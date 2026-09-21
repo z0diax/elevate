@@ -1,0 +1,32 @@
+# Apache / XAMPP configuration for Tacloban PRAISE.
+# The built Vite frontend is served through index.php while the PHP API stays
+# available under /api.
+
+DirectoryIndex index.php index.html
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # Leave backend endpoints and upload storage untouched.
+  RewriteRule ^api/ - [L,QSA]
+  RewriteRule ^uploads/ - [L,QSA]
+  RewriteRule ^dist/ - [L,QSA]
+
+  # Expose built frontend assets from /assets even though Vite writes them to dist/assets.
+  RewriteRule ^assets/(.*)$ dist/assets/$1 [L,QSA]
+  RewriteRule ^favicon\.png$ dist/favicon.png [L,QSA]
+
+  # Allow direct access to real files and directories in the project.
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # Everything else is handled by the XAMPP bootstrap.
+  RewriteRule ^ index.php [L]
+</IfModule>
+
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css text/javascript application/javascript application/json
+</IfModule>
+
+Options -Indexes

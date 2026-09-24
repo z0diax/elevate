@@ -3,6 +3,7 @@ import { Application, Award, UserProfile } from '../../types';
 import { StatusBadge } from '../common/StatusBadge';
 import { AuditTrailModal } from '../common/AuditTrailModal';
 import { praiseService } from '../../lib/supabase';
+import { showToast } from '../../lib/toast';
 import { pdfGenerator } from '../../lib/pdfGenerator';
 import {
   Award as AwardIcon,
@@ -40,6 +41,7 @@ export const DeliberationDashboard: React.FC<DeliberationDashboardProps> = ({
   const [selectedAppId, setSelectedAppId] = useState('');
   const [resolutionRemarks, setResolutionRemarks] = useState('');
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
+  const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
 
   const deliberationApps = useMemo(() => applications
@@ -61,9 +63,17 @@ export const DeliberationDashboard: React.FC<DeliberationDashboardProps> = ({
   const selectedApp = deliberationApps.find(application => application.id === selectedAppId) || deliberationApps[0];
   const selectedAward = awards.find(award => award.id === selectedApp?.award_id);
   const isDecisionRecorded = Boolean(selectedApp?.deliberation_decision);
+  const hasQualifyingScore = (application: Application) => {
+    const award = awards.find(item => item.id === application.award_id);
+    return award !== undefined
+      && application.final_weighted_score !== undefined
+      && application.final_weighted_score !== null
+      && application.final_weighted_score >= award.min_qualifying_score;
+  };
+  const selectedQualifies = selectedApp ? hasQualifyingScore(selectedApp) : false;
 
   async function handleApprove() {
-    if (!selectedApp) {
+    if (!selectedApp || !hasQualifyingScore(selectedApp)) {
       return;
     }
 
@@ -73,6 +83,7 @@ export const DeliberationDashboard: React.FC<DeliberationDashboardProps> = ({
         selectedApp.id,
         resolutionRemarks.trim() || 'Approved by the PRAISE Committee based on the consolidated evaluation results.'
       );
+      showToast(`${selectedApp.application_number} approved by the committee.`);
       setResolutionRemarks('');
       await onRefreshData();
     } catch (error) {
@@ -95,6 +106,7 @@ export const DeliberationDashboard: React.FC<DeliberationDashboardProps> = ({
     setIsBusy(true);
     try {
       await praiseService.disapproveApplication(selectedApp.id, resolutionRemarks.trim());
+      showToast(`${selectedApp.application_number} marked as not approved.`);
       setResolutionRemarks('');
       await onRefreshData();
     } catch (error) {
@@ -105,12 +117,16 @@ export const DeliberationDashboard: React.FC<DeliberationDashboardProps> = ({
   }
 
   async function handleConferAward(application: Application) {
+    if (!hasQualifyingScore(application)) {
+      return;
+    }
     setIsBusy(true);
     try {
       await praiseService.conferAward(
         application.id,
         resolutionRemarks.trim() || 'Conferred PRAISE Award with plaque of recognition and approved incentive.'
       );
+      showToast(`Award conferred for ${application.application_number}.`);
       await onRefreshData();
       confetti({
         particleCount: 120,
@@ -176,8 +192,7 @@ export const DeliberationDashboard: React.FC<DeliberationDashboardProps> = ({
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <div className={`${selectedApp ? 'lg:col-span-7' : 'lg:col-span-12'} space-y-3`}>
+      <div className="space-y-3">
           <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider px-1">
             Ranked Nominees Matrix ({deliberationApps.length})
           </h3>
@@ -198,11 +213,16 @@ export const DeliberationDashboard: React.FC<DeliberationDashboardProps> = ({
                 <tbody className="divide-y divide-slate-100">
                   {deliberationApps.map((application, index) => {
                     const isSelected = application.id === selectedApp?.id;
+                    const award = awards.find(item => item.id === application.award_id);
+                    const qualifies = hasQualifyingScore(application);
 
                     return (
                       <tr
                         key={application.id}
-                        onClick={() => setSelectedAppId(application.id)}
+                        onClick={() => {
+                          setSelectedAppId(application.id);
+                          setIsDetailsModalOpen(true);
+                        }}
                         className={`cursor-pointer transition-colors ${isSelected ? 'bg-blue-50/70 font-medium' : 'hover:bg-slate-50'}`}
                       >
                         <td className="px-3.5 py-3">
@@ -219,26 +239,39 @@ export const DeliberationDashboard: React.FC<DeliberationDashboardProps> = ({
                         <td className="px-3.5 py-3 text-slate-600">{application.office_name}</td>
                         <td className="px-3.5 py-3 text-center font-bold font-mono text-sm">
                           {application.final_weighted_score !== undefined && application.final_weighted_score !== null
-                            ? <span className="text-green-700">{application.final_weighted_score}%</span>
+                            ? <span className={qualifies ? 'text-green-700' : 'text-red-700'}>{application.final_weighted_score}%</span>
                             : <span className="text-slate-400">N/A</span>}
+                          {award && <p className="text-[10px] font-normal text-slate-500">Minimum {award.min_qualifying_score}%</p>}
                         </td>
                         <td className="px-3.5 py-3">
                           <StatusBadge status={application.status} size="sm" />
                         </td>
                         <td className="px-3.5 py-3 text-right">
-                          {application.status === 'Approved' && (
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={event => {
+                                event.stopPropagation();
+                                setSelectedAppId(application.id);
+                                setIsDetailsModalOpen(true);
+                              }}
+                              className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 text-[11px] font-bold rounded-md border border-blue-200 cursor-pointer"
+                            >
+                              View Details
+                            </button>
+                            {application.status === 'Approved' && (
                             <button
                               onClick={event => {
                                 event.stopPropagation();
                                 void handleConferAward(application);
                               }}
-                              disabled={isBusy}
+                              disabled={isBusy || !qualifies}
+                              title={!qualifies ? 'Score is below the qualifying standard or unavailable.' : undefined}
                               className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-slate-950 text-[11px] font-bold rounded-md shadow-xs transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-70"
                             >
                               Confer Award
                             </button>
-                          )}
-                          {application.status === 'Awarded' && (
+                            )}
+                            {application.status === 'Awarded' && (
                             <button
                               onClick={event => {
                                 event.stopPropagation();
@@ -249,7 +282,8 @@ export const DeliberationDashboard: React.FC<DeliberationDashboardProps> = ({
                               <Download size={12} />
                               <span>Certificate</span>
                             </button>
-                          )}
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -258,59 +292,128 @@ export const DeliberationDashboard: React.FC<DeliberationDashboardProps> = ({
               </table>
             </div>
           </div>
-        </div>
+      </div>
 
-        {selectedApp ? (
-          <div className="lg:col-span-5 space-y-4">
-            <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-xs space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+      {selectedApp && isDetailsModalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-3 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="deliberation-details-title">
+          <div className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-slate-50 shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-900 px-5 py-4 text-white sm:px-7">
                 <div>
-                  <h4 className="text-base font-bold text-slate-900">{selectedApp.nominee_name}</h4>
-                  <p className="text-xs text-slate-500">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-blue-300">Nomination details & committee review</p>
+                  <h4 id="deliberation-details-title" className="mt-1 text-lg font-bold tracking-tight">{selectedApp.nominee_name}</h4>
+                  <p className="mt-1 text-xs text-slate-300">
                     {[selectedApp.position_title, selectedApp.office_name].filter(Boolean).join(' • ')}
                   </p>
                 </div>
-                <StatusBadge status={selectedApp.status} size="md" />
+                <div className="flex items-center gap-2">
+                  <StatusBadge status={selectedApp.status} size="md" />
+                  <button
+                    onClick={() => setIsDetailsModalOpen(false)}
+                    className="rounded-lg border border-slate-600 px-2.5 py-1 text-lg leading-none text-slate-300 hover:bg-slate-700 hover:text-white"
+                    aria-label="Close nomination details"
+                  >
+                    ×
+                  </button>
+                </div>
               </div>
 
-              <div className="flex items-center justify-between">
+            <div className="overflow-y-auto">
+              <div className="space-y-5 p-5 sm:p-7">
+              <div className="flex flex-col gap-3 rounded-xl border border-blue-100 bg-blue-50/70 p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <p className="text-[10px] font-semibold text-slate-400 uppercase">Award Category</p>
-                  <p className="text-sm font-bold text-blue-700">{selectedAward?.name || selectedApp.award_name}</p>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-blue-600">Award category</p>
+                  <p className="mt-1 text-base font-bold text-slate-900">{selectedAward?.name || selectedApp.award_name}</p>
                 </div>
                 <button
                   onClick={() => setIsAuditModalOpen(true)}
-                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-md inline-flex items-center gap-1.5 cursor-pointer"
+                  className="inline-flex items-center gap-1.5 self-start rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 sm:self-auto"
                 >
                   <History size={14} />
                   <span>Audit Trail</span>
                 </button>
               </div>
 
-              <div>
-                <h5 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                  <Scale size={14} className="text-blue-600" />
-                  <span>Evaluator Assessments ({(selectedApp.evaluations || []).length})</span>
-                </h5>
+              <div className={`rounded-lg border p-3 text-xs font-semibold ${selectedQualifies ? 'border-green-200 bg-green-50 text-green-800' : 'border-red-200 bg-red-50 text-red-800'}`}>
+                {selectedApp.final_weighted_score === undefined || selectedApp.final_weighted_score === null
+                  ? 'A completed evaluation score is required before this nomination can be approved or awarded.'
+                  : selectedAward
+                    ? `Final score: ${selectedApp.final_weighted_score}%. Minimum qualifying score: ${selectedAward.min_qualifying_score}%. ${selectedQualifies ? 'Qualifies for an award.' : 'Below the qualifying standard; this nomination cannot be approved or awarded.'}`
+                    : 'The award qualifying standard is unavailable. This nomination cannot be approved or awarded.'}
+              </div>
 
-                <div className="space-y-2">
+              <section className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="h-5 w-1 rounded-full bg-blue-600" />
+                  <h5 className="text-sm font-bold tracking-tight text-slate-900">Nomination summary</h5>
+                </div>
+                <div className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-white p-4 text-sm shadow-sm sm:grid-cols-2">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Nominee</p>
+                    <p className="mt-1 font-semibold text-slate-800">{selectedApp.nominee_name}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Position / office</p>
+                    <p className="mt-1 font-semibold text-slate-800">{[selectedApp.position_title, selectedApp.office_name].filter(Boolean).join(' • ')}</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:col-span-2">
+                    <p className="text-xs font-bold text-slate-800">Justification & merits</p>
+                    <p className="mt-2 break-words whitespace-pre-wrap text-sm leading-6 text-slate-600">{selectedApp.justification}</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:col-span-2">
+                    <p className="text-xs font-bold text-slate-800">Accomplishments & public impact</p>
+                    <p className="mt-2 break-words whitespace-pre-wrap text-sm leading-6 text-slate-600">{selectedApp.accomplishments}</p>
+                  </div>
+                  {selectedApp.supporting_narrative && (
+                    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:col-span-2">
+                      <p className="text-xs font-bold text-slate-800">Supporting narrative</p>
+                      <p className="mt-2 break-words whitespace-pre-wrap text-sm leading-6 text-slate-600">{selectedApp.supporting_narrative}</p>
+                    </div>
+                  )}
+                </div>
+              </section>
+
+              <section className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <h5 className="flex items-center gap-2 text-sm font-bold tracking-tight text-slate-900">
+                  <Scale size={14} className="text-blue-600" />
+                  <span>Evaluator assessments</span>
+                  </h5>
+                  <span className="rounded-full bg-blue-100 px-2.5 py-1 text-[11px] font-bold text-blue-700">{(selectedApp.evaluations || []).length} submitted</span>
+                </div>
+
+                <div className="space-y-3">
                   {(selectedApp.evaluations || []).map(evaluation => (
-                    <div key={evaluation.id} className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs">
-                      <div className="flex justify-between items-center mb-1">
-                        <span className="font-bold text-slate-900">{evaluation.evaluator_name}</span>
-                        <span className="font-mono font-bold text-green-700">{evaluation.total_score || evaluation.weighted_percentage}%</span>
+                    <div key={evaluation.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Evaluator</p>
+                          <p className="mt-1 text-sm font-bold text-slate-900">{evaluation.evaluator_name}</p>
+                        </div>
+                        <div className="rounded-lg bg-emerald-50 px-3 py-2 text-right">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">Weighted score</p>
+                          <p className="mt-0.5 font-mono text-base font-bold text-emerald-700">{evaluation.total_score || evaluation.weighted_percentage}%</p>
+                        </div>
                       </div>
-                      <p className="text-[11px] text-slate-600 italic">
-                        "{evaluation.general_remarks || 'No remarks submitted.'}"
-                      </p>
+                      <div className="mt-3 border-t border-slate-100 pt-3">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Evaluator remarks</p>
+                        <p className="safe-long-text mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">
+                          <span className="safe-long-text block whitespace-pre-wrap">{evaluation.general_remarks || 'No remarks submitted.'}</span>
+                        </p>
+                      </div>
                     </div>
                   ))}
                 </div>
-              </div>
+              </section>
 
-              <div className="pt-3 border-t border-slate-100 space-y-3">
-                <label className="block text-xs font-bold text-slate-900">
-                  PRAISE Committee Resolution Notes / Deliberation Minutes:
+              <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div>
+                  <h5 className="text-sm font-bold tracking-tight text-slate-900">Committee decision</h5>
+                  <p className="mt-1 text-xs text-slate-500">Record the rationale and final resolution for this nomination.</p>
+                </div>
+                <label className="block text-xs font-bold text-slate-700">
+                  Resolution notes / deliberation minutes
                 </label>
                 <textarea
                   rows={3}
@@ -318,15 +421,15 @@ export const DeliberationDashboard: React.FC<DeliberationDashboardProps> = ({
                   value={isDecisionRecorded ? (selectedApp.deliberation_remarks || '') : resolutionRemarks}
                   onChange={event => setResolutionRemarks(event.target.value)}
                   readOnly={isDecisionRecorded}
-                  className="w-full text-xs p-2.5 rounded-md border border-slate-300 bg-slate-50 text-slate-900 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden read-only:cursor-default"
+                  className="safe-long-text min-h-28 w-full min-w-0 max-w-full resize-y rounded-lg border border-slate-300 bg-slate-50 p-3 text-sm leading-6 text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-500 read-only:cursor-default"
                 />
 
                 {isDecisionRecorded ? (
-                  <p className="pt-2 text-xs font-semibold text-slate-500">
+                  <p className="rounded-lg bg-slate-50 p-3 text-xs font-semibold text-slate-600">
                     Committee decision recorded: {selectedApp.deliberation_decision}. This decision cannot be changed.
                   </p>
                 ) : (
-                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+                  <div className="flex flex-wrap items-center justify-end gap-3 border-t border-slate-100 pt-3">
                     <button
                       id="disapprove-btn"
                       onClick={() => void handleDisapprove()}
@@ -340,7 +443,8 @@ export const DeliberationDashboard: React.FC<DeliberationDashboardProps> = ({
                     <button
                       id="approve-btn"
                       onClick={() => void handleApprove()}
-                      disabled={isBusy}
+                      disabled={isBusy || !selectedQualifies}
+                      title={!selectedQualifies ? 'Score is below the qualifying standard or unavailable.' : undefined}
                       className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white text-xs font-semibold rounded-md inline-flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-70"
                     >
                       <CheckCircle2 size={14} />
@@ -348,7 +452,7 @@ export const DeliberationDashboard: React.FC<DeliberationDashboardProps> = ({
                     </button>
                   </div>
                 )}
-              </div>
+              </section>
 
               {selectedApp.status === 'Awarded' && (
                 <div className="p-4 bg-amber-50 rounded-xl border border-amber-200 text-center space-y-2">
@@ -366,9 +470,10 @@ export const DeliberationDashboard: React.FC<DeliberationDashboardProps> = ({
                 </div>
               )}
             </div>
+            </div>
           </div>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
 
       {selectedApp && (
         <AuditTrailModal

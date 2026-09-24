@@ -1,5 +1,6 @@
 import React from 'react';
 import { UserProfile, UserRole } from '../../types';
+import { APP_LOGO_URL } from '../../lib/branding';
 import { 
   LayoutDashboard, 
   FilePlus, 
@@ -88,7 +89,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'My Nominations',
       icon: FolderOpen,
       badge: counts.myApplications,
-      roles: ['NOMINEE'],
+      roles: ['HEAD_OF_OFFICE', 'NOMINEE'],
       section: 'Main Menu'
     },
 
@@ -97,7 +98,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'new-nomination',
       label: 'Submit Nomination',
       icon: FilePlus,
-      roles: ['ADMINISTRATOR', 'SECRETARIAT', 'HEAD_OF_OFFICE', 'NOMINEE'],
+      roles: ['ADMINISTRATOR', 'SECRETARIAT', 'NOMINEE'],
       section: 'Applications'
     },
     {
@@ -196,11 +197,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       >
         {/* Brand Banner */}
         <div className="p-5 border-b border-slate-800 bg-slate-900/80 flex items-center gap-3">
-          <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-xl shadow-sm shrink-0">
-            T
+          <div className="w-10 h-10 flex items-center justify-center shrink-0">
+            <img src={APP_LOGO_URL} alt="HRMDO PRAISE logo" className="app-logo-outlined h-full w-full object-contain" />
           </div>
           <div className="min-w-0">
-            <h1 className="text-white text-xs font-bold tracking-widest uppercase truncate">Tacloban City</h1>
+            <h1 className="text-white text-xs font-bold tracking-widest uppercase truncate">HRMDO</h1>
             <p className="text-blue-400 text-[10px] uppercase tracking-tighter font-semibold truncate">PRAISE Management</p>
           </div>
         </div>

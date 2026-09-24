@@ -21,6 +21,7 @@ interface DocumentViewerModalProps {
   applicationNumber?: string;
   userRole: UserRole;
   onVerify?: (status: 'Verified' | 'Rejected', remarks: string) => void;
+  onHeadReview?: (status: 'Head Approved' | 'Head Rejected', remarks: string) => void;
 }
 
 export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
@@ -31,11 +32,13 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
   applicationNumber,
   userRole,
   onVerify,
+  onHeadReview,
 }) => {
   const [remarks, setRemarks] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
   const canVerify = (userRole === 'SECRETARIAT' || userRole === 'ADMINISTRATOR') && !!onVerify;
+  const canHeadReview = userRole === 'HEAD_OF_OFFICE' && !!onHeadReview;
 
   useEffect(() => {
     if (!document) {
@@ -64,17 +67,18 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
     return null;
   }
 
-  const handleAction = (status: 'Verified' | 'Rejected') => {
-    if (status === 'Rejected' && !remarks.trim()) {
+  const handleAction = (status: 'Verified' | 'Rejected' | 'Head Approved' | 'Head Rejected') => {
+    if ((status === 'Rejected' || status === 'Head Rejected') && !remarks.trim()) {
       setErrorMsg('Mandatory: Please provide a clear explanation before rejecting this document.');
       return;
     }
 
     setErrorMsg('');
-    onVerify?.(
-      status,
-      remarks.trim() || (status === 'Verified' ? 'Document verified and compliant with PRAISE requirements.' : 'Document returned for compliance.')
-    );
+    if (status === 'Head Approved' || status === 'Head Rejected') {
+      onHeadReview?.(status, remarks.trim() || 'Document inspected and approved by the Head of Office.');
+      return;
+    }
+    onVerify?.(status, remarks.trim() || (status === 'Verified' ? 'Document verified and compliant with PRAISE requirements.' : 'Document returned for compliance.'));
   };
 
   return (
@@ -112,13 +116,13 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
           <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl bg-slate-50 border border-slate-200">
             <div className="flex items-center gap-3">
               <div className={`p-2 rounded-lg ${
-                document.status === 'Verified'
+                document.status === 'Verified' || document.status === 'Head Approved'
                   ? 'bg-green-50 text-green-700 border border-green-200'
-                  : document.status === 'Rejected'
+                  : document.status === 'Rejected' || document.status === 'Head Rejected'
                     ? 'bg-red-50 text-red-700 border border-red-200'
                     : 'bg-amber-50 text-amber-700 border border-amber-200'
               }`}>
-                {document.status === 'Verified' ? <CheckCircle2 size={18} /> : <FileCheck size={18} />}
+                {document.status === 'Verified' || document.status === 'Head Approved' ? <CheckCircle2 size={18} /> : <FileCheck size={18} />}
               </div>
               <div>
                 <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Verification Status</p>
@@ -146,7 +150,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
                 <AlertCircle size={14} />
                 <span>Existing Review Remarks</span>
               </p>
-              <p className="text-xs text-slate-700 leading-relaxed">{document.verification_remarks}</p>
+              <p className="safe-long-text text-xs text-slate-700 leading-relaxed whitespace-pre-wrap">{document.verification_remarks}</p>
             </div>
           )}
 
@@ -228,17 +232,17 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
             )}
           </div>
 
-          {canVerify && (
+          {(canVerify || canHeadReview) && (
             <div className="pt-3 border-t border-slate-200 space-y-3">
               <label className="block text-xs font-bold text-slate-800">
-                Secretariat Verification Remarks / Compliance Notes:
+                {canHeadReview ? 'Head of Office Inspection Remarks:' : 'Secretariat Verification Remarks / Compliance Notes:'}
               </label>
               <textarea
                 value={remarks}
                 onChange={event => setRemarks(event.target.value)}
                 placeholder="Enter validation remarks or specific deficiency notes if returning this document..."
                 rows={3}
-                className="w-full text-xs p-3 rounded-md border border-slate-300 bg-slate-50 text-slate-900 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+                className="safe-long-text w-full min-w-0 max-w-full text-xs p-3 rounded-md border border-slate-300 bg-slate-50 text-slate-900 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
               />
 
               {errorMsg && (
@@ -251,19 +255,19 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
               <div className="flex items-center justify-end gap-3 pt-2">
                 <button
                   id="reject-doc-btn"
-                  onClick={() => handleAction('Rejected')}
+                  onClick={() => handleAction(canHeadReview ? 'Head Rejected' : 'Rejected')}
                   className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs font-semibold rounded-md flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
                   <XCircle size={14} />
-                  <span>Reject / Require Compliance</span>
+                  <span>{canHeadReview ? 'Reject / Return for Correction' : 'Reject / Require Compliance'}</span>
                 </button>
                 <button
                   id="verify-doc-btn"
-                  onClick={() => handleAction('Verified')}
+                  onClick={() => handleAction(canHeadReview ? 'Head Approved' : 'Verified')}
                   className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-xs font-semibold rounded-md flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
                 >
                   <CheckCircle2 size={14} />
-                  <span>Verify as Compliant</span>
+                  <span>{canHeadReview ? 'Approve for Endorsement' : 'Verify as Compliant'}</span>
                 </button>
               </div>
             </div>

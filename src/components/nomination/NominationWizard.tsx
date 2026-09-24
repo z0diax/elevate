@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { Award, Office, UserProfile } from '../../types';
+import React, { useRef, useState } from 'react';
+import { Application, Award, Office, UserProfile } from '../../types';
 import { praiseService } from '../../lib/supabase';
-import { TACLOBAN_BARANGAYS } from '../../lib/initialData';
+import { showToast } from '../../lib/toast';
 import { 
   FileText, 
   Upload, 
@@ -18,6 +18,15 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { pdfGenerator } from '../../lib/pdfGenerator';
+import {
+  clearNominationDraft,
+  clearNominationDraftFiles,
+  NominationDraftData,
+  readNominationDraft,
+  readNominationDraftFiles,
+  saveNominationDraft,
+  saveNominationDraftFile,
+} from '../../lib/nominationDraft';
 
 interface NominationWizardProps {
   awards: Award[];
@@ -37,6 +46,20 @@ type UploadedRequirement = {
   is_uploaded: boolean;
 };
 
+function createSubmissionId(): string {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  if (globalThis.crypto?.getRandomValues) {
+    globalThis.crypto.getRandomValues(bytes);
+  } else {
+    for (let index = 0; index < bytes.length; index += 1) bytes[index] = Math.floor(Math.random() * 256);
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 export const NominationWizard: React.FC<NominationWizardProps> = ({
   awards,
   offices,
@@ -44,56 +67,151 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
   onNominationComplete,
   onCancel
 }) => {
-  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+  const restoredDraft = React.useMemo(() => readNominationDraft(currentUser.id), [currentUser.id]);
+  const [submissionId] = useState(() => restoredDraft?.submissionId || createSubmissionId());
+  const restoredAwardId = restoredDraft && awards.some(award => award.id === restoredDraft.selectedAwardId)
+    ? restoredDraft.selectedAwardId
+    : awards[0]?.id || '';
+  const restoredOfficeId = restoredDraft && offices.some(office => office.id === restoredDraft.officeId)
+    ? restoredDraft.officeId
+    : currentUser.office_id || offices[0]?.id || '';
+
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(restoredDraft?.step || 1);
 
   // Form State
-  const [selectedAwardId, setSelectedAwardId] = useState(awards[0]?.id || '');
+  const [selectedAwardId, setSelectedAwardId] = useState(restoredAwardId);
   
   // Nominee Info
-  const [nomineeName, setNomineeName] = useState('');
-  const [employeeId, setEmployeeId] = useState('');
-  const [positionTitle, setPositionTitle] = useState('');
-  const [officeId, setOfficeId] = useState(currentUser.office_id || offices[0]?.id || '');
-  const [divisionSection, setDivisionSection] = useState('');
-  const [employmentCategory, setEmploymentCategory] = useState<'Permanent' | 'Casual' | 'Contractual' | 'Job Order' | 'Barangay Official' | 'Barangay Worker'>('Permanent');
-  const [contactNumber, setContactNumber] = useState('');
-  const [email, setEmail] = useState('');
-  const [barangay, setBarangay] = useState('Brgy. 88 San Jose');
+  const [nomineeName, setNomineeName] = useState(restoredDraft?.nomineeName || '');
+  const [employeeId, setEmployeeId] = useState(restoredDraft?.employeeId || '');
+  const [positionTitle, setPositionTitle] = useState(restoredDraft?.positionTitle || '');
+  const [officeId, setOfficeId] = useState(restoredOfficeId);
+  const [divisionSection, setDivisionSection] = useState(restoredDraft?.divisionSection || '');
+  const [employmentCategory, setEmploymentCategory] = useState<'Permanent' | 'Casual' | 'Contractual' | 'Job Order' | 'Barangay Official' | 'Barangay Worker'>(restoredDraft?.employmentCategory || 'Permanent');
+  const [contactNumber, setContactNumber] = useState(restoredDraft?.contactNumber || '');
+  const [email, setEmail] = useState(restoredDraft?.email || '');
+  const [barangay, setBarangay] = useState(restoredDraft?.barangay || '');
 
   // Nomination Details
-  const [nominationType, setNominationType] = useState<'Individual' | 'Group / Team'>('Individual');
-  const [nominatorName, setNominatorName] = useState(currentUser.full_name);
-  const [nominatorPosition, setNominatorPosition] = useState(currentUser.position_title || 'Nominator');
-  const [nominatingOffice, setNominatingOffice] = useState(currentUser.office_name || 'City Government of Tacloban');
-  const [justification, setJustification] = useState('');
-  const [accomplishments, setAccomplishments] = useState('');
-  const [supportingNarrative, setSupportingNarrative] = useState('');
+  const [nominationType, setNominationType] = useState<'Individual' | 'Group / Team'>(restoredDraft?.nominationType || 'Individual');
+  const [nominatorName, setNominatorName] = useState(restoredDraft?.nominatorName || currentUser.full_name);
+  const [nominatorPosition, setNominatorPosition] = useState(restoredDraft?.nominatorPosition || currentUser.position_title || 'Nominator');
+  const [nominatingOffice, setNominatingOffice] = useState(restoredDraft?.nominatingOffice || currentUser.office_name || 'City Government of Tacloban');
+  const [justification, setJustification] = useState(restoredDraft?.justification || '');
+  const [accomplishments, setAccomplishments] = useState(restoredDraft?.accomplishments || '');
+  const [supportingNarrative, setSupportingNarrative] = useState(restoredDraft?.supportingNarrative || '');
 
   // Uploaded Documents
   const [uploadedDocs, setUploadedDocs] = useState<UploadedRequirement[]>([]);
 
-  const [submittedApp, setSubmittedApp] = useState<any | null>(null);
+  const [submittedApp, setSubmittedApp] = useState<Application | null>(null);
+  const [uploadError, setUploadError] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const submissionInProgress = useRef(false);
+  const createdApplicationRef = useRef<Application | null>(null);
+  const uploadedDocumentKeys = useRef(new Set<string>());
 
   const selectedAward = awards.find(a => a.id === selectedAwardId) || awards[0];
   const selectedOfficeObj = offices.find(o => o.id === officeId) || offices[0];
 
+  React.useEffect(() => {
+    if (submittedApp) return;
+
+    const draft: NominationDraftData = {
+      version: 1,
+      submissionId,
+      saved_at: new Date().toISOString(),
+      step,
+      selectedAwardId,
+      nomineeName,
+      employeeId,
+      positionTitle,
+      officeId,
+      divisionSection,
+      employmentCategory,
+      contactNumber,
+      email,
+      barangay,
+      nominationType,
+      nominatorName,
+      nominatorPosition,
+      nominatingOffice,
+      justification,
+      accomplishments,
+      supportingNarrative,
+    };
+
+    try {
+      saveNominationDraft(currentUser.id, draft);
+    } catch (error) {
+      console.warn('Unable to save the nomination draft.', error);
+    }
+  }, [
+    accomplishments,
+    barangay,
+    contactNumber,
+    currentUser.id,
+    divisionSection,
+    email,
+    employeeId,
+    employmentCategory,
+    justification,
+    nomineeName,
+    nominationType,
+    nominatingOffice,
+    nominatorName,
+    nominatorPosition,
+    officeId,
+    positionTitle,
+    selectedAwardId,
+    step,
+    submissionId,
+    submittedApp,
+    supportingNarrative,
+  ]);
+
   // Update document requirements when award changes
   React.useEffect(() => {
-    if (selectedAward?.document_requirements) {
-      setUploadedDocs(
-        selectedAward.document_requirements.map(req => ({
-          requirement_id: req.id,
-          requirement_name: req.document_name,
-          file_size: 0,
-          file_type: 'application/pdf',
-          is_mandatory: req.is_mandatory,
-          is_uploaded: false
-        }))
-      );
+    let cancelled = false;
+    const requirements = selectedAward?.document_requirements || [];
+    const emptyRequirements = requirements.map(req => ({
+      requirement_id: req.id,
+      requirement_name: req.document_name,
+      file_size: 0,
+      file_type: 'application/pdf',
+      is_mandatory: req.is_mandatory,
+      is_uploaded: false,
+    }));
+
+    setUploadedDocs(emptyRequirements);
+
+    if (!selectedAwardId || requirements.length === 0) {
+      return () => { cancelled = true; };
     }
-  }, [selectedAwardId, selectedAward]);
+
+    void readNominationDraftFiles(currentUser.id, selectedAwardId)
+      .then(savedFiles => {
+        if (cancelled) return;
+        setUploadedDocs(requirements.map(req => {
+          const file = savedFiles.get(req.id);
+          return {
+            requirement_id: req.id,
+            requirement_name: req.document_name,
+            file,
+            file_size: file?.size || 0,
+            file_type: file?.type || 'application/pdf',
+            is_mandatory: req.is_mandatory,
+            is_uploaded: Boolean(file),
+          };
+        }));
+      })
+      .catch(error => {
+        console.warn('Unable to restore nomination draft attachments.', error);
+      });
+
+    return () => { cancelled = true; };
+  }, [currentUser.id, selectedAwardId, selectedAward?.document_requirements]);
 
   const handleFileUpload = (reqId: string, docName: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -118,6 +236,25 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
       }
       return doc;
     }));
+
+    void saveNominationDraftFile(currentUser.id, selectedAwardId, reqId || docName, file)
+      .catch(error => {
+        console.warn('Unable to save the nomination draft attachment.', error);
+      });
+  };
+
+  const clearSavedDraft = async () => {
+    clearNominationDraft(currentUser.id);
+    try {
+      await clearNominationDraftFiles(currentUser.id);
+    } catch (error) {
+      console.warn('Unable to clear nomination draft attachments.', error);
+    }
+  };
+
+  const handleCancel = async () => {
+    await clearSavedDraft();
+    onCancel();
   };
 
   // Validation
@@ -171,11 +308,15 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
   };
 
   const handleSubmitNomination = async () => {
+    if (submissionInProgress.current) return;
+    submissionInProgress.current = true;
     setErrorMessage('');
+    setUploadError('');
     setIsSubmitting(true);
 
     try {
-      const createdApplication = await praiseService.submitNomination({
+      const createdApplication = createdApplicationRef.current || await praiseService.submitNomination({
+        submission_id: submissionId,
         award_id: selectedAwardId,
         nominee_id: currentUser.role === 'NOMINEE' ? currentUser.id : undefined,
         nominee_name: nomineeName.trim(),
@@ -197,19 +338,24 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
         accomplishments: accomplishments.trim(),
         supporting_narrative: supportingNarrative.trim()
       });
+      createdApplicationRef.current = createdApplication;
+      setSubmittedApp(createdApplication);
 
       for (const document of uploadedDocs) {
-        if (document.file) {
+        const documentKey = document.requirement_id || document.requirement_name;
+        if (document.file && !uploadedDocumentKeys.current.has(documentKey)) {
           await praiseService.uploadApplicationDocument(
             createdApplication.id,
             document.file,
             document.requirement_name,
             document.requirement_id
           );
+          uploadedDocumentKeys.current.add(documentKey);
         }
       }
 
-      setSubmittedApp(praiseService.getApplicationById(createdApplication.id) || createdApplication);
+      await clearSavedDraft();
+      showToast(`Nomination ${createdApplication.application_number} submitted successfully.`);
 
       confetti({
         particleCount: 80,
@@ -218,9 +364,15 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
       });
     } catch (err) {
       console.error(err);
-      setErrorMessage(err instanceof Error ? err.message : 'An error occurred while submitting the nomination.');
+      const message = err instanceof Error ? err.message : 'An error occurred while submitting the nomination.';
+      if (createdApplicationRef.current) {
+        setUploadError(`Nomination ${createdApplicationRef.current.application_number} was filed, but some attachments could not be uploaded. ${message}`);
+      } else {
+        setErrorMessage(message);
+      }
     } finally {
       setIsSubmitting(false);
+      submissionInProgress.current = false;
     }
   };
 
@@ -238,6 +390,16 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
             Your nomination has been recorded in the City of Tacloban PRAISE System.
           </p>
         </div>
+
+        {isSubmitting && <p className="text-sm font-medium text-blue-700">Finishing attachment uploads...</p>}
+        {uploadError && (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+            <p>{uploadError}</p>
+            <button type="button" onClick={() => void handleSubmitNomination()} className="mt-3 rounded-md bg-amber-700 px-4 py-2 font-semibold text-white hover:bg-amber-800">
+              Retry attachment uploads
+            </button>
+          </div>
+        )}
 
         <div className="p-6 bg-slate-50 rounded-xl border border-slate-200 text-left max-w-lg mx-auto space-y-3">
           <div className="flex justify-between items-center border-b border-slate-200 pb-2">
@@ -264,7 +426,8 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
           <button
             id="download-summary-dossier-btn"
             onClick={() => pdfGenerator.generateApplicationSummary(submittedApp, selectedAward, selectedOfficeObj)}
-            className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-md inline-flex items-center gap-2 shadow-xs transition-colors cursor-pointer"
+            disabled={isSubmitting}
+            className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-md inline-flex items-center gap-2 shadow-xs transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
           >
             <Download size={15} />
             <span>Download Summary Form A-1 (PDF)</span>
@@ -273,7 +436,8 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
           <button
             id="view-application-dashboard-btn"
             onClick={() => onNominationComplete(submittedApp.id)}
-            className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-md transition-colors cursor-pointer shadow-xs"
+            disabled={isSubmitting}
+            className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-md transition-colors cursor-pointer shadow-xs disabled:cursor-not-allowed disabled:opacity-60"
           >
             Go to Application Tracking
           </button>
@@ -323,40 +487,67 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
         </div>
       )}
 
+      {restoredDraft && (
+        <div className="mx-6 mt-6 flex items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 p-4 text-xs text-blue-900">
+          <CheckCircle2 size={17} className="mt-0.5 shrink-0 text-blue-700" />
+          <div>
+            <p className="font-bold">Your saved nomination draft was restored.</p>
+            <p className="mt-0.5 text-blue-700">
+              You can continue from Step {restoredDraft.step}. Changes and selected attachments are saved automatically in this browser.
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="p-6 md:p-8 space-y-6">
         {/* STEP 1: NOMINEE PROFILE & AWARD SELECTION */}
         {step === 1 && (
           <div className="space-y-6">
             <div>
-              <label className="block text-xs font-bold text-slate-900 uppercase tracking-wider mb-2">
+              <label htmlFor="award-category-select" className="block text-xs font-bold text-slate-900 uppercase tracking-wider mb-2">
                 1. Select Award Category *
               </label>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {awards.map(award => (
-                  <button
-                    key={award.id}
-                    type="button"
-                    onClick={() => setSelectedAwardId(award.id)}
-                    className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
-                      selectedAwardId === award.id
-                        ? 'border-blue-600 bg-blue-50/70 shadow-2xs'
-                        : 'border-slate-200 hover:bg-slate-50'
-                    }`}
+              <div className="rounded-xl border border-slate-300 bg-slate-50 transition-colors focus-within:border-blue-600 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100">
+                <div className="flex items-center gap-3 px-3.5">
+                  <AwardIcon size={17} className="shrink-0 text-blue-600" />
+                  <select
+                    id="award-category-select"
+                    required
+                    value={selectedAwardId}
+                    onChange={event => setSelectedAwardId(event.target.value)}
+                    className="min-w-0 flex-1 cursor-pointer bg-transparent py-3 text-sm font-semibold text-slate-900 outline-none"
                   >
-                    <div className="flex items-center gap-2">
-                      <AwardIcon size={16} className={selectedAwardId === award.id ? 'text-blue-600' : 'text-slate-400'} />
-                      <p className="text-xs font-bold text-slate-900 truncate">{award.name}</p>
-                    </div>
-                    <p className="text-[11px] text-slate-500 mt-1 line-clamp-2">
-                      {award.description}
-                    </p>
-                  </button>
-                ))}
+                    {awards.length === 0 && <option value="">No active awards available</option>}
+                    {awards.map(award => (
+                      <option key={award.id} value={award.id}>
+                        {award.is_on_the_spot ? '[ON-THE-SPOT] ' : ''}{award.name} ({award.code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {selectedAward?.description?.trim() && (
+                  <div className="border-t border-slate-200 px-4 py-2 text-[11px] leading-relaxed text-slate-600">
+                    {selectedAward.description}
+                  </div>
+                )}
               </div>
             </div>
 
+            {selectedAward?.is_on_the_spot && (
+              <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-900">
+                <AwardIcon size={17} className="mt-0.5 shrink-0 text-red-700" />
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wide">On-the-Spot Award</p>
+                  <p className="mt-0.5 text-xs leading-relaxed">
+                    Special recognition for an employee or group demonstrating honesty, bravery, or courage in the performance of their work.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Award Eligibility Checklist */}
-            {selectedAward?.eligibility_requirements && (
+            {Boolean(selectedAward?.eligibility_requirements?.length) && (
               <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
                 <h4 className="text-xs font-bold text-slate-800 mb-2">
                   Award Minimum Eligibility Standards:
@@ -369,6 +560,18 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
                     </li>
                   ))}
                 </ul>
+              </div>
+            )}
+
+            {selectedAward?.remarks?.trim() && (
+              <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
+                <h4 className="text-xs font-bold text-amber-900 mb-1.5 flex items-center gap-2">
+                  <FileText size={14} className="shrink-0" />
+                  <span>Award Notes</span>
+                </h4>
+                <p className="text-xs leading-relaxed text-amber-900 whitespace-pre-wrap">
+                  {selectedAward.remarks}
+                </p>
               </div>
             )}
 
@@ -499,15 +702,13 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
                     Barangay Jurisdiction (Tacloban City)
                   </label>
-                  <select
+                  <input
+                    type="text"
+                    placeholder="e.g. Brgy. 88 San Jose"
                     value={barangay}
                     onChange={e => setBarangay(e.target.value)}
                     className="w-full text-xs p-2.5 rounded-md border border-slate-300 bg-slate-50 text-slate-900 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
-                  >
-                    {TACLOBAN_BARANGAYS.map(b => (
-                      <option key={b} value={b}>{b}</option>
-                    ))}
-                  </select>
+                  />
                 </div>
               </div>
             </div>
@@ -680,7 +881,9 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
 
               <div className="pt-3 border-t border-slate-200 text-xs">
                 <span className="text-slate-500 font-semibold">Justification Excerpt:</span>
-                <p className="text-slate-700 mt-1 italic">"{justification}"</p>
+                <p className="mt-1 max-h-28 overflow-y-auto break-words whitespace-pre-wrap rounded-lg bg-white p-3 italic leading-relaxed text-slate-700">
+                  "{justification}"
+                </p>
               </div>
 
               <div className="pt-3 border-t border-slate-200 text-xs">
@@ -715,7 +918,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
           ) : (
             <button
               type="button"
-              onClick={onCancel}
+              onClick={() => void handleCancel()}
               className="px-4 py-2 text-slate-500 hover:text-slate-800 text-xs font-semibold cursor-pointer"
             >
               Cancel

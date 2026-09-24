@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { AlertCircle, ArrowLeft, LockKeyhole, Mail, ShieldCheck, UserPlus, UserRound } from 'lucide-react';
+import { APP_LOGO_URL, APP_NAME } from '../../lib/branding';
 
 interface NomineeSignupScreenProps {
   errorMessage?: string;
@@ -48,6 +49,9 @@ export const NomineeSignupScreen: React.FC<NomineeSignupScreenProps> = ({
         <div className="relative p-8 sm:p-10 lg:p-12 bg-linear-to-br from-slate-950 via-slate-900 to-blue-950">
           <div className="absolute inset-0 opacity-40 pointer-events-none bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.28),_transparent_36%),radial-gradient(circle_at_bottom_right,_rgba(14,165,233,0.2),_transparent_42%)]" />
           <div className="relative space-y-6">
+            <div className="flex h-20 w-20 items-center justify-center">
+              <img src={APP_LOGO_URL} alt={`${APP_NAME} logo`} className="app-logo-outlined h-full w-full object-contain" />
+            </div>
             <span className="inline-flex items-center rounded-full border border-blue-400/30 bg-blue-400/10 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.24em] text-blue-200">
               Nominee Registration
             </span>

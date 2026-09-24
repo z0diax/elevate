@@ -1,4 +1,4 @@
-# Tacloban PRAISE XAMPP Guide
+# HRMDO PRAISE MANAGEMENT XAMPP Guide
 
 This project runs on XAMPP with:
 

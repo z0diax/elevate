@@ -16,6 +16,13 @@ textarea {
   touch-action: manipulation;
 }
 
+.safe-long-text {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 @media (max-width: 639px) {
   input,
   select,
@@ -27,4 +34,12 @@ textarea {
     -webkit-overflow-scrolling: touch;
     overscroll-behavior-inline: contain;
   }
+}
+/* Keep the transparent brand mark readable against the dark application chrome. */
+.app-logo-outlined {
+  filter:
+    drop-shadow(1px 0 0 #fff)
+    drop-shadow(-1px 0 0 #fff)
+    drop-shadow(0 1px 0 #fff)
+    drop-shadow(0 -1px 0 #fff);
 }

@@ -35,7 +35,7 @@ header('Content-Type: text/html; charset=UTF-8');
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tacloban PRAISE XAMPP Setup</title>
+    <title>HRMDO PRAISE MANAGEMENT - XAMPP Setup</title>
     <style>
       body {
         margin: 0;
@@ -78,7 +78,7 @@ header('Content-Type: text/html; charset=UTF-8');
   <body>
     <main>
       <div class="card">
-        <h1>Tacloban PRAISE is not built yet</h1>
+        <h1>HRMDO PRAISE MANAGEMENT is not built yet</h1>
         <p>XAMPP can serve this app after the Vite frontend is built once.</p>
         <ol>
           <li>Run <code>npm install</code></li>

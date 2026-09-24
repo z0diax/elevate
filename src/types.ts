@@ -79,15 +79,17 @@ export interface Award {
   name: string;
   code: string;
   description: string;
+  remarks?: string;
   award_year: number;
   min_qualifying_score: number;
+  is_on_the_spot?: boolean;
   is_active: boolean;
   eligibility_requirements?: AwardEligibilityRequirement[];
   document_requirements?: AwardDocumentRequirement[];
   criteria?: AwardCriterion[];
 }
 
-export type DocumentStatus = 'Not Submitted' | 'Submitted' | 'For Verification' | 'Verified' | 'Rejected' | 'Missing';
+export type DocumentStatus = 'Not Submitted' | 'Submitted' | 'For Verification' | 'Head Approved' | 'Head Rejected' | 'Verified' | 'Rejected' | 'Missing';
 
 export interface ApplicationDocument {
   id: string;
@@ -221,6 +223,15 @@ export interface CertificateTemplateSettings {
   center_signatory_title: string;
   right_signatory_name: string;
   right_signatory_title: string;
+  form_a1_prepared_label: string;
+  form_a1_prepared_name: string;
+  form_a1_prepared_title: string;
+  form_a1_verified_label: string;
+  form_a1_verified_name: string;
+  form_a1_verified_title: string;
+  form_a1_confirmed_label: string;
+  form_a1_confirmed_name: string;
+  form_a1_confirmed_title: string;
   background_image_url?: string;
   updated_at?: string;
 }

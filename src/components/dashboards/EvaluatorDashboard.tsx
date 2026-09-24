@@ -4,6 +4,7 @@ import { StatusBadge } from '../common/StatusBadge';
 import { StageProgressTracker } from '../common/StageProgressTracker';
 import { DocumentViewerModal } from '../common/DocumentViewerModal';
 import { praiseService } from '../../lib/supabase';
+import { showToast } from '../../lib/toast';
 import {
   AlertCircle,
   CheckCircle2,
@@ -40,7 +41,7 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
     return isAssigned || isEvaluationStatus;
   }), [applications, currentUser.id]);
 
-  const [selectedAppId, setSelectedAppId] = useState<string>(assignedApplications[0]?.id || '');
+  const [selectedAppId, setSelectedAppId] = useState<string>('');
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [criterionScores, setCriterionScores] = useState<Record<string, CriterionInput>>({});
   const [generalRemarks, setGeneralRemarks] = useState('');
@@ -49,17 +50,12 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    if (!assignedApplications.length) {
+    if (selectedAppId && !assignedApplications.some(application => application.id === selectedAppId)) {
       setSelectedAppId('');
-      return;
-    }
-
-    if (!assignedApplications.some(application => application.id === selectedAppId)) {
-      setSelectedAppId(assignedApplications[0].id);
     }
   }, [assignedApplications, selectedAppId]);
 
-  const selectedApp = assignedApplications.find(application => application.id === selectedAppId) || assignedApplications[0];
+  const selectedApp = assignedApplications.find(application => application.id === selectedAppId);
   const selectedAward = awards.find(award => award.id === selectedApp?.award_id) || null;
   const selectedDoc = selectedApp?.documents?.find(document => document.id === selectedDocId) || null;
   const existingEvaluation = selectedApp?.evaluations?.find(evaluation => evaluation.evaluator_id === currentUser.id);
@@ -191,6 +187,7 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
         }),
         general_remarks: generalRemarks.trim(),
       });
+      showToast(`Evaluation for ${selectedApp.application_number} submitted successfully.`);
 
       setIsLocked(true);
       await onRefreshData();
@@ -231,66 +228,81 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <div className="lg:col-span-4 space-y-3">
+      <div className="space-y-3">
+        <div className="space-y-3">
           <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider px-1">
             Assigned Nominees ({assignedApplications.length})
           </h3>
 
-          <div className="space-y-2 max-h-[75vh] overflow-y-auto pr-1">
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
             {assignedApplications.length === 0 ? (
-              <div className="p-8 text-center bg-white rounded-xl border border-slate-200 text-slate-400 shadow-xs">
+              <div className="p-12 text-center text-slate-400">
                 <Scale size={32} className="mx-auto mb-2 opacity-30 text-slate-400" />
                 <p className="text-xs font-semibold">No active applications currently assigned to your queue.</p>
               </div>
             ) : (
-              assignedApplications.map(application => {
-                const isSelected = application.id === selectedApp?.id;
+              assignedApplications.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[820px] text-left text-sm">
+                    <thead className="border-b border-slate-200 bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      <tr>
+                        <th className="px-5 py-3">Reference</th>
+                        <th className="px-5 py-3">Nominee</th>
+                        <th className="px-5 py-3">Office</th>
+                        <th className="px-5 py-3">Award applied</th>
+                        <th className="px-5 py-3">Assessment</th>
+                        <th className="px-5 py-3 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+              {assignedApplications.map(application => {
                 const hasMyEval = application.evaluations?.some(evaluation => evaluation.evaluator_id === currentUser.id && evaluation.is_submitted);
 
                 return (
-                  <div
+                  <tr
                     key={application.id}
-                    id={`eval-app-card-${application.id}`}
-                    onClick={() => setSelectedAppId(application.id)}
-                    className={`p-3.5 rounded-xl border transition-all cursor-pointer ${
-                      isSelected
-                        ? 'bg-blue-50/70 border-blue-500 shadow-2xs'
-                        : 'bg-white border-slate-200 hover:bg-slate-50 shadow-xs'
-                    }`}
+                    className="hover:bg-slate-50"
                   >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-mono text-[11px] font-bold text-blue-600">{application.application_number}</span>
+                    <td className="px-5 py-4 font-mono text-xs font-bold text-blue-600">{application.application_number}</td>
+                    <td className="px-5 py-4 font-semibold text-slate-900">{application.nominee_name}</td>
+                    <td className="px-5 py-4 text-slate-600">{application.office_name}</td>
+                    <td className="px-5 py-4 font-medium text-slate-700">{application.award_name}</td>
+                    <td className="px-5 py-4">
                       {hasMyEval ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full">
-                          <CheckCircle2 size={11} />
-                          <span>Scored</span>
+                        <span className="inline-flex items-center gap-1 rounded-full border border-green-200 bg-green-50 px-2 py-1 text-[10px] font-bold text-green-700">
+                          <CheckCircle2 size={11} /> Scored
                         </span>
-                      ) : (
-                        <StatusBadge status={application.status} size="sm" />
-                      )}
-                    </div>
-
-                    <h4 className="text-xs font-bold text-slate-900 truncate">{application.nominee_name}</h4>
-                    <p className="text-[11px] text-slate-500 truncate">
-                      {[application.position_title, application.office_name].filter(Boolean).join(' • ')}
-                    </p>
-
-                    <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
-                      <span className="text-slate-600 font-medium truncate max-w-[170px]">{application.award_name}</span>
-                      {application.final_weighted_score !== undefined && application.final_weighted_score !== null && (
-                        <span className="text-green-700 font-bold font-mono">{application.final_weighted_score}%</span>
-                      )}
-                    </div>
-                  </div>
+                      ) : <StatusBadge status={application.status} size="sm" />}
+                    </td>
+                    <td className="px-5 py-4 text-right">
+                      <button type="button" onClick={() => setSelectedAppId(application.id)} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100">
+                        Open assessment
+                      </button>
+                    </td>
+                  </tr>
                 );
               })
+                    }</tbody>
+                  </table>
+                </div>
+              )
             )}
           </div>
         </div>
 
         {selectedApp && selectedAward ? (
-          <div className="lg:col-span-8 space-y-6">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-3 sm:p-6">
+            <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-slate-50 shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-900 px-5 py-4 text-white sm:px-7">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-blue-300">Evaluator assessment</p>
+                <h3 className="mt-1 text-lg font-bold">{selectedApp.nominee_name}</h3>
+                <p className="mt-1 text-xs text-slate-300">{selectedApp.application_number} • {selectedAward.name}</p>
+              </div>
+              <button type="button" onClick={() => setSelectedAppId('')} className="rounded-lg border border-slate-600 px-2.5 py-1 text-lg leading-none text-slate-300 hover:bg-slate-700 hover:text-white" aria-label="Close assessment modal">×</button>
+            </div>
+            <div className="min-w-0 overflow-x-hidden overflow-y-auto p-4 sm:p-6">
+            <div className="space-y-6">
             <StageProgressTracker
               currentStage={selectedApp.processing_stage}
               currentStatus={selectedApp.status}
@@ -314,13 +326,13 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
               <div className="text-xs space-y-3">
                 <div>
                   <span className="font-bold text-slate-900">Accomplishments & Public Impact:</span>
-                  <p className="mt-1 p-3 rounded-lg bg-slate-50 text-slate-700 border border-slate-200 leading-relaxed">
+                  <p className="safe-long-text mt-1 max-w-full overflow-hidden whitespace-pre-wrap p-3 rounded-lg bg-slate-50 text-slate-700 border border-slate-200 leading-relaxed">
                     {selectedApp.accomplishments}
                   </p>
                 </div>
                 <div>
                   <span className="font-bold text-slate-900">Justification Narrative:</span>
-                  <p className="mt-1 p-3 rounded-lg bg-slate-50 text-slate-700 border border-slate-200 leading-relaxed">
+                  <p className="safe-long-text mt-1 max-w-full overflow-hidden whitespace-pre-wrap p-3 rounded-lg bg-slate-50 text-slate-700 border border-slate-200 leading-relaxed">
                     {selectedApp.justification}
                   </p>
                 </div>
@@ -469,7 +481,7 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
                   placeholder="Enter overarching feedback, commendations, and recommendation."
                   value={generalRemarks}
                   onChange={event => setGeneralRemarks(event.target.value)}
-                  className="w-full text-xs p-3 rounded-md border border-slate-300 bg-slate-50 text-slate-900 focus:bg-white focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
+                  className="safe-long-text w-full min-w-0 max-w-full text-xs p-3 rounded-md border border-slate-300 bg-slate-50 text-slate-900 focus:bg-white focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
                 />
               </div>
 
@@ -497,11 +509,10 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
               )}
             </div>
           </div>
-        ) : (
-          <div className="lg:col-span-8 bg-white p-12 text-center rounded-xl border border-slate-200 text-slate-400">
-            No application selected from queue.
           </div>
-        )}
+            </div>
+            </div>
+        ) : null}
       </div>
 
       {selectedDoc && selectedApp && (

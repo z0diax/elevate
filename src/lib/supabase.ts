@@ -50,6 +50,7 @@ type CreateUserPayload = Omit<UserProfile, 'id' | 'created_at'> & {
 };
 
 type SubmitNominationPayload = {
+  submission_id: string;
   award_id: string;
   nominee_id?: string;
   nominee_name: string;
@@ -224,8 +225,10 @@ function normalizeAward(award: any): Award {
     name: String(award.name),
     code: String(award.code),
     description: award.description || '',
+    remarks: award.remarks || '',
     award_year: Number(award.award_year || new Date().getFullYear()),
-    min_qualifying_score: Number(award.min_qualifying_score || 85),
+    min_qualifying_score: Number(award.min_qualifying_score ?? 85),
+    is_on_the_spot: Boolean(award.is_on_the_spot),
     is_active: Boolean(award.is_active),
     criteria: Array.isArray(award.criteria)
       ? award.criteria.map((criterion: any) => ({
@@ -434,7 +437,7 @@ async function loadOffices(): Promise<Office[]> {
 async function loadAuditLogs(user?: UserProfile | null, applications?: Application[]): Promise<ApplicationHistory[]> {
   const activeUser = user || currentUser;
 
-  if (activeUser?.role === 'NOMINEE') {
+  if (activeUser?.role === 'NOMINEE' || activeUser?.role === 'HEAD_OF_OFFICE') {
     const relatedApplications = (applications || cachedApplications).filter(application =>
       application.nominee_id === activeUser.id ||
       application.nominator_id === activeUser.id ||
@@ -713,10 +716,14 @@ export const praiseService = {
       method: 'POST',
       body: JSON.stringify(data),
     }));
-    await loadApplications();
-    await loadAuditLogs();
-    if (currentUser) {
-      await loadNotifications(currentUser);
+    try {
+      await loadApplications();
+      await loadAuditLogs();
+      if (currentUser) {
+        await loadNotifications(currentUser);
+      }
+    } catch (error) {
+      console.warn('Nomination saved, but the application lists could not be refreshed.', error);
     }
     return application;
   },
@@ -750,10 +757,14 @@ export const praiseService = {
       body: formData,
     }));
 
-    await loadApplications();
-    await loadAuditLogs();
-    if (currentUser) {
-      await loadNotifications(currentUser);
+    try {
+      await loadApplications();
+      await loadAuditLogs();
+      if (currentUser) {
+        await loadNotifications(currentUser);
+      }
+    } catch (error) {
+      console.warn('Document saved, but the application lists could not be refreshed.', error);
     }
 
     return document;
@@ -783,6 +794,21 @@ export const praiseService = {
         remarks,
         verified_by: currentUser?.full_name,
       }),
+    }));
+    await loadApplications();
+    await loadAuditLogs();
+    return application;
+  },
+
+  async inspectDocumentForEndorsement(
+    appId: string,
+    docId: string,
+    status: 'Head Approved' | 'Head Rejected',
+    remarks: string
+  ): Promise<Application> {
+    const application = normalizeApplication(await apiRequest<any>(`applications.php?action=inspect_document&id=${encodeURIComponent(appId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ document_id: docId, status, remarks }),
     }));
     await loadApplications();
     await loadAuditLogs();
@@ -955,6 +981,19 @@ export const praiseService = {
     }));
     await loadApplications();
     await loadAuditLogs();
+    return application;
+  },
+
+  async resubmitApplication(appId: string, remarks: string): Promise<Application> {
+    const application = normalizeApplication(await apiRequest<any>(`applications.php?action=resubmit&id=${encodeURIComponent(appId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ remarks }),
+    }));
+    await loadApplications();
+    await loadAuditLogs();
+    if (currentUser) {
+      await loadNotifications(currentUser);
+    }
     return application;
   },
 

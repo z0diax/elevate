@@ -5,6 +5,7 @@ import { StageProgressTracker } from '../common/StageProgressTracker';
 import { DocumentViewerModal } from '../common/DocumentViewerModal';
 import { AuditTrailModal } from '../common/AuditTrailModal';
 import { praiseService } from '../../lib/supabase';
+import { showToast } from '../../lib/toast';
 import {
   FileCheck2,
   FileText,
@@ -22,15 +23,7 @@ interface SecretariatDashboardProps {
   onRefreshData: () => void | Promise<void>;
 }
 
-const WORKBENCH_STATUSES = new Set([
-  'Endorsed',
-  'For Verification',
-  'Incomplete',
-  'Verified',
-  'For Evaluation',
-  'Under Evaluation',
-  'Evaluation Completed',
-]);
+const WORKBENCH_STATUSES = new Set(['Endorsed', 'For Verification', 'Incomplete', 'Verified']);
 
 export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
   applications,
@@ -39,9 +32,12 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
   currentUser,
   onRefreshData,
 }) => {
-  const workbenchApplications = useMemo(() => applications.filter(application => WORKBENCH_STATUSES.has(application.status)), [applications]);
+  const workbenchApplications = useMemo(() => applications.filter(application =>
+    application.processing_stage === 'Document Verification'
+    && WORKBENCH_STATUSES.has(application.status)
+  ), [applications]);
 
-  const [selectedAppId, setSelectedAppId] = useState<string>(workbenchApplications[0]?.id || '');
+  const [selectedAppId, setSelectedAppId] = useState<string>('');
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
   const [selectedEvaluatorIds, setSelectedEvaluatorIds] = useState<string[]>([]);
@@ -49,19 +45,15 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
   const [returnRemarks, setReturnRemarks] = useState('');
   const [isReturning, setIsReturning] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
+  const [routingSuccess, setRoutingSuccess] = useState('');
 
   useEffect(() => {
-    if (!workbenchApplications.length) {
+    if (selectedAppId && !workbenchApplications.some(application => application.id === selectedAppId)) {
       setSelectedAppId('');
-      return;
-    }
-
-    if (!workbenchApplications.some(application => application.id === selectedAppId)) {
-      setSelectedAppId(workbenchApplications[0].id);
     }
   }, [selectedAppId, workbenchApplications]);
 
-  const selectedApp = workbenchApplications.find(application => application.id === selectedAppId) || workbenchApplications[0];
+  const selectedApp = workbenchApplications.find(application => application.id === selectedAppId);
   const selectedAward = awards.find(award => award.id === selectedApp?.award_id);
   const selectedDoc = selectedApp?.documents?.find(document => document.id === selectedDocId) || null;
 
@@ -81,6 +73,7 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
     setIsBusy(true);
     try {
       await praiseService.verifyDocument(selectedApp.id, docId, status, remarks);
+      showToast(`Document marked ${status.toLowerCase()}.`);
       await onRefreshData();
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Failed to update document verification.');
@@ -101,6 +94,7 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
         selectedApp.id,
         'All mandatory documentary requirements verified and authenticated by Secretariat.'
       );
+      showToast('All documents verified. The application is ready for evaluator routing.');
       await onRefreshData();
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Failed to mark the application as verified.');
@@ -122,6 +116,7 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
     setIsBusy(true);
     try {
       await praiseService.returnApplicationForRevision(selectedApp.id, returnRemarks.trim());
+      showToast('Application returned to the filer for revision.');
       setIsReturning(false);
       setReturnRemarks('');
       await onRefreshData();
@@ -150,9 +145,10 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
     setIsBusy(true);
     try {
       await praiseService.routeToEvaluators(selectedApp.id, selectedEvaluatorIds, routingRemarks.trim());
+      showToast(`${selectedApp.application_number} forwarded to the selected evaluator(s).`);
       setRoutingRemarks('');
+      setRoutingSuccess(`${selectedApp.application_number} was forwarded to the selected evaluator(s). It has been removed from the Secretariat workbench.`);
       await onRefreshData();
-      alert(`Successfully routed ${selectedApp.nominee_name} to ${selectedEvaluatorIds.length} evaluator(s).`);
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Failed to route the application to evaluators.');
     } finally {
@@ -162,6 +158,11 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
 
   return (
     <div id="secretariat-workbench-container" className="space-y-6">
+    {routingSuccess && (
+      <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-xs text-green-700" role="status">
+        {routingSuccess}
+      </div>
+    )}
       <div className="bg-slate-900 rounded-xl p-6 text-white flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xs">
         <div>
           <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">Secretariat Processing Workbench</span>
@@ -187,8 +188,8 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <div className={`${selectedApp ? 'lg:col-span-4' : 'lg:col-span-12'} space-y-3`}>
+      <div className="space-y-3">
+        <div className="space-y-3">
           <div className="flex items-center justify-between px-1">
             <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
               Verification Queue ({workbenchApplications.length})
@@ -198,48 +199,62 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
             </span>
           </div>
 
-          <div className="space-y-2 max-h-[75vh] overflow-y-auto pr-1">
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
             {workbenchApplications.length === 0 ? (
-              <div className="bg-white p-12 text-center rounded-xl border border-slate-200 text-slate-400">
-                No applications are currently awaiting document verification.
+              <div className="p-12 text-center text-slate-400">
+                <p>No applications are currently awaiting document verification.</p>
+                <p className="mt-2 text-xs text-slate-500">
+                  Nominations requiring committee decisions are listed under <strong className="font-semibold text-slate-700">PRAISE Deliberation</strong>.
+                </p>
               </div>
-            ) : workbenchApplications.map(application => {
-              const isSelected = application.id === selectedApp?.id;
-              return (
-                <div
-                  key={application.id}
-                  id={`secretariat-app-card-${application.id}`}
-                  onClick={() => setSelectedAppId(application.id)}
-                  className={`p-3.5 rounded-xl border transition-all cursor-pointer ${
-                    isSelected
-                      ? 'bg-blue-50/70 border-blue-500 shadow-2xs'
-                      : 'bg-white border-slate-200 hover:bg-slate-50 shadow-xs'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-mono text-[11px] font-bold text-blue-600">
-                      {application.application_number}
-                    </span>
-                    <StatusBadge status={application.status} size="sm" />
-                  </div>
-
-                  <h4 className="text-xs font-bold text-slate-900 truncate">{application.nominee_name}</h4>
-                  <p className="text-[11px] text-slate-500 truncate">
-                    {[application.position_title, application.office_name].filter(Boolean).join(' • ')}
-                  </p>
-
-                  <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
-                    <span className="text-slate-600 font-medium truncate max-w-[170px]">{application.award_name}</span>
-                    <span className="text-slate-400 shrink-0">{application.documents?.length || 0} docs</span>
-                  </div>
-                </div>
-              );
-            })}
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[760px] text-left text-sm">
+                  <thead className="border-b border-slate-200 bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    <tr>
+                      <th className="px-5 py-3">Reference</th>
+                      <th className="px-5 py-3">Nominee</th>
+                      <th className="px-5 py-3">Office</th>
+                      <th className="px-5 py-3">Award applied</th>
+                      <th className="px-5 py-3">Status</th>
+                      <th className="px-5 py-3 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {workbenchApplications.map(application => (
+                      <tr key={application.id} className="hover:bg-slate-50">
+                        <td className="px-5 py-4 font-mono text-xs font-bold text-blue-600">{application.application_number}</td>
+                        <td className="px-5 py-4 font-semibold text-slate-900">{application.nominee_name}</td>
+                        <td className="px-5 py-4 text-slate-600">{application.office_name}</td>
+                        <td className="px-5 py-4 font-medium text-slate-700">{application.award_name}</td>
+                        <td className="px-5 py-4"><StatusBadge status={application.status} size="sm" /></td>
+                        <td className="px-5 py-4 text-right">
+                          <button type="button" onClick={() => setSelectedAppId(application.id)} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100">
+                            Open review
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
 
         {selectedApp ? (
-          <div className="lg:col-span-8 space-y-6">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-3 sm:p-6">
+            <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-slate-50 shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-900 px-5 py-4 text-white sm:px-7">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-blue-300">Secretariat document review</p>
+                <h3 className="mt-1 text-lg font-bold">{selectedApp.nominee_name}</h3>
+                <p className="mt-1 text-xs text-slate-300">{selectedApp.application_number} • {selectedApp.award_name}</p>
+              </div>
+              <button type="button" onClick={() => setSelectedAppId('')} className="rounded-lg border border-slate-600 px-2.5 py-1 text-lg leading-none text-slate-300 hover:bg-slate-700 hover:text-white" aria-label="Close review modal">×</button>
+            </div>
+            <div className="overflow-y-auto p-4 sm:p-6">
+            <div className="space-y-6">
             <StageProgressTracker
               currentStage={selectedApp.processing_stage}
               currentStatus={selectedApp.status}
@@ -270,14 +285,14 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
               <div className="text-xs space-y-2">
                 <div>
                   <span className="font-bold text-slate-900">Justification & Merits:</span>
-                  <p className="text-slate-700 mt-1 leading-relaxed bg-slate-50 p-3 rounded-lg border border-slate-200">
+                  <p className="safe-long-text text-slate-700 mt-1 leading-relaxed bg-slate-50 p-3 rounded-lg border border-slate-200">
                     {selectedApp.justification}
                   </p>
                 </div>
 
                 <div>
                   <span className="font-bold text-slate-900">Accomplishments & Public Impact:</span>
-                  <p className="text-slate-700 mt-1 leading-relaxed bg-slate-50 p-3 rounded-lg border border-slate-200">
+                  <p className="safe-long-text text-slate-700 mt-1 leading-relaxed bg-slate-50 p-3 rounded-lg border border-slate-200">
                     {selectedApp.accomplishments}
                   </p>
                 </div>
@@ -426,7 +441,7 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
                 <button
                   id="forward-to-evaluators-btn"
                   onClick={() => void handleRouteToEvaluators()}
-                  disabled={isBusy}
+                  disabled={isBusy || selectedApp.status !== 'Verified'}
                   className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-md inline-flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   <Send size={14} />
@@ -444,7 +459,7 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
                     placeholder="Specify the missing documents or clarifications required."
                     value={returnRemarks}
                     onChange={event => setReturnRemarks(event.target.value)}
-                    className="w-full text-xs p-2.5 rounded-md border border-red-200 bg-white text-slate-900"
+                    className="safe-long-text w-full min-w-0 max-w-full text-xs p-2.5 rounded-md border border-red-200 bg-white text-slate-900"
                   />
                   <div className="flex justify-end gap-2">
                     <button
@@ -465,6 +480,9 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
               )}
             </div>
           </div>
+            </div>
+            </div>
+            </div>
         ) : null}
       </div>
 

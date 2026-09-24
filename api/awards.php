@@ -19,6 +19,7 @@ $method = $_SERVER['REQUEST_METHOD'];
 
 function normalize_award(array $award): array {
     $award['is_active'] = (bool)$award['is_active'];
+    $award['is_on_the_spot'] = (bool)($award['is_on_the_spot'] ?? false);
     $award['min_qualifying_score'] = (float)$award['min_qualifying_score'];
     $award['award_year'] = (int)$award['award_year'];
     return $award;
@@ -202,16 +203,18 @@ if ($method === 'POST') {
 
     try {
         $stmt = $db->prepare("
-            INSERT INTO awards (id, name, code, description, award_year, min_qualifying_score, is_active)
-            VALUES (:id, :name, :code, :description, :award_year, :min_qualifying_score, :is_active)
+            INSERT INTO awards (id, name, code, description, remarks, award_year, min_qualifying_score, is_on_the_spot, is_active)
+            VALUES (:id, :name, :code, :description, :remarks, :award_year, :min_qualifying_score, :is_on_the_spot, :is_active)
         ");
         $stmt->execute([
             ':id' => $id,
             ':name' => $data['name'],
             ':code' => $data['code'],
             ':description' => $data['description'] ?? '',
+            ':remarks' => $data['remarks'] ?? '',
             ':award_year' => (int)($data['award_year'] ?? date('Y')),
             ':min_qualifying_score' => (float)($data['min_qualifying_score'] ?? 85),
+            ':is_on_the_spot' => !empty($data['is_on_the_spot']) ? 1 : 0,
             ':is_active' => !isset($data['is_active']) || $data['is_active'] ? 1 : 0,
         ]);
 
@@ -252,8 +255,10 @@ if ($method === 'PUT') {
                 name = COALESCE(:name, name),
                 code = COALESCE(:code, code),
                 description = COALESCE(:description, description),
+                remarks = COALESCE(:remarks, remarks),
                 award_year = COALESCE(:award_year, award_year),
                 min_qualifying_score = COALESCE(:min_qualifying_score, min_qualifying_score),
+                is_on_the_spot = COALESCE(:is_on_the_spot, is_on_the_spot),
                 is_active = COALESCE(:is_active, is_active)
             WHERE id = :id
         ");
@@ -262,8 +267,10 @@ if ($method === 'PUT') {
             ':name' => $data['name'] ?? null,
             ':code' => $data['code'] ?? null,
             ':description' => $data['description'] ?? null,
+            ':remarks' => $data['remarks'] ?? null,
             ':award_year' => isset($data['award_year']) ? (int)$data['award_year'] : null,
             ':min_qualifying_score' => isset($data['min_qualifying_score']) ? (float)$data['min_qualifying_score'] : null,
+            ':is_on_the_spot' => array_key_exists('is_on_the_spot', $data) ? (!empty($data['is_on_the_spot']) ? 1 : 0) : null,
             ':is_active' => array_key_exists('is_active', $data) ? (!empty($data['is_active']) ? 1 : 0) : null,
         ]);
 

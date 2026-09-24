@@ -55,6 +55,27 @@ if ($method === 'POST') {
         sendResponse(400, [], 'application_id is required.');
     }
 
+    $applicationStmt = $db->prepare("SELECT nominator_id, status FROM applications WHERE id = :id LIMIT 1");
+    $applicationStmt->execute([':id' => $applicationId]);
+    $application = $applicationStmt->fetch();
+    if (!$application) {
+        sendResponse(404, [], 'Application not found.');
+    }
+    if ((string)$application['nominator_id'] !== (string)$actor['id']) {
+        sendResponse(403, [], 'Only the original filer can upload or replace nomination documents.');
+    }
+    if ($documentId !== '' && !in_array($application['status'], ['Returned for Revision', 'Incomplete'], true)) {
+        sendResponse(409, [], 'Documents can only be replaced while the nomination is returned for correction.');
+    }
+    if ($documentId === '' && $requirementId) {
+        $existingStmt = $db->prepare('SELECT * FROM application_documents WHERE application_id = :application_id AND requirement_id = :requirement_id LIMIT 1');
+        $existingStmt->execute([':application_id' => $applicationId, ':requirement_id' => $requirementId]);
+        $existingDocument = $existingStmt->fetch();
+        if ($existingDocument) {
+            sendResponse(200, $existingDocument, 'Document was already uploaded.');
+        }
+    }
+
     $uploadDir = __DIR__ . '/../uploads/';
     if (!is_dir($uploadDir)) {
         mkdir($uploadDir, 0755, true);
@@ -84,10 +105,11 @@ if ($method === 'POST') {
                     verified_by = NULL,
                     verified_at = NULL,
                     uploaded_at = NOW()
-                WHERE id = :id
+                WHERE id = :id AND application_id = :application_id
             ");
             $stmt->execute([
                 ':id' => $documentId,
+                ':application_id' => $applicationId,
                 ':document_name' => $documentName,
                 ':file_url' => $fileUrl,
                 ':file_size' => $file['size'],
@@ -117,16 +139,8 @@ if ($method === 'POST') {
         }
 
         $db->prepare("
-            UPDATE applications
-            SET status = 'For Verification',
-                processing_stage = 'Document Verification',
-                required_action = 'Uploaded documents awaiting Secretariat verification.'
-            WHERE id = :id
-        ")->execute([':id' => $applicationId]);
-
-        $db->prepare("
             INSERT INTO application_history (id, application_id, user_id, user_name, user_role, action, previous_status, new_status, remarks)
-            VALUES (:id, :application_id, :user_id, :user_name, :user_role, :action, NULL, 'For Verification', :remarks)
+            VALUES (:id, :application_id, :user_id, :user_name, :user_role, :action, :previous_status, :new_status, :remarks)
         ")->execute([
             ':id' => 'log-' . time() . '-' . rand(10, 99),
             ':application_id' => $applicationId,
@@ -134,6 +148,8 @@ if ($method === 'POST') {
             ':user_name' => $actor['full_name'],
             ':user_role' => $actor['role'],
             ':action' => $logAction,
+            ':previous_status' => $application['status'],
+            ':new_status' => $application['status'],
             ':remarks' => $logRemarks,
         ]);
 

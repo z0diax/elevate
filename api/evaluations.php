@@ -22,8 +22,8 @@ if ($method === 'POST') {
     $data = getJsonInput();
 
     $appId = $data['application_id'] ?? '';
-    $evaluatorId = $data['evaluator_id'] ?? $actor['id'];
-    $evaluatorName = $data['evaluator_name'] ?? $actor['full_name'];
+    $evaluatorId = $actor['id'];
+    $evaluatorName = $actor['full_name'];
     $evaluatorOffice = $data['evaluator_office'] ?? ($actor['office_name'] ?? '');
     $scores = $data['scores'] ?? [];
     $generalRemarks = trim((string)($data['general_remarks'] ?? ''));
@@ -32,18 +32,21 @@ if ($method === 'POST') {
         sendResponse(400, [], 'Application ID and Evaluator ID are required.');
     }
 
-    $stmtApp = $db->prepare("SELECT assigned_evaluators, status FROM applications WHERE id = :id");
+    $stmtApp = $db->prepare("SELECT assigned_evaluators, status, processing_stage FROM applications WHERE id = :id");
     $stmtApp->execute([':id' => $appId]);
     $application = $stmtApp->fetch();
     if (!$application) {
         sendResponse(404, [], 'Application not found.');
+    }
+    if ($application['processing_stage'] !== 'Evaluation' || !in_array($application['status'], ['For Evaluation', 'Under Evaluation'], true)) {
+        sendResponse(409, [], 'This nomination is not currently open for evaluator assessment.');
     }
 
     $assignedEvaluators = !empty($application['assigned_evaluators'])
         ? (json_decode($application['assigned_evaluators'], true) ?: [])
         : [];
 
-    if ($actor['role'] === 'EVALUATOR' && !empty($assignedEvaluators) && !in_array($actor['id'], $assignedEvaluators, true)) {
+    if ($actor['role'] === 'EVALUATOR' && !in_array($actor['id'], $assignedEvaluators, true)) {
         sendResponse(403, [], 'This application is not assigned to your evaluator account.');
     }
 

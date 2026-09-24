@@ -10,6 +10,7 @@ import {
   Filter, 
   Plus, 
   Edit3, 
+  Copy,
   Trash2,
   History, 
   Download, 
@@ -19,9 +20,11 @@ import {
   Sparkles
 } from 'lucide-react';
 import { praiseService } from '../../lib/supabase';
+import { showToast } from '../../lib/toast';
 import { pdfGenerator } from '../../lib/pdfGenerator';
 import { AuditTrailModal } from '../common/AuditTrailModal';
 import { ConfirmationModal } from '../common/ConfirmationModal';
+import { StageProgressTracker } from '../common/StageProgressTracker';
 
 type ConfirmationRequest = {
   title: string;
@@ -33,6 +36,8 @@ type ConfirmationRequest = {
 
 type AwardModalTab = 'details' | 'criteria' | 'attachments';
 
+const OFFICES_PER_PAGE = 10;
+
 interface AdminDashboardProps {
   applications: Application[];
   awards: Award[];
@@ -42,7 +47,7 @@ interface AdminDashboardProps {
   initialSubTab: 'overview' | 'awards' | 'offices' | 'users';
   onRefreshData: () => void;
   onNavigateToNomination: () => void;
-  onSelectApplication: (app: Application) => void;
+  onSelectAdminSection: (section: 'overview' | 'awards' | 'offices' | 'users') => void;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
@@ -54,7 +59,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   initialSubTab,
   onRefreshData,
   onNavigateToNomination,
-  onSelectApplication
+  onSelectAdminSection
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'overview' | 'applications' | 'awards' | 'offices' | 'users'>(initialSubTab);
   
@@ -67,16 +72,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // Modals & Forms
   const [auditApp, setAuditApp] = useState<Application | null>(null);
+  const [trackingApp, setTrackingApp] = useState<Application | null>(null);
   const [isAwardModalOpen, setIsAwardModalOpen] = useState(false);
   const [editingAward, setEditingAward] = useState<Award | null>(null);
+  const [duplicatingAwardName, setDuplicatingAwardName] = useState<string | null>(null);
   const [activeAwardModalTab, setActiveAwardModalTab] = useState<AwardModalTab>('details');
 
   // Award Form State
   const [awardName, setAwardName] = useState('');
   const [awardCode, setAwardCode] = useState('');
   const [awardDescription, setAwardDescription] = useState('');
+  const [awardRemarks, setAwardRemarks] = useState('');
   const [awardYear, setAwardYear] = useState(new Date().getFullYear());
   const [awardMinScore, setAwardMinScore] = useState(85);
+  const [awardIsOnTheSpot, setAwardIsOnTheSpot] = useState(false);
   const [awardCriteria, setAwardCriteria] = useState<Array<{
     id: string;
     criterion_name: string;
@@ -90,6 +99,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     description: string;
     is_mandatory: boolean;
   }>>([]);
+  const [awardEligibilityRequirements, setAwardEligibilityRequirements] = useState<NonNullable<Award['eligibility_requirements']>>([]);
 
   // Office Form State
   const [isOfficeModalOpen, setIsOfficeModalOpen] = useState(false);
@@ -98,6 +108,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [officeCode, setOfficeCode] = useState('');
   const [officeHead, setOfficeHead] = useState('');
   const [officeHeadTitle, setOfficeHeadTitle] = useState('');
+  const [officePage, setOfficePage] = useState(1);
 
   // User Role Form State
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
@@ -146,17 +157,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   });
 
   const criteriaTotalWeight = awardCriteria.reduce((sum, criterion) => sum + Number(criterion.weight_percentage || 0), 0);
+  const officePageCount = Math.max(1, Math.ceil(offices.length / OFFICES_PER_PAGE));
+  const officePageStart = (officePage - 1) * OFFICES_PER_PAGE;
+  const paginatedOffices = offices.slice(officePageStart, officePageStart + OFFICES_PER_PAGE);
+
+  useEffect(() => {
+    setOfficePage(currentPage => Math.min(currentPage, officePageCount));
+  }, [officePageCount]);
 
   // Award Modal Open Handler
   const handleOpenAwardModal = (award?: Award) => {
     setActiveAwardModalTab('details');
+    setDuplicatingAwardName(null);
     if (award) {
       setEditingAward(award);
       setAwardName(award.name);
       setAwardCode(award.code);
       setAwardDescription(award.description);
+      setAwardRemarks(award.remarks || '');
       setAwardYear(award.award_year);
       setAwardMinScore(award.min_qualifying_score);
+      setAwardIsOnTheSpot(Boolean(award.is_on_the_spot));
       setAwardCriteria(
         (award.criteria || []).map(c => ({
           id: c.id,
@@ -174,20 +195,67 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           is_mandatory: requirement.is_mandatory,
         }))
       );
+      setAwardEligibilityRequirements((award.eligibility_requirements || []).map(requirement => ({ ...requirement })));
     } else {
+      const newAwardKey = Date.now();
       setEditingAward(null);
       setAwardName('');
       setAwardCode('');
       setAwardDescription('');
+      setAwardRemarks('');
       setAwardYear(new Date().getFullYear());
       setAwardMinScore(85);
+      setAwardIsOnTheSpot(false);
       setAwardCriteria([
-        { id: `c-1`, criterion_name: 'Quality and Consistency', criterion_description: 'Standard of output', weight_percentage: 35, max_score: 100 },
-        { id: `c-2`, criterion_name: 'Productivity & Citizen Impact', criterion_description: 'Tangible public value', weight_percentage: 30, max_score: 100 },
-        { id: `c-3`, criterion_name: 'Initiative & Ethics', criterion_description: 'Proactiveness and integrity', weight_percentage: 35, max_score: 100 },
+        { id: `crit-new-${newAwardKey}-1`, criterion_name: 'Quality and Consistency', criterion_description: 'Standard of output', weight_percentage: 35, max_score: 100 },
+        { id: `crit-new-${newAwardKey}-2`, criterion_name: 'Productivity & Citizen Impact', criterion_description: 'Tangible public value', weight_percentage: 30, max_score: 100 },
+        { id: `crit-new-${newAwardKey}-3`, criterion_name: 'Initiative & Ethics', criterion_description: 'Proactiveness and integrity', weight_percentage: 35, max_score: 100 },
       ]);
       setAwardDocumentRequirements([]);
+      setAwardEligibilityRequirements([]);
     }
+    setIsAwardModalOpen(true);
+  };
+
+  const handleDuplicateAward = (award: Award) => {
+    const copyCodeBase = `${award.code.slice(0, 40)}-COPY`;
+    let copyCode = copyCodeBase;
+    let copyNumber = 2;
+
+    while (awards.some(existingAward => existingAward.code.toLowerCase() === copyCode.toLowerCase())) {
+      copyCode = `${copyCodeBase}-${copyNumber}`;
+      copyNumber += 1;
+    }
+
+    const cloneKey = Date.now();
+    setActiveAwardModalTab('details');
+    setEditingAward(null);
+    setDuplicatingAwardName(award.name);
+    setAwardName(`${award.name} (Copy)`);
+    setAwardCode(copyCode);
+    setAwardDescription(award.description);
+    setAwardRemarks(award.remarks || '');
+    setAwardYear(award.award_year);
+    setAwardMinScore(award.min_qualifying_score);
+    setAwardIsOnTheSpot(Boolean(award.is_on_the_spot));
+    setAwardCriteria((award.criteria || []).map((criterion, index) => ({
+      id: `crit-copy-${cloneKey}-${index + 1}`,
+      criterion_name: criterion.criterion_name,
+      criterion_description: criterion.criterion_description,
+      weight_percentage: criterion.weight_percentage,
+      max_score: criterion.max_score,
+    })));
+    setAwardDocumentRequirements((award.document_requirements || []).map((requirement, index) => ({
+      id: `dreq-copy-${cloneKey}-${index + 1}`,
+      document_name: requirement.document_name,
+      description: requirement.description,
+      is_mandatory: requirement.is_mandatory,
+    })));
+    setAwardEligibilityRequirements((award.eligibility_requirements || []).map((requirement, index) => ({
+      ...requirement,
+      id: `elig-copy-${cloneKey}-${index + 1}`,
+      award_id: '',
+    })));
     setIsAwardModalOpen(true);
   };
 
@@ -231,8 +299,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           name: awardName,
           code: awardCode,
           description: awardDescription,
+          remarks: awardRemarks,
           award_year: awardYear,
           min_qualifying_score: awardMinScore,
+          is_on_the_spot: awardIsOnTheSpot,
           criteria: awardCriteria.map(c => ({
             ...c,
             award_id: editingAward.id
@@ -241,15 +311,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             ...requirement,
             award_id: editingAward.id,
           })),
-          eligibility_requirements: editingAward.eligibility_requirements || []
+          eligibility_requirements: awardEligibilityRequirements
         });
       } else {
         await praiseService.createAward({
           name: awardName,
           code: awardCode,
           description: awardDescription,
+          remarks: awardRemarks,
           award_year: awardYear,
           min_qualifying_score: awardMinScore,
+          is_on_the_spot: awardIsOnTheSpot,
           is_active: true,
           criteria: awardCriteria.map(c => ({
             ...c,
@@ -259,11 +331,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             ...requirement,
             award_id: '',
           })),
-          eligibility_requirements: []
+          eligibility_requirements: awardEligibilityRequirements.map(requirement => ({
+            ...requirement,
+            award_id: '',
+          }))
         });
       }
 
       setIsAwardModalOpen(false);
+      showToast(editingAward ? 'Award configuration updated.' : 'Award category created.');
       await onRefreshData();
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Failed to save the award configuration.');
@@ -287,6 +363,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       errorMessage: 'Failed to delete the award category.',
       onConfirm: async () => {
         await praiseService.deleteAward(award.id);
+        showToast(`${award.name} deleted.`);
         await onRefreshData();
       },
     });
@@ -360,6 +437,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       setIsOfficeModalOpen(false);
       resetOfficeForm();
+      showToast(editingOffice ? 'Office updated.' : 'Office created.');
       await onRefreshData();
     } catch (error) {
       alert(error instanceof Error ? error.message : `Failed to ${editingOffice ? 'update' : 'create'} the office.`);
@@ -383,6 +461,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       errorMessage: 'Failed to delete the office.',
       onConfirm: async () => {
         await praiseService.deleteOffice(office.id);
+        showToast(`${office.name} deleted.`);
         await onRefreshData();
       },
     });
@@ -396,6 +475,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       errorMessage: 'Failed to delete the nomination.',
       onConfirm: async () => {
         await praiseService.deleteNomination(application.id);
+        showToast(`${application.application_number} deleted.`);
         await onRefreshData();
       },
     });
@@ -415,6 +495,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       );
       setEditingUser(null);
       setResetPassword('');
+      showToast(`User role for ${editingUser.full_name} updated.`);
       await onRefreshData();
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Failed to update the user account.');
@@ -436,6 +517,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       errorMessage: 'Failed to delete the user account.',
       onConfirm: async () => {
         await praiseService.deleteUser(user.id);
+        showToast(`${user.full_name}'s account deleted.`);
         await onRefreshData();
       },
     });
@@ -488,6 +570,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setCreateUserOffice('');
       setCreateUserPosition('');
       setCreateUserPassword('ChangeMe123!');
+      showToast('User account created successfully.');
       await onRefreshData();
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Failed to create the user account.');
@@ -563,7 +646,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             return (
               <button
                 key={tab.id}
-                onClick={() => setActiveSubTab(tab.id as any)}
+                onClick={() => {
+                  const section = tab.id as 'overview' | 'awards' | 'offices' | 'users';
+                  setActiveSubTab(section);
+                  onSelectAdminSection(section);
+                }}
                 className={`px-3.5 py-2 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer ${
                   isActive
                     ? 'bg-blue-600 text-white shadow-xs'
@@ -723,7 +810,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         <td className="px-4 py-3.5">
                           <div className="flex items-center justify-end gap-1 whitespace-nowrap">
                             <button
-                              onClick={() => onSelectApplication(app)}
+                              onClick={() => setTrackingApp(app)}
                               className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded text-[11px] transition-colors cursor-pointer"
                             >
                               Track Stage
@@ -789,9 +876,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               >
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <span className="px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300 font-mono text-[10px] font-bold">
-                      {award.code}
-                    </span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300 font-mono text-[10px] font-bold">
+                        {award.code}
+                      </span>
+                      {award.is_on_the_spot && (
+                        <span className="px-2 py-0.5 rounded bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300 text-[10px] font-bold uppercase tracking-wide">
+                          On-the-Spot
+                        </span>
+                      )}
+                    </div>
                     <span className="text-xs text-slate-400">Min Score: <strong>{award.min_qualifying_score}%</strong></span>
                   </div>
                   <h4 className="text-sm font-bold text-slate-900 dark:text-white">{award.name}</h4>
@@ -813,7 +907,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </div>
                 </div>
 
-                <div className="pt-4 mt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-2">
+                <div className="pt-4 mt-4 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-end gap-2">
+                  <button
+                    onClick={() => handleDuplicateAward(award)}
+                    disabled={isSaving}
+                    title={`Duplicate ${award.name}`}
+                    className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/50 dark:hover:bg-blue-950 text-xs font-semibold rounded-lg text-blue-700 dark:text-blue-300 inline-flex items-center gap-1 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Copy size={13} />
+                    <span>Duplicate</span>
+                  </button>
                   <button
                     onClick={() => handleOpenAwardModal(award)}
                     className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-xs font-semibold rounded-lg text-slate-700 dark:text-slate-200 inline-flex items-center gap-1 cursor-pointer"
@@ -869,7 +972,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {offices.map(off => {
+                {paginatedOffices.map(off => {
                   const dependencyCounts = getOfficeDependencyCounts(off.id);
                   const canDeleteOffice = dependencyCounts.profiles === 0 && dependencyCounts.applications === 0;
                   const deleteTooltip = canDeleteOffice
@@ -923,6 +1026,46 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 })}
               </tbody>
             </table>
+            </div>
+            <div className="flex flex-col gap-3 border-t border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-800/50 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {offices.length > 0
+                  ? `Showing ${officePageStart + 1}-${Math.min(officePageStart + OFFICES_PER_PAGE, offices.length)} of ${offices.length} offices`
+                  : 'No offices to display'}
+              </p>
+              <div className="flex flex-wrap items-center gap-1.5" aria-label="Offices pagination">
+                <button
+                  type="button"
+                  onClick={() => setOfficePage(page => Math.max(1, page - 1))}
+                  disabled={officePage === 1}
+                  className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  Previous
+                </button>
+                {Array.from({ length: officePageCount }, (_, index) => index + 1).map(page => (
+                  <button
+                    key={page}
+                    type="button"
+                    onClick={() => setOfficePage(page)}
+                    aria-current={officePage === page ? 'page' : undefined}
+                    className={`min-w-8 rounded-md px-2.5 py-1.5 text-xs font-bold transition-colors ${
+                      officePage === page
+                        ? 'bg-blue-600 text-white'
+                        : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    {page}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setOfficePage(page => Math.min(officePageCount, page + 1))}
+                  disabled={officePage === officePageCount}
+                  className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  Next
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1011,8 +1154,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
           <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-2xl w-full max-h-[calc(100dvh-2rem)] overflow-y-auto p-5 sm:p-6 space-y-4 shadow-2xl border border-slate-200 dark:border-slate-800 my-8">
             <h3 className="text-base font-bold text-slate-900 dark:text-white">
-              {editingAward ? `Configure Award: ${editingAward.name}` : 'Create New Award Category'}
+              {editingAward
+                ? `Configure Award: ${editingAward.name}`
+                : duplicatingAwardName
+                  ? `Duplicate Award: ${duplicatingAwardName}`
+                  : 'Create New Award Category'}
             </h3>
+
+            {duplicatingAwardName && (
+              <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-200">
+                Criteria, eligibility standards, attachments, scoring, description, and notes were copied from <strong>{duplicatingAwardName}</strong>. Rename the award, review the generated code, then save it as a new category.
+              </div>
+            )}
 
             <div role="tablist" aria-label="Award configuration sections" className="grid grid-cols-3 gap-1 rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
               {([
@@ -1087,6 +1240,39 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 onChange={e => setAwardDescription(e.target.value)}
                 className="w-full p-2 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500"
               />
+            </div>
+
+            <label className="flex cursor-pointer items-start justify-between gap-4 rounded-xl border border-red-200 bg-red-50/70 p-3 text-xs dark:border-red-900 dark:bg-red-950/30">
+              <div>
+                <span className="block font-bold text-red-900 dark:text-red-200">On-the-Spot Award</span>
+                <span className="mt-1 block leading-relaxed text-red-700 dark:text-red-300">
+                  Enable this for special recognition of employees or groups demonstrating honesty, bravery, or courage while performing their work.
+                </span>
+              </div>
+              <span className="relative mt-0.5 inline-flex shrink-0 items-center">
+                <input
+                  type="checkbox"
+                  checked={awardIsOnTheSpot}
+                  onChange={event => setAwardIsOnTheSpot(event.target.checked)}
+                  className="peer sr-only"
+                />
+                <span className="h-6 w-11 rounded-full bg-slate-300 transition-colors peer-checked:bg-red-700 peer-focus-visible:ring-2 peer-focus-visible:ring-red-500 peer-focus-visible:ring-offset-2 dark:bg-slate-700" />
+                <span className="absolute left-1 h-4 w-4 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-5" />
+              </span>
+            </label>
+
+            <div className="text-xs">
+              <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-200">Remarks / Nomination Notes</label>
+              <textarea
+                rows={3}
+                value={awardRemarks}
+                onChange={e => setAwardRemarks(e.target.value)}
+                placeholder="Add instructions or reminders that applicants should see when they select this award."
+                className="w-full p-2 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500"
+              />
+              <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                These notes appear in Step 1 of the nomination form when this award is selected.
+              </p>
             </div>
               </>
             )}
@@ -1279,7 +1465,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 disabled={isSaving}
                 className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg cursor-pointer disabled:cursor-not-allowed disabled:opacity-70"
               >
-                {isSaving ? 'Saving...' : 'Save Award Configuration'}
+                {isSaving ? 'Saving...' : duplicatingAwardName ? 'Create Duplicated Award' : 'Save Award Configuration'}
               </button>
             </div>
           </div>
@@ -1547,6 +1733,76 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           applicationNumber={auditApp.application_number}
           nomineeName={auditApp.nominee_name}
         />
+      )}
+
+      {trackingApp && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-3 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="tracking-modal-title">
+          <div className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-slate-50 shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-900 px-5 py-4 text-white sm:px-7">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-blue-300">Nomination progress</p>
+                <h3 id="tracking-modal-title" className="mt-1 text-lg font-bold">{trackingApp.nominee_name}</h3>
+                <p className="mt-1 text-xs text-slate-300">
+                  {trackingApp.application_number} • {trackingApp.award_name}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTrackingApp(null)}
+                className="rounded-lg border border-slate-600 px-2.5 py-1 text-lg leading-none text-slate-300 hover:bg-slate-700 hover:text-white"
+                aria-label="Close stage tracking"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="min-w-0 overflow-x-hidden overflow-y-auto p-4 sm:p-6">
+              <div className="space-y-5">
+                <StageProgressTracker
+                  currentStage={trackingApp.processing_stage}
+                  currentStatus={trackingApp.status}
+                />
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="rounded-xl border border-slate-200 bg-white p-4">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Application status</p>
+                    <p className="mt-2 text-sm font-bold text-slate-900">{trackingApp.status}</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-white p-4">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Next action</p>
+                    <p className="mt-2 break-words text-sm font-bold text-slate-900">
+                      {trackingApp.required_action || 'No pending action recorded.'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Nomination details</p>
+                  <dl className="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+                    <div>
+                      <dt className="text-xs text-slate-500">Nominee</dt>
+                      <dd className="mt-1 font-semibold text-slate-900">{trackingApp.nominee_name}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-slate-500">Office</dt>
+                      <dd className="mt-1 font-semibold text-slate-900">{trackingApp.office_name}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-slate-500">Award applied</dt>
+                      <dd className="mt-1 font-semibold text-slate-900">{trackingApp.award_name}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-slate-500">Submitted</dt>
+                      <dd className="mt-1 font-semibold text-slate-900">
+                        {new Date(trackingApp.created_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })}
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       <ConfirmationModal

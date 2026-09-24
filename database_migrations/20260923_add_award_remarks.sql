@@ -1,0 +1,2 @@
+ALTER TABLE `awards`
+  ADD COLUMN IF NOT EXISTS `remarks` TEXT DEFAULT NULL AFTER `description`;

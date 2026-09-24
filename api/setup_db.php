@@ -39,7 +39,7 @@ function parse_sql_statements(string $sqlContent): array {
 
 function render_message_page(string $title, string $message, string $accent = '#38bdf8'): never {
     echo '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">';
-    echo '<title>Tacloban PRAISE Database Setup</title>';
+    echo '<title>HRMDO PRAISE MANAGEMENT Database Setup</title>';
     echo '<style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 40px; display: flex; align-items: center; justify-content: center; min-height: 80vh; }
         .card { background: #1e293b; border: 1px solid #334155; border-radius: 16px; padding: 32px; max-width: 640px; width: 100%; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); }
@@ -222,7 +222,7 @@ try {
 <body>
   <div class="card">
     <span class="badge">MySQL Database Ready</span>
-    <h1>Tacloban PRAISE System Initialized</h1>
+    <h1>HRMDO PRAISE MANAGEMENT Initialized</h1>
     <p>Your XAMPP MySQL database <code>tacloban_praise_db</code> has been created and loaded with the deployment schema, award configuration, office records, and bootstrap administrator account.</p>
 
     <div class="stats-grid">

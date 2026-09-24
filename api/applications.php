@@ -15,6 +15,33 @@ if (!$db) {
     sendResponse(503, [], 'Database connection failed.');
 }
 
+function ensureDocumentReviewStatusSchema(PDO $db): void {
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+
+    $column = $db->query("SHOW COLUMNS FROM `application_documents` LIKE 'status'")->fetch();
+    if (!$column) {
+        return;
+    }
+
+    $columnType = strtolower((string)($column['Type'] ?? ''));
+    if (str_contains($columnType, 'enum') && !str_contains($columnType, 'head approved')) {
+        $db->exec("ALTER TABLE `application_documents` MODIFY COLUMN `status` VARCHAR(50) NOT NULL DEFAULT 'Submitted'");
+        $db->exec("
+            UPDATE `application_documents`
+            SET `status` = 'Head Approved'
+            WHERE (`status` = '' OR `status` IS NULL)
+              AND `verification_remarks` LIKE '%approved%Head%Office%'
+        ");
+    }
+
+    $checked = true;
+}
+
+ensureDocumentReviewStatusSchema($db);
+
 $method = $_SERVER['REQUEST_METHOD'];
 
 function getFullApplication($db, string $appId): ?array {
@@ -71,6 +98,24 @@ function getFullApplication($db, string $appId): ?array {
     return $app;
 }
 
+function findSubmittedNomination(PDO $db, string $appId, array $actor, array $data): ?array {
+    $stmt = $db->prepare('SELECT nominator_id, award_id, nominee_name, office_id FROM applications WHERE id = :id');
+    $stmt->execute([':id' => $appId]);
+    $existing = $stmt->fetch();
+    if (!$existing) {
+        return null;
+    }
+
+    if ((string)$existing['nominator_id'] !== (string)$actor['id']
+        || (string)$existing['award_id'] !== (string)$data['award_id']
+        || (string)$existing['nominee_name'] !== trim((string)$data['nominee_name'])
+        || (string)$existing['office_id'] !== (string)$data['office_id']) {
+        sendResponse(409, [], 'This submission ID already belongs to another nomination.');
+    }
+
+    return getFullApplication($db, $appId);
+}
+
 function addHistory($db, string $appId, array $user, string $action, ?string $previousStatus, string $newStatus, string $remarks = ''): void {
     $stmt = $db->prepare("
         INSERT INTO application_history (id, application_id, user_id, user_name, user_role, action, previous_status, new_status, remarks)
@@ -89,13 +134,61 @@ function addHistory($db, string $appId, array $user, string $action, ?string $pr
     ]);
 }
 
+function canViewApplication(array $application, array $actor): bool {
+    $role = $actor['role'] ?? '';
+
+    if ($role === 'ADMINISTRATOR') {
+        return true;
+    }
+
+    // A filer must retain read-only visibility of their own nomination throughout
+    // the workflow, even after it moves beyond their operational workbench.
+    if ((string)($application['nominator_id'] ?? '') === (string)($actor['id'] ?? '')
+        || (string)($application['nominee_id'] ?? '') === (string)($actor['id'] ?? '')) {
+        return true;
+    }
+
+    if ($role === 'SECRETARIAT') {
+        if ($application['processing_stage'] === 'Document Verification') {
+            return in_array($application['status'], ['Endorsed', 'For Verification', 'Incomplete', 'Verified'], true);
+        }
+
+        if ($application['processing_stage'] === 'Deliberation') {
+            return in_array($application['status'], ['Evaluation Completed', 'For Deliberation'], true);
+        }
+
+        return in_array($application['processing_stage'], ['Final Decision', 'Awarded'], true)
+            && in_array($application['status'], ['Approved', 'Not Approved', 'Awarded'], true);
+    }
+
+    if ($role === 'HEAD_OF_OFFICE') {
+        return $application['processing_stage'] === 'Endorsement'
+            && (!empty($actor['office_id']) && $application['office_id'] === $actor['office_id']);
+    }
+
+    if ($role === 'EVALUATOR') {
+        $assignedEvaluators = is_array($application['assigned_evaluators'] ?? null)
+            ? $application['assigned_evaluators']
+            : (!empty($application['assigned_evaluators'])
+                ? (json_decode((string)$application['assigned_evaluators'], true) ?: [])
+                : []);
+        return $application['processing_stage'] === 'Evaluation'
+            && in_array($actor['id'], $assignedEvaluators, true);
+    }
+
+    return false;
+}
+
 if ($method === 'GET') {
-    require_auth($db);
+    $actor = require_auth($db);
 
     if (isset($_GET['id'])) {
         $application = getFullApplication($db, (string)$_GET['id']);
         if (!$application) {
             sendResponse(404, [], 'Application not found.');
+        }
+        if (!canViewApplication($application, $actor)) {
+            sendResponse(403, [], 'You are not assigned to this nomination at its current workflow stage.');
         }
         sendResponse(200, $application);
     }
@@ -104,7 +197,7 @@ if ($method === 'GET') {
     $results = [];
     foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $id) {
         $application = getFullApplication($db, (string)$id);
-        if ($application) {
+        if ($application && canViewApplication($application, $actor)) {
             $results[] = $application;
         }
     }
@@ -120,9 +213,20 @@ if ($method === 'POST') {
         sendResponse(400, [], 'Missing required fields: award_id, nominee_name, office_id.');
     }
 
+    $submissionId = (string)($data['submission_id'] ?? '');
+    if ($submissionId !== '' && !preg_match('/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i', $submissionId)) {
+        sendResponse(400, [], 'Invalid submission ID.');
+    }
+    $appId = $submissionId !== '' ? 'app-' . strtolower($submissionId) : 'app-' . time() . '-' . rand(100, 999);
+    if ($submissionId !== '') {
+        $existing = findSubmittedNomination($db, $appId, $actor, $data);
+        if ($existing) {
+            sendResponse(200, $existing, 'Nomination was already submitted.');
+        }
+    }
+
     $db->beginTransaction();
     try {
-        $appId = 'app-' . time() . '-' . rand(100, 999);
         $year = (int)($data['award_year'] ?? date('Y'));
 
         $stmtCount = $db->query("SELECT COUNT(*) FROM applications");
@@ -168,7 +272,7 @@ if ($method === 'POST') {
             ':email' => $data['email'] ?? '',
             ':barangay' => $data['barangay'] ?? null,
             ':nomination_type' => $data['nomination_type'] ?? 'Individual',
-            ':nominator_id' => $data['nominator_id'] ?? $actor['id'],
+            ':nominator_id' => $actor['id'],
             ':nominator_name' => $data['nominator_name'] ?? $actor['full_name'],
             ':nominator_position' => $data['nominator_position'] ?? ($actor['position_title'] ?? 'Nominator'),
             ':nominating_office' => $data['nominating_office'] ?? ($data['office_name'] ?? ''),
@@ -211,6 +315,12 @@ if ($method === 'POST') {
         $db->commit();
     } catch (Exception $e) {
         $db->rollBack();
+        if ($submissionId !== '') {
+            $existing = findSubmittedNomination($db, $appId, $actor, $data);
+            if ($existing) {
+                sendResponse(200, $existing, 'Nomination was already submitted.');
+            }
+        }
         sendResponse(500, [], 'Failed to create nomination: ' . $e->getMessage());
     }
 
@@ -232,8 +342,98 @@ if ($method === 'PUT') {
         sendResponse(404, [], 'Application not found.');
     }
 
+    if ($action === 'resubmit') {
+        if ((string)$current['nominator_id'] !== (string)$actor['id']) {
+            sendResponse(403, [], 'Only the user who originally submitted this nomination can resubmit it.');
+        }
+
+        $wasRejectedDuringEndorsement = $current['status'] === 'Not Approved'
+            && isset($current['endorsement']['decision'])
+            && $current['endorsement']['decision'] === 'Rejected';
+        if (!in_array($current['status'], ['Returned for Revision', 'Incomplete'], true) && !$wasRejectedDuringEndorsement) {
+            sendResponse(409, [], 'This nomination is not currently eligible for resubmission.');
+        }
+
+        $pendingDocsStmt = $db->prepare("
+            SELECT COUNT(*)
+            FROM application_documents
+            WHERE application_id = :id AND status IN ('Rejected', 'Missing')
+        ");
+        $pendingDocsStmt->execute([':id' => $appId]);
+        if ((int)$pendingDocsStmt->fetchColumn() > 0) {
+            sendResponse(409, [], 'Replace every rejected or missing document before resubmitting.');
+        }
+
+        $replacementDocsStmt = $db->prepare("
+            SELECT COUNT(*)
+            FROM application_documents
+            WHERE application_id = :id AND status = 'For Verification'
+        ");
+        $replacementDocsStmt->execute([':id' => $appId]);
+        $hasReplacementDocuments = (int)$replacementDocsStmt->fetchColumn() > 0;
+        $returnToVerification = $current['status'] === 'Incomplete'
+            || $current['processing_stage'] === 'Document Verification'
+            || (isset($current['endorsement']['decision']) && $current['endorsement']['decision'] === 'Endorsed')
+            || $hasReplacementDocuments;
+        $newStatus = $returnToVerification ? 'For Verification' : 'For Endorsement';
+        $newStage = $returnToVerification ? 'Document Verification' : 'Endorsement';
+        $requiredAction = $returnToVerification
+            ? 'Corrected nomination resubmitted for Secretariat document verification.'
+            : 'Corrected nomination resubmitted for Head of Office endorsement.';
+        $resubmissionNote = trim((string)($data['remarks'] ?? 'Requested corrections completed by the original filer.'));
+
+        $db->beginTransaction();
+        try {
+            $db->prepare("
+                UPDATE applications
+                SET status = :status,
+                    processing_stage = :stage,
+                    required_action = :required_action,
+                    remarks = :remarks,
+                    updated_at = NOW()
+                WHERE id = :id
+            ")->execute([
+                ':status' => $newStatus,
+                ':stage' => $newStage,
+                ':required_action' => $requiredAction,
+                ':remarks' => $resubmissionNote !== '' ? $resubmissionNote : null,
+                ':id' => $appId,
+            ]);
+
+            addHistory($db, $appId, $actor, 'Nomination Resubmitted', $current['status'], $newStatus, $resubmissionNote);
+            $db->commit();
+        } catch (Exception $e) {
+            $db->rollBack();
+            sendResponse(500, [], 'Failed to resubmit nomination: ' . $e->getMessage());
+        }
+
+        sendResponse(200, getFullApplication($db, $appId), 'Nomination resubmitted successfully.');
+    }
+
     if ($action === 'endorse') {
         $decision = $data['decision'] ?? 'Endorsed';
+        if ($actor['role'] !== 'HEAD_OF_OFFICE' && $actor['role'] !== 'ADMINISTRATOR') {
+            sendResponse(403, [], 'Only a Head of Office can record an endorsement decision.');
+        }
+        if ($current['processing_stage'] !== 'Endorsement' || !in_array($current['status'], ['For Endorsement', 'Submitted', 'Returned for Revision'], true)) {
+            sendResponse(409, [], 'This nomination is no longer awaiting Head of Office endorsement.');
+        }
+        if ($actor['role'] === 'HEAD_OF_OFFICE' && !empty($actor['office_id']) && $current['office_id'] !== $actor['office_id']) {
+            sendResponse(403, [], 'You can only endorse nominations from your assigned office.');
+        }
+        if ($decision === 'Endorsed') {
+            $headReviewStmt = $db->prepare("SELECT status FROM application_documents WHERE application_id = :id");
+            $headReviewStmt->execute([':id' => $appId]);
+            $headReviewStatuses = $headReviewStmt->fetchAll(PDO::FETCH_COLUMN);
+            $allDocumentsApproved = !empty($headReviewStatuses)
+                && count(array_filter(
+                    $headReviewStatuses,
+                    static fn($status): bool => strcasecmp(trim((string)$status), 'Head Approved') === 0
+                )) === count($headReviewStatuses);
+            if (!$allDocumentsApproved) {
+                sendResponse(409, [], 'Inspect and approve every attached document before endorsing this nomination.');
+            }
+        }
         $remarks = trim((string)($data['remarks'] ?? ''));
         $endorserName = $data['endorser_name'] ?? $actor['full_name'];
         $endorserTitle = $data['endorser_title'] ?? ($actor['position_title'] ?? 'Department Head');
@@ -256,7 +456,7 @@ if ($method === 'PUT') {
         try {
             $db->prepare("
                 UPDATE applications
-                SET status = :status, processing_stage = :stage, required_action = :required_action, remarks = :remarks
+                SET status = :status, processing_stage = :stage, required_action = :required_action, remarks = :remarks, updated_at = NOW()
                 WHERE id = :id
             ")->execute([
                 ':status' => $newStatus,
@@ -289,6 +489,12 @@ if ($method === 'PUT') {
     }
 
     if ($action === 'verify_document') {
+        if (!in_array($actor['role'], ['SECRETARIAT', 'ADMINISTRATOR'], true)) {
+            sendResponse(403, [], 'Only Secretariat staff can complete formal document verification.');
+        }
+        if ($current['processing_stage'] !== 'Document Verification' || !in_array($current['status'], ['For Verification', 'Incomplete', 'Endorsed'], true)) {
+            sendResponse(409, [], 'This nomination is not currently in Secretariat document verification.');
+        }
         $docId = $data['document_id'] ?? '';
         $status = $data['status'] ?? 'Verified';
         $remarks = trim((string)($data['remarks'] ?? ''));
@@ -349,7 +555,76 @@ if ($method === 'PUT') {
         sendResponse(200, getFullApplication($db, $appId), 'Document verification updated.');
     }
 
+    if ($action === 'inspect_document') {
+        if ($actor['role'] !== 'HEAD_OF_OFFICE') {
+            sendResponse(403, [], 'Only a Head of Office can inspect documents for endorsement.');
+        }
+        if ($current['processing_stage'] !== 'Endorsement' || !in_array($current['status'], ['For Endorsement', 'Submitted', 'Returned for Revision'], true)) {
+            sendResponse(409, [], 'This nomination is no longer awaiting Head of Office document inspection.');
+        }
+        if (!empty($actor['office_id']) && $current['office_id'] !== $actor['office_id']) {
+            sendResponse(403, [], 'You can only inspect documents for nominations from your assigned office.');
+        }
+
+        $docId = (string)($data['document_id'] ?? '');
+        $status = (string)($data['status'] ?? '');
+        $remarks = trim((string)($data['remarks'] ?? ''));
+        if ($docId === '' || !in_array($status, ['Head Approved', 'Head Rejected'], true)) {
+            sendResponse(400, [], 'A document and a valid Head of Office review decision are required.');
+        }
+        if ($status === 'Head Rejected' && $remarks === '') {
+            sendResponse(400, [], 'Remarks are required when returning a document for correction.');
+        }
+
+        $docStmt = $db->prepare("SELECT status FROM application_documents WHERE id = :id AND application_id = :application_id");
+        $docStmt->execute([':id' => $docId, ':application_id' => $appId]);
+        $document = $docStmt->fetch();
+        if (!$document) {
+            sendResponse(404, [], 'Document not found for this nomination.');
+        }
+        if (in_array(strtolower(trim((string)$document['status'])), ['head approved', 'head rejected'], true)) {
+            sendResponse(409, [], 'This document has already been inspected by the Head of Office.');
+        }
+
+        $db->beginTransaction();
+        try {
+            $reviewStmt = $db->prepare("
+                UPDATE application_documents
+                SET status = :status,
+                    verification_remarks = :remarks,
+                    verified_by = :reviewed_by,
+                    verified_at = NOW()
+                WHERE id = :id AND application_id = :application_id
+                  AND LOWER(TRIM(status)) NOT IN ('head approved', 'head rejected')
+            ");
+            $reviewStmt->execute([
+                ':status' => $status,
+                ':remarks' => $remarks !== '' ? $remarks : 'Document inspected and approved for endorsement.',
+                ':reviewed_by' => $actor['full_name'],
+                ':id' => $docId,
+                ':application_id' => $appId,
+            ]);
+            if ($reviewStmt->rowCount() === 0) {
+                $db->rollBack();
+                sendResponse(409, [], 'This document has already been inspected by the Head of Office.');
+            }
+            addHistory($db, $appId, $actor, "Head of Office: {$status}", $current['status'], $current['status'], $remarks);
+            $db->commit();
+        } catch (Exception $e) {
+            $db->rollBack();
+            sendResponse(500, [], 'Failed to record document inspection: ' . $e->getMessage());
+        }
+
+        sendResponse(200, getFullApplication($db, $appId), 'Document inspection recorded.');
+    }
+
     if ($action === 'mark_verified') {
+        if (!in_array($actor['role'], ['SECRETARIAT', 'ADMINISTRATOR'], true)) {
+            sendResponse(403, [], 'Only Secretariat staff can complete document verification.');
+        }
+        if ($current['processing_stage'] !== 'Document Verification' || !in_array($current['status'], ['For Verification', 'Incomplete', 'Endorsed'], true)) {
+            sendResponse(409, [], 'This nomination is not currently in Secretariat document verification.');
+        }
         $remarks = trim((string)($data['remarks'] ?? 'All mandatory documentary requirements verified and authenticated by Secretariat.'));
 
         $db->beginTransaction();
@@ -389,6 +664,12 @@ if ($method === 'PUT') {
     }
 
     if ($action === 'assign_evaluators') {
+        if (!in_array($actor['role'], ['SECRETARIAT', 'ADMINISTRATOR'], true)) {
+            sendResponse(403, [], 'Only Secretariat staff can route nominations to evaluators.');
+        }
+        if ($current['processing_stage'] !== 'Document Verification' || $current['status'] !== 'Verified') {
+            sendResponse(409, [], 'Only a verified nomination can be routed to evaluators.');
+        }
         $evaluatorIds = $data['evaluator_ids'] ?? [];
         $remarks = trim((string)($data['remarks'] ?? 'Assigned PRAISE evaluators.'));
 
@@ -417,6 +698,14 @@ if ($method === 'PUT') {
     }
 
     if ($action === 'return_for_revision') {
+        $allowedReturnRoles = [
+            'Endorsement' => ['HEAD_OF_OFFICE', 'ADMINISTRATOR'],
+            'Document Verification' => ['SECRETARIAT', 'ADMINISTRATOR'],
+            'Evaluation' => ['EVALUATOR', 'ADMINISTRATOR'],
+        ];
+        if (!isset($allowedReturnRoles[$current['processing_stage']]) || !in_array($actor['role'], $allowedReturnRoles[$current['processing_stage']], true)) {
+            sendResponse(403, [], 'Your role is not assigned to return this nomination at its current stage.');
+        }
         $remarks = trim((string)($data['remarks'] ?? 'Returned for revision.'));
         if ($remarks === '') {
             sendResponse(400, [], 'Remarks are required when returning for revision.');
@@ -427,13 +716,14 @@ if ($method === 'PUT') {
             $db->prepare("
                 UPDATE applications
                 SET status = 'Returned for Revision',
-                    processing_stage = 'Endorsement',
+                    processing_stage = :stage,
                     required_action = :required_action,
                     remarks = :remarks
                 WHERE id = :id
             ")->execute([
                 ':required_action' => $remarks,
                 ':remarks' => $remarks,
+                ':stage' => $current['processing_stage'],
                 ':id' => $appId,
             ]);
 
@@ -448,9 +738,31 @@ if ($method === 'PUT') {
     }
 
     if ($action === 'deliberation') {
+        if (!in_array($actor['role'], ['SECRETARIAT', 'ADMINISTRATOR'], true)) {
+            sendResponse(403, [], 'Only Secretariat or an Administrator can record the committee decision.');
+        }
         $decision = $data['decision'] ?? 'Approved';
         $remarks = trim((string)($data['remarks'] ?? ''));
         $awardNow = !empty($data['award_now']);
+
+        if ($decision === 'Approved') {
+            $awardStmt = $db->prepare('SELECT min_qualifying_score FROM awards WHERE id = :award_id');
+            $awardStmt->execute([':award_id' => $current['award_id']]);
+            $minimumScore = $awardStmt->fetchColumn();
+            $finalScore = $current['final_weighted_score'];
+
+            if ($minimumScore === false || $finalScore === null) {
+                sendResponse(409, [], 'This nomination cannot be approved or awarded without an award qualifying standard and a completed evaluation score.');
+            }
+
+            if ((float)$finalScore < (float)$minimumScore) {
+                sendResponse(409, [], sprintf(
+                    'This nomination scored %s%%, below the award qualifying standard of %s%%. It cannot be approved or awarded.',
+                    number_format((float)$finalScore, 2),
+                    number_format((float)$minimumScore, 2)
+                ));
+            }
+        }
 
         if ($awardNow) {
             if ($decision !== 'Approved') {

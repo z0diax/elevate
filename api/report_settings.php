@@ -23,6 +23,15 @@ function default_report_settings(): array {
         'center_signatory_title' => 'City Administrator / PRAISE Chairperson',
         'right_signatory_name' => 'Hon. Alfred S. Romualdez',
         'right_signatory_title' => 'City Mayor, Tacloban City',
+        'form_a1_prepared_label' => 'PREPARED BY (Nominator):',
+        'form_a1_prepared_name' => '{nominator_name}',
+        'form_a1_prepared_title' => '{nominator_position}',
+        'form_a1_verified_label' => 'VERIFIED BY (Secretariat):',
+        'form_a1_verified_name' => 'Atty. Paul Vincent G. Yu',
+        'form_a1_verified_title' => 'PRAISE Secretariat Lead',
+        'form_a1_confirmed_label' => 'CONFIRMED BY (HRMDO Head):',
+        'form_a1_confirmed_name' => 'Marites S. Bocar',
+        'form_a1_confirmed_title' => 'City Gov Dept Head II, HRMDO',
         'background_image_url' => null,
     ];
 }
@@ -39,6 +48,15 @@ function ensure_report_settings_table(PDO $db): void {
           `center_signatory_title` VARCHAR(255) NOT NULL,
           `right_signatory_name` VARCHAR(255) NOT NULL,
           `right_signatory_title` VARCHAR(255) NOT NULL,
+          `form_a1_prepared_label` VARCHAR(255) NOT NULL,
+          `form_a1_prepared_name` VARCHAR(255) NOT NULL,
+          `form_a1_prepared_title` VARCHAR(255) NOT NULL,
+          `form_a1_verified_label` VARCHAR(255) NOT NULL,
+          `form_a1_verified_name` VARCHAR(255) NOT NULL,
+          `form_a1_verified_title` VARCHAR(255) NOT NULL,
+          `form_a1_confirmed_label` VARCHAR(255) NOT NULL,
+          `form_a1_confirmed_name` VARCHAR(255) NOT NULL,
+          `form_a1_confirmed_title` VARCHAR(255) NOT NULL,
           `background_image_url` VARCHAR(500) DEFAULT NULL,
           `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
           `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -51,6 +69,20 @@ function ensure_report_settings_table(PDO $db): void {
         $db->exec("ALTER TABLE `report_settings` ADD COLUMN `background_image_url` VARCHAR(500) DEFAULT NULL AFTER `right_signatory_title`");
     }
 
+    $formA1Columns = [
+        'form_a1_prepared_label', 'form_a1_prepared_name', 'form_a1_prepared_title',
+        'form_a1_verified_label', 'form_a1_verified_name', 'form_a1_verified_title',
+        'form_a1_confirmed_label', 'form_a1_confirmed_name', 'form_a1_confirmed_title',
+    ];
+    $defaults = default_report_settings();
+    foreach ($formA1Columns as $column) {
+        $columnCheck = $db->query("SHOW COLUMNS FROM `report_settings` LIKE '{$column}'");
+        if ($columnCheck && !$columnCheck->fetch(PDO::FETCH_ASSOC)) {
+            $defaultValue = str_replace("'", "''", $defaults[$column]);
+            $db->exec("ALTER TABLE `report_settings` ADD COLUMN `{$column}` VARCHAR(255) NOT NULL DEFAULT '{$defaultValue}' AFTER `right_signatory_title`");
+        }
+    }
+
     $stmt = $db->prepare("SELECT COUNT(*) FROM `report_settings` WHERE `id` = 'default'");
     $stmt->execute();
     $exists = (int)$stmt->fetchColumn() > 0;
@@ -59,7 +91,6 @@ function ensure_report_settings_table(PDO $db): void {
         return;
     }
 
-    $defaults = default_report_settings();
     $insert = $db->prepare("
         INSERT INTO `report_settings` (
             `id`,
@@ -71,6 +102,9 @@ function ensure_report_settings_table(PDO $db): void {
             `center_signatory_title`,
             `right_signatory_name`,
             `right_signatory_title`,
+            `form_a1_prepared_label`, `form_a1_prepared_name`, `form_a1_prepared_title`,
+            `form_a1_verified_label`, `form_a1_verified_name`, `form_a1_verified_title`,
+            `form_a1_confirmed_label`, `form_a1_confirmed_name`, `form_a1_confirmed_title`,
             `background_image_url`
         ) VALUES (
             :id,
@@ -82,6 +116,9 @@ function ensure_report_settings_table(PDO $db): void {
             :center_signatory_title,
             :right_signatory_name,
             :right_signatory_title,
+            :form_a1_prepared_label, :form_a1_prepared_name, :form_a1_prepared_title,
+            :form_a1_verified_label, :form_a1_verified_name, :form_a1_verified_title,
+            :form_a1_confirmed_label, :form_a1_confirmed_name, :form_a1_confirmed_title,
             :background_image_url
         )
     ");
@@ -95,6 +132,15 @@ function ensure_report_settings_table(PDO $db): void {
         ':center_signatory_title' => $defaults['center_signatory_title'],
         ':right_signatory_name' => $defaults['right_signatory_name'],
         ':right_signatory_title' => $defaults['right_signatory_title'],
+        ':form_a1_prepared_label' => $defaults['form_a1_prepared_label'],
+        ':form_a1_prepared_name' => $defaults['form_a1_prepared_name'],
+        ':form_a1_prepared_title' => $defaults['form_a1_prepared_title'],
+        ':form_a1_verified_label' => $defaults['form_a1_verified_label'],
+        ':form_a1_verified_name' => $defaults['form_a1_verified_name'],
+        ':form_a1_verified_title' => $defaults['form_a1_verified_title'],
+        ':form_a1_confirmed_label' => $defaults['form_a1_confirmed_label'],
+        ':form_a1_confirmed_name' => $defaults['form_a1_confirmed_name'],
+        ':form_a1_confirmed_title' => $defaults['form_a1_confirmed_title'],
         ':background_image_url' => $defaults['background_image_url'],
     ]);
 }
@@ -110,6 +156,9 @@ function fetch_report_settings(PDO $db): array {
             `center_signatory_title`,
             `right_signatory_name`,
             `right_signatory_title`,
+            `form_a1_prepared_label`, `form_a1_prepared_name`, `form_a1_prepared_title`,
+            `form_a1_verified_label`, `form_a1_verified_name`, `form_a1_verified_title`,
+            `form_a1_confirmed_label`, `form_a1_confirmed_name`, `form_a1_confirmed_title`,
             `background_image_url`,
             `updated_at`
         FROM `report_settings`
@@ -233,6 +282,15 @@ if ($method === 'PUT') {
         'center_signatory_title' => require_non_empty_string($data, 'center_signatory_title'),
         'right_signatory_name' => require_non_empty_string($data, 'right_signatory_name'),
         'right_signatory_title' => require_non_empty_string($data, 'right_signatory_title'),
+        'form_a1_prepared_label' => require_non_empty_string($data, 'form_a1_prepared_label'),
+        'form_a1_prepared_name' => require_non_empty_string($data, 'form_a1_prepared_name'),
+        'form_a1_prepared_title' => require_non_empty_string($data, 'form_a1_prepared_title'),
+        'form_a1_verified_label' => require_non_empty_string($data, 'form_a1_verified_label'),
+        'form_a1_verified_name' => require_non_empty_string($data, 'form_a1_verified_name'),
+        'form_a1_verified_title' => require_non_empty_string($data, 'form_a1_verified_title'),
+        'form_a1_confirmed_label' => require_non_empty_string($data, 'form_a1_confirmed_label'),
+        'form_a1_confirmed_name' => require_non_empty_string($data, 'form_a1_confirmed_name'),
+        'form_a1_confirmed_title' => require_non_empty_string($data, 'form_a1_confirmed_title'),
         'background_image_url' => optional_string($data, 'background_image_url'),
     ];
 
@@ -249,6 +307,15 @@ if ($method === 'PUT') {
             `center_signatory_title` = :center_signatory_title,
             `right_signatory_name` = :right_signatory_name,
             `right_signatory_title` = :right_signatory_title,
+            `form_a1_prepared_label` = :form_a1_prepared_label,
+            `form_a1_prepared_name` = :form_a1_prepared_name,
+            `form_a1_prepared_title` = :form_a1_prepared_title,
+            `form_a1_verified_label` = :form_a1_verified_label,
+            `form_a1_verified_name` = :form_a1_verified_name,
+            `form_a1_verified_title` = :form_a1_verified_title,
+            `form_a1_confirmed_label` = :form_a1_confirmed_label,
+            `form_a1_confirmed_name` = :form_a1_confirmed_name,
+            `form_a1_confirmed_title` = :form_a1_confirmed_title,
             `background_image_url` = :background_image_url
         WHERE `id` = 'default'
     ");
@@ -261,6 +328,15 @@ if ($method === 'PUT') {
         ':center_signatory_title' => $payload['center_signatory_title'],
         ':right_signatory_name' => $payload['right_signatory_name'],
         ':right_signatory_title' => $payload['right_signatory_title'],
+        ':form_a1_prepared_label' => $payload['form_a1_prepared_label'],
+        ':form_a1_prepared_name' => $payload['form_a1_prepared_name'],
+        ':form_a1_prepared_title' => $payload['form_a1_prepared_title'],
+        ':form_a1_verified_label' => $payload['form_a1_verified_label'],
+        ':form_a1_verified_name' => $payload['form_a1_verified_name'],
+        ':form_a1_verified_title' => $payload['form_a1_verified_title'],
+        ':form_a1_confirmed_label' => $payload['form_a1_confirmed_label'],
+        ':form_a1_confirmed_name' => $payload['form_a1_confirmed_name'],
+        ':form_a1_confirmed_title' => $payload['form_a1_confirmed_title'],
         ':background_image_url' => $payload['background_image_url'],
     ]);
 

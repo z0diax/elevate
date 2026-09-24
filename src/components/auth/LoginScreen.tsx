@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { AlertCircle, LockKeyhole, LogIn, Mail, ShieldCheck } from 'lucide-react';
+import { APP_LOGO_URL, APP_NAME } from '../../lib/branding';
 
 interface LoginScreenProps {
   errorMessage?: string;
@@ -37,6 +38,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
           <div className="absolute inset-0 opacity-40 pointer-events-none bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.28),_transparent_36%),radial-gradient(circle_at_bottom_right,_rgba(14,165,233,0.2),_transparent_42%)]" />
 
           <div className="relative space-y-6">
+            <div className="flex h-20 w-20 items-center justify-center">
+              <img src={APP_LOGO_URL} alt={`${APP_NAME} logo`} className="app-logo-outlined h-full w-full object-contain" />
+            </div>
             <div className="space-y-3">
               <span className="inline-flex items-center rounded-full border border-blue-400/30 bg-blue-400/10 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.24em] text-blue-200">
                 Secure Access
@@ -44,10 +48,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
               <div>
                 <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">
-                  Tacloban PRAISE Management System
+                  {APP_NAME}
                 </h1>
                 <p className="mt-3 max-w-2xl text-sm text-slate-300 leading-relaxed">
-                  Official workflow and records platform for the City Government of Tacloban PRAISE program.
+                  Official HRMDO workflow and records platform for the City Government of Tacloban PRAISE program.
                 </p>
               </div>
             </div>

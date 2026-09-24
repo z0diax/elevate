@@ -5,7 +5,7 @@ import { pdfGenerator } from './lib/pdfGenerator';
 import { praiseService } from './lib/supabase';
 import { Header } from './components/common/Header';
 import { Sidebar } from './components/common/Sidebar';
-import { NominationWizard } from './components/nomination/NominationWizard';
+import { SubmitNominationView } from './components/nomination/SubmitNominationView';
 import { AdminDashboard } from './components/dashboards/AdminDashboard';
 import { SecretariatDashboard } from './components/dashboards/SecretariatDashboard';
 import { HeadOfOfficeDashboard } from './components/dashboards/HeadOfOfficeDashboard';
@@ -18,9 +18,42 @@ import { AuditLogsView } from './components/audit/AuditLogsView';
 import { AwardsCatalogView } from './components/awards/AwardsCatalogView';
 import { LoginScreen } from './components/auth/LoginScreen';
 import { NomineeSignupScreen } from './components/auth/NomineeSignupScreen';
+import { ToastHost } from './components/common/ToastHost';
+import { showToast } from './lib/toast';
 
 const DESKTOP_BREAKPOINT = 1024;
 const SIDEBAR_STORAGE_KEY = 'praise-sidebar-open';
+const ACTIVE_VIEW_STORAGE_PREFIX = 'praise-active-view';
+
+const ROLE_TABS: Record<UserProfile['role'], ReadonlySet<string>> = {
+  ADMINISTRATOR: new Set([
+    'dashboard',
+    'secretariat-workbench',
+    'new-nomination',
+    'all-applications',
+    'verification',
+    'deliberation',
+    'awards-management',
+    'offices-management',
+    'users-management',
+    'reports',
+    'certificate-template',
+    'audit-logs',
+  ]),
+  SECRETARIAT: new Set([
+    'secretariat-workbench',
+    'new-nomination',
+    'all-applications',
+    'verification',
+    'deliberation',
+    'reports',
+    'certificate-template',
+    'audit-logs',
+  ]),
+  HEAD_OF_OFFICE: new Set(['endorsements', 'my-applications', 'new-nomination', 'awards-catalog']),
+  EVALUATOR: new Set(['evaluator-queue', 'awards-catalog']),
+  NOMINEE: new Set(['my-applications', 'new-nomination', 'awards-catalog']),
+};
 
 function getPublicAuthRoute(): 'login' | 'signup' {
   return typeof window !== 'undefined' && window.location.hash === '#/signup' ? 'signup' : 'login';
@@ -43,6 +76,21 @@ function defaultTabForRole(user: UserProfile): string {
   }
 }
 
+function activeViewStorageKey(userId: string): string {
+  return `${ACTIVE_VIEW_STORAGE_PREFIX}:${userId}`;
+}
+
+function getRestoredTab(user: UserProfile): string {
+  if (typeof window === 'undefined') {
+    return defaultTabForRole(user);
+  }
+
+  const savedTab = window.localStorage.getItem(activeViewStorageKey(user.id));
+  return savedTab && ROLE_TABS[user.role].has(savedTab)
+    ? savedTab
+    : defaultTabForRole(user);
+}
+
 export default function App() {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
@@ -53,6 +101,7 @@ export default function App() {
   const [auditLogs, setAuditLogs] = useState<ApplicationHistory[]>([]);
   const [certificateTemplateSettings, setCertificateTemplateSettings] = useState<CertificateTemplateSettings>(DEFAULT_CERTIFICATE_TEMPLATE_SETTINGS);
   const [currentTab, setCurrentTab] = useState<string>('dashboard');
+  const [openNominationFormRequested, setOpenNominationFormRequested] = useState(false);
   const [isDesktopViewport, setIsDesktopViewport] = useState(() => (
     typeof window === 'undefined' ? true : window.innerWidth >= DESKTOP_BREAKPOINT
   ));
@@ -87,7 +136,7 @@ export default function App() {
     pdfGenerator.setCertificateTemplateSettings(nextCertificateTemplateSettings);
     setCurrentUser(user);
     if (user && !preserveTab) {
-      setCurrentTab(defaultTabForRole(user));
+      setCurrentTab(getRestoredTab(user));
     }
   }, []);
 
@@ -145,6 +194,14 @@ export default function App() {
   }, [isDesktopSidebarOpen]);
 
   useEffect(() => {
+    if (!currentUser || typeof window === 'undefined' || !ROLE_TABS[currentUser.role].has(currentTab)) {
+      return;
+    }
+
+    window.localStorage.setItem(activeViewStorageKey(currentUser.id), currentTab);
+  }, [currentTab, currentUser]);
+
+  useEffect(() => {
     let cancelled = false;
 
     const initialize = async () => {
@@ -192,9 +249,9 @@ export default function App() {
     setIsLoading(true);
     setLoginError('');
     try {
-      const user = await praiseService.login(email, password);
+      await praiseService.login(email, password);
+      showToast('Signed in successfully.');
       await bootstrapSession(false);
-      setCurrentTab(defaultTabForRole(user));
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : 'Unable to sign in.');
       throw error;
@@ -207,9 +264,9 @@ export default function App() {
     setIsLoading(true);
     setLoginError('');
     try {
-      const user = await praiseService.registerNominee(fullName, email, password);
+      await praiseService.registerNominee(fullName, email, password);
+      showToast('Nominee account created successfully.');
       await bootstrapSession(false);
-      setCurrentTab(defaultTabForRole(user));
       navigatePublicAuthRoute('login');
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : 'Unable to create the nominee account.');
@@ -223,6 +280,7 @@ export default function App() {
     setIsLoading(true);
     try {
       await praiseService.logout();
+      showToast('Signed out successfully.');
       setUsers([]);
       setApplications([]);
       setAwards([]);
@@ -231,13 +289,16 @@ export default function App() {
       setAuditLogs([]);
       setCertificateTemplateSettings(DEFAULT_CERTIFICATE_TEMPLATE_SETTINGS);
       pdfGenerator.setCertificateTemplateSettings(DEFAULT_CERTIFICATE_TEMPLATE_SETTINGS);
+      if (currentUser && typeof window !== 'undefined') {
+        window.localStorage.removeItem(activeViewStorageKey(currentUser.id));
+      }
       setCurrentUser(null);
       setCurrentTab('dashboard');
       setIsMobileSidebarOpen(false);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [currentUser]);
 
   const handleMarkNotificationRead = useCallback(async (notificationId: string) => {
     await praiseService.markNotificationRead(notificationId);
@@ -253,6 +314,7 @@ export default function App() {
     settings: Omit<CertificateTemplateSettings, 'updated_at'>
   ) => {
     const updatedSettings = await praiseService.updateCertificateTemplateSettings(settings);
+    showToast('Certificate template settings saved.');
     setCertificateTemplateSettings(updatedSettings);
     pdfGenerator.setCertificateTemplateSettings(updatedSettings);
   }, []);
@@ -271,6 +333,11 @@ export default function App() {
       setIsMobileSidebarOpen(false);
     }
   }, [isDesktopViewport]);
+
+  const handleOpenNominationForm = useCallback(() => {
+    setOpenNominationFormRequested(true);
+    setCurrentTab('new-nomination');
+  }, []);
 
   const pendingEndorsementCount = applications.filter(application => {
     const isSameOffice = !currentUser?.office_id || application.office_id === currentUser.office_id;
@@ -322,6 +389,7 @@ export default function App() {
 
   return (
     <div id="praise-app-root" className="min-h-screen bg-slate-50 text-slate-900 flex font-sans">
+      <ToastHost />
       <Sidebar
         currentTab={currentTab}
         onSelectTab={setCurrentTab}
@@ -348,7 +416,13 @@ export default function App() {
           onMarkNotificationRead={handleMarkNotificationRead}
           onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
           onToggleSidebar={handleToggleSidebar}
-          onNavigateToTab={setCurrentTab}
+          onNavigateToTab={tab => {
+            if (tab === 'new-nomination') {
+              handleOpenNominationForm();
+              return;
+            }
+            setCurrentTab(tab);
+          }}
           onLogout={handleLogout}
         />
 
@@ -370,8 +444,16 @@ export default function App() {
                       : 'overview'
               }
               onRefreshData={refreshData}
-              onNavigateToNomination={() => setCurrentTab('new-nomination')}
-              onSelectApplication={() => setCurrentTab('secretariat-workbench')}
+              onNavigateToNomination={handleOpenNominationForm}
+              onSelectAdminSection={section => {
+                const sectionTabs = {
+                  overview: 'dashboard',
+                  awards: 'awards-management',
+                  offices: 'offices-management',
+                  users: 'users-management',
+                } as const;
+                setCurrentTab(sectionTabs[section]);
+              }}
             />
           )}
 
@@ -391,7 +473,7 @@ export default function App() {
               currentUser={currentUser}
               awards={awards}
               onRefreshData={refreshData}
-              onNavigateToNomination={() => setCurrentTab('new-nomination')}
+              onNavigateToNomination={handleOpenNominationForm}
             />
           )}
 
@@ -419,29 +501,26 @@ export default function App() {
               awards={awards}
               currentUser={currentUser}
               onRefreshData={refreshData}
-              onNavigateToNomination={() => setCurrentTab('new-nomination')}
+              onNavigateToNomination={handleOpenNominationForm}
             />
           )}
 
           {currentTab === 'new-nomination' && (
-            <NominationWizard
+            <SubmitNominationView
+              applications={applications}
               awards={awards}
               offices={offices}
               currentUser={currentUser}
-              onNominationComplete={async () => {
-                await refreshData();
-                setCurrentTab(currentUser.role === 'NOMINEE' ? 'my-applications' : defaultTabForRole(currentUser));
-              }}
-              onCancel={() => {
-                setCurrentTab(currentUser.role === 'NOMINEE' ? 'my-applications' : defaultTabForRole(currentUser));
-              }}
+              onRefreshData={refreshData}
+              openFormRequested={openNominationFormRequested}
+              onOpenFormRequestHandled={() => setOpenNominationFormRequested(false)}
             />
           )}
 
           {currentTab === 'awards-catalog' && (
             <AwardsCatalogView
               awards={awards}
-              onSelectAwardForNomination={() => setCurrentTab('new-nomination')}
+              onSelectAwardForNomination={handleOpenNominationForm}
             />
           )}
 

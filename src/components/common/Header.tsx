@@ -62,7 +62,7 @@ export const Header: React.FC<HeaderProps> = ({
       case 'my-applications':
         return { section: 'Portal', page: 'My Nominations' };
       case 'new-nomination':
-        return { section: 'Intake', page: 'New Nomination Form' };
+        return { section: 'Intake', page: 'Submitted Nominations' };
       case 'awards-management':
         return { section: 'Configuration', page: 'Manage Awards & Criteria' };
       case 'offices-management':

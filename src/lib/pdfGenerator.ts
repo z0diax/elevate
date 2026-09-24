@@ -130,6 +130,86 @@ function drawColumnBlock(
   return topY + fitted.totalHeight;
 }
 
+function drawCertificateSignatories(doc: jsPDF, settings: CertificateTemplateSettings, lineY: number): void {
+  const columns = [
+    { centerX: 55, name: settings.left_signatory_name, title: settings.left_signatory_title },
+    { centerX: 148.5, name: settings.center_signatory_name, title: settings.center_signatory_title },
+    { centerX: 242, name: settings.right_signatory_name, title: settings.right_signatory_title },
+  ];
+
+  doc.setDrawColor(148, 163, 184);
+  doc.setLineWidth(0.35);
+
+  columns.forEach(({ centerX, name, title }) => {
+    doc.line(centerX - 28, lineY, centerX + 28, lineY);
+
+    drawColumnBlock(doc, name, centerX, lineY + 4, 62, {
+      fontName: 'helvetica',
+      fontStyle: 'bold',
+      maxHeight: 5,
+      maxFontSize: 9.5,
+      minFontSize: 8,
+      lineHeightFactor: 1.05,
+      maxLines: 1,
+      color: [15, 23, 42],
+    });
+
+    drawColumnBlock(doc, title, centerX, lineY + 8, 68, {
+      fontName: 'helvetica',
+      fontStyle: 'normal',
+      maxHeight: 7,
+      maxFontSize: 7.5,
+      minFontSize: 6.5,
+      lineHeightFactor: 1.1,
+      maxLines: 2,
+      color: [100, 116, 139],
+    });
+  });
+}
+
+function drawFormA1Signatories(doc: jsPDF, settings: CertificateTemplateSettings, app: Application, topY: number): void {
+  const render = (value: string) => renderCertificateTemplateText(value, app);
+  const columns = [
+    { centerX: 44, label: settings.form_a1_prepared_label, name: settings.form_a1_prepared_name, title: settings.form_a1_prepared_title },
+    { centerX: 105, label: settings.form_a1_verified_label, name: settings.form_a1_verified_name, title: settings.form_a1_verified_title },
+    { centerX: 166, label: settings.form_a1_confirmed_label, name: settings.form_a1_confirmed_name, title: settings.form_a1_confirmed_title },
+  ];
+
+  doc.setDrawColor(148, 163, 184);
+  doc.setLineWidth(0.35);
+
+  columns.forEach(({ centerX, label, name, title }) => {
+    drawColumnBlock(doc, render(label), centerX, topY, 56, {
+      fontName: 'helvetica',
+      fontStyle: 'bold',
+      maxHeight: 8,
+      maxFontSize: 8,
+      minFontSize: 6.5,
+      maxLines: 2,
+      color: [71, 85, 105],
+    });
+    doc.line(centerX - 26, topY + 14, centerX + 26, topY + 14);
+    drawColumnBlock(doc, render(name), centerX, topY + 18, 56, {
+      fontName: 'helvetica',
+      fontStyle: 'bold',
+      maxHeight: 5,
+      maxFontSize: 9,
+      minFontSize: 7,
+      maxLines: 1,
+      color: [15, 23, 42],
+    });
+    drawColumnBlock(doc, render(title), centerX, topY + 22, 56, {
+      fontName: 'helvetica',
+      fontStyle: 'normal',
+      maxHeight: 7,
+      maxFontSize: 7.5,
+      minFontSize: 6,
+      maxLines: 2,
+      color: [100, 116, 139],
+    });
+  });
+}
+
 async function loadImageAsPngDataUrl(source: string): Promise<string> {
   const cachedImage = certificateBackgroundImageCache.get(source);
   if (cachedImage) {
@@ -368,56 +448,7 @@ async function buildAwardCertificateDoc(
     { align: 'center' }
   );
 
-  // Signature block
-  const signatureLineY = 186.5;
-  const signatureNameY = 190.5;
-  const signatureTitleY = 194.5;
-  const signatureColumns = [
-    {
-      centerX: 55,
-      name: resolvedTemplateSettings.left_signatory_name,
-      title: resolvedTemplateSettings.left_signatory_title,
-    },
-    {
-      centerX: 148.5,
-      name: resolvedTemplateSettings.center_signatory_name,
-      title: resolvedTemplateSettings.center_signatory_title,
-    },
-    {
-      centerX: 242,
-      name: resolvedTemplateSettings.right_signatory_name,
-      title: resolvedTemplateSettings.right_signatory_title,
-    },
-  ];
-
-  doc.setDrawColor(148, 163, 184);
-  doc.setLineWidth(0.35);
-
-  signatureColumns.forEach(({ centerX, name, title }) => {
-    doc.line(centerX - 28, signatureLineY, centerX + 28, signatureLineY);
-
-    drawColumnBlock(doc, name, centerX, signatureNameY, 62, {
-      fontName: 'helvetica',
-      fontStyle: 'bold',
-      maxHeight: 5,
-      maxFontSize: 9.5,
-      minFontSize: 8,
-      lineHeightFactor: 1.05,
-      maxLines: 1,
-      color: [15, 23, 42],
-    });
-
-    drawColumnBlock(doc, title, centerX, signatureTitleY, 68, {
-      fontName: 'helvetica',
-      fontStyle: 'normal',
-      maxHeight: 7,
-      maxFontSize: 7.5,
-      minFontSize: 6.5,
-      lineHeightFactor: 1.1,
-      maxLines: 2,
-      color: [100, 116, 139],
-    });
-  });
+  drawCertificateSignatories(doc, resolvedTemplateSettings, 186.5);
 
   return doc;
 }
@@ -552,35 +583,24 @@ export const pdfGenerator = {
     let signY = doc.lastAutoTable.finalY + 14;
     if (signY > 250) {
       doc.addPage();
-      signY = 30;
+      doc.setFillColor(30, 58, 138);
+      doc.rect(0, 0, 210, 20, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(255, 255, 255);
+      doc.text('PRAISE NOMINATION SUMMARY DOSSIER', 105, 12, { align: 'center' });
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(71, 85, 105);
+      doc.text(`Official Reference No: ${app.application_number}`, 105, 33, { align: 'center' });
+      signY = 49;
     }
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
     doc.setTextColor(30, 41, 59);
-
-    // Three Signature columns
-    doc.text('PREPARED BY (Nominator):', 14, signY);
-    doc.text('VERIFIED BY (Secretariat):', 80, signY);
-    doc.text('CONFIRMED BY (HRMDO Head):', 145, signY);
-
-    doc.setFont('helvetica', 'normal');
-    doc.text('_____________________________', 14, signY + 14);
-    doc.text(app.nominator_name, 14, signY + 18);
-    doc.setFontSize(8);
-    doc.text(app.nominator_position, 14, signY + 22);
-
-    doc.setFontSize(9);
-    doc.text('_____________________________', 80, signY + 14);
-    doc.text('Atty. Paul Vincent G. Yu', 80, signY + 18);
-    doc.setFontSize(8);
-    doc.text('PRAISE Secretariat Lead', 80, signY + 22);
-
-    doc.setFontSize(9);
-    doc.text('_____________________________', 145, signY + 14);
-    doc.text('Marites S. Bocar', 145, signY + 18);
-    doc.setFontSize(8);
-    doc.text('City Gov Dept Head II, HRMDO', 145, signY + 22);
+    doc.text('SECTION V: OFFICIAL SIGNATORIES', 14, signY);
+    drawFormA1Signatories(doc, activeCertificateTemplateSettings, app, signY + 9);
 
     // Save
     doc.save(`${app.application_number}_Summary_Dossier.pdf`);
@@ -648,30 +668,19 @@ export const pdfGenerator = {
       theme: 'grid'
     });
 
-    // Signoffs
+    // Use the same left, center, and right signatories as the certificate template.
     // @ts-expect-error autoTable adds lastAutoTable to doc
-    const lastY = doc.lastAutoTable.finalY + 12;
-    const finalSignY = lastY > 175 ? 180 : lastY;
-
-    doc.setFontSize(8);
-    doc.setTextColor(30, 41, 59);
+    const tableEndY = doc.lastAutoTable.finalY;
+    let signatureLineY = tableEndY + 18;
+    if (signatureLineY > 187) {
+      doc.addPage();
+      signatureLineY = 48;
+    }
     doc.setFont('helvetica', 'bold');
-    doc.text('PRAISE COMMITTEE CHAIRPERSON:', 20, finalSignY);
-    doc.text('HRMDO HEAD / SECRETARIAT:', 110, finalSignY);
-    doc.text('CITY MAYOR (APPROVED BY):', 200, finalSignY);
-
-    doc.setFont('helvetica', 'normal');
-    doc.text('________________________________', 20, finalSignY + 10);
-    doc.text('ATTY. IRENE V. CHIU', 20, finalSignY + 14);
-    doc.text('City Administrator / PRAISE Chair', 20, finalSignY + 18);
-
-    doc.text('________________________________', 110, finalSignY + 10);
-    doc.text('MARITES S. BOCAR', 110, finalSignY + 14);
-    doc.text('Head, HRMDO Tacloban', 110, finalSignY + 18);
-
-    doc.text('________________________________', 200, finalSignY + 10);
-    doc.text('HON. ALFRED S. ROMUALDEZ', 200, finalSignY + 14);
-    doc.text('City Mayor, Tacloban City', 200, finalSignY + 18);
+    doc.setFontSize(8);
+    doc.setTextColor(71, 85, 105);
+    doc.text('OFFICIAL SIGNATORIES', 148.5, signatureLineY - 9, { align: 'center' });
+    drawCertificateSignatories(doc, activeCertificateTemplateSettings, signatureLineY);
 
     doc.save(`Tacloban_PRAISE_Deliberation_Matrix_${new Date().getFullYear()}.pdf`);
   },

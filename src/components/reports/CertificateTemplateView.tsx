@@ -8,12 +8,12 @@ import { praiseService } from '../../lib/supabase';
 import { Application, Award, CertificateTemplateSettings } from '../../types';
 import {
   ArrowLeft,
+  CheckCircle2,
   FileSignature,
   ImagePlus,
   Printer,
   RotateCcw,
   Save,
-  Sparkles,
   Trash2,
   Type,
   Upload,
@@ -41,6 +41,8 @@ const TEMPLATE_TOKENS = [
   '{award_year}',
   '{application_number}',
   '{weighted_score}',
+  '{nominator_name}',
+  '{nominator_position}',
 ];
 
 const WORKSPACE_TABS: Array<{
@@ -48,10 +50,51 @@ const WORKSPACE_TABS: Array<{
   label: string;
   icon: React.ComponentType<{ size?: number; className?: string }>;
 }> = [
-  { id: 'content', label: 'Message', icon: Type },
-  { id: 'design', label: 'Design', icon: ImagePlus },
+  { id: 'content', label: 'Wording', icon: Type },
+  { id: 'design', label: 'Background', icon: ImagePlus },
   { id: 'signatories', label: 'Signatories', icon: Users },
 ];
+
+const CERTIFICATE_SIGNERS = [
+  { position: 'Left', nameKey: 'left_signatory_name', titleKey: 'left_signatory_title' },
+  { position: 'Center', nameKey: 'center_signatory_name', titleKey: 'center_signatory_title' },
+  { position: 'Right', nameKey: 'right_signatory_name', titleKey: 'right_signatory_title' },
+] as const;
+
+const FORM_A1_SIGNERS = [
+  { position: 'Prepared by', labelKey: 'form_a1_prepared_label', nameKey: 'form_a1_prepared_name', titleKey: 'form_a1_prepared_title' },
+  { position: 'Verified by', labelKey: 'form_a1_verified_label', nameKey: 'form_a1_verified_name', titleKey: 'form_a1_verified_title' },
+  { position: 'Confirmed by', labelKey: 'form_a1_confirmed_label', nameKey: 'form_a1_confirmed_name', titleKey: 'form_a1_confirmed_title' },
+] as const;
+
+const SAMPLE_PREVIEW_APPLICATION: Application = {
+  id: 'certificate-preview-sample',
+  application_number: 'SAMPLE-PREVIEW',
+  award_id: '',
+  award_name: 'Service Excellence Award',
+  award_year: new Date().getFullYear(),
+  nominee_name: 'Sample Recipient',
+  position_title: 'Public Service Employee',
+  office_id: '',
+  office_name: 'City Government of Tacloban',
+  employment_category: 'Permanent',
+  contact_number: '',
+  email: '',
+  nomination_type: 'Individual',
+  nominator_id: '',
+  nominator_name: 'Sample Nominator',
+  nominator_position: 'Nominating Officer',
+  nominating_office: 'City Government of Tacloban',
+  justification: '',
+  accomplishments: '',
+  supporting_narrative: '',
+  date_of_nomination: new Date().toISOString().slice(0, 10),
+  status: 'Awarded',
+  processing_stage: 'Awarded',
+  final_weighted_score: 95,
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+};
 
 function toEditableTemplate(settings: CertificateTemplateSettings): EditableCertificateTemplate {
   return {
@@ -63,6 +106,15 @@ function toEditableTemplate(settings: CertificateTemplateSettings): EditableCert
     center_signatory_title: settings.center_signatory_title,
     right_signatory_name: settings.right_signatory_name,
     right_signatory_title: settings.right_signatory_title,
+    form_a1_prepared_label: settings.form_a1_prepared_label,
+    form_a1_prepared_name: settings.form_a1_prepared_name,
+    form_a1_prepared_title: settings.form_a1_prepared_title,
+    form_a1_verified_label: settings.form_a1_verified_label,
+    form_a1_verified_name: settings.form_a1_verified_name,
+    form_a1_verified_title: settings.form_a1_verified_title,
+    form_a1_confirmed_label: settings.form_a1_confirmed_label,
+    form_a1_confirmed_name: settings.form_a1_confirmed_name,
+    form_a1_confirmed_title: settings.form_a1_confirmed_title,
     background_image_url: settings.background_image_url || '',
   };
 }
@@ -77,22 +129,16 @@ const requiredTemplateFields: Array<Exclude<keyof EditableCertificateTemplate, '
   'center_signatory_title',
   'right_signatory_name',
   'right_signatory_title',
+  'form_a1_prepared_label',
+  'form_a1_prepared_name',
+  'form_a1_prepared_title',
+  'form_a1_verified_label',
+  'form_a1_verified_name',
+  'form_a1_verified_title',
+  'form_a1_confirmed_label',
+  'form_a1_confirmed_name',
+  'form_a1_confirmed_title',
 ];
-
-function RibbonGroup({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="min-w-0 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-xs">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</p>
-      <div className="mt-3">{children}</div>
-    </div>
-  );
-}
 
 export const CertificateTemplateView: React.FC<CertificateTemplateViewProps> = ({
   applications,
@@ -115,9 +161,6 @@ export const CertificateTemplateView: React.FC<CertificateTemplateViewProps> = (
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const [previewLoadError, setPreviewLoadError] = useState('');
   const backgroundFileInputRef = useRef<HTMLInputElement | null>(null);
-  const citationSectionRef = useRef<HTMLDivElement | null>(null);
-  const confermentSectionRef = useRef<HTMLDivElement | null>(null);
-  const signatoriesSectionRef = useRef<HTMLDivElement | null>(null);
 
   const savedTemplate = useMemo(
     () => toEditableTemplate(certificateTemplateSettings),
@@ -156,7 +199,7 @@ export const CertificateTemplateView: React.FC<CertificateTemplateViewProps> = (
 
   const previewApplication = applications.find(application => application.id === selectedPreviewApplicationId)
     || latestAwardedApp
-    || applications[0];
+    || SAMPLE_PREVIEW_APPLICATION;
   const previewAward = useMemo(
     () => awards.find(award => award.id === previewApplication?.award_id),
     [awards, previewApplication]
@@ -174,7 +217,6 @@ export const CertificateTemplateView: React.FC<CertificateTemplateViewProps> = (
     .some(key => templateForm[key] !== savedTemplate[key]);
   const hasPendingBackgroundUpload = Boolean(pendingBackgroundFile);
   const isTemplateValid = requiredTemplateFields.every(field => templateForm[field].trim() !== '');
-  const activeFieldLabel = activeTokenField === 'citation_text' ? 'Citation' : 'Conferment';
   const templateUpdatedLabel = certificateTemplateSettings.updated_at
     ? new Date(certificateTemplateSettings.updated_at).toLocaleString('en-PH', {
         month: 'short',
@@ -184,10 +226,6 @@ export const CertificateTemplateView: React.FC<CertificateTemplateViewProps> = (
         minute: '2-digit',
       })
     : 'Default template';
-  const previewCanvasStyle = {
-    width: 'min(100%, calc((100vh - 19rem) * 1.4142857))',
-  } as const;
-
   useEffect(() => (
     () => {
       if (previewPdfUrl) {
@@ -248,20 +286,6 @@ export const CertificateTemplateView: React.FC<CertificateTemplateViewProps> = (
     }));
     setTemplateNotice('');
     setTemplateError('');
-  };
-
-  const scrollToEditorSection = (
-    targetRef: React.RefObject<HTMLDivElement | null>,
-    field?: TokenTargetField,
-  ) => {
-    if (field) {
-      setActiveTokenField(field);
-    }
-
-    targetRef.current?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'start',
-    });
   };
 
   const handleInsertToken = (token: string) => {
@@ -384,554 +408,346 @@ export const CertificateTemplateView: React.FC<CertificateTemplateViewProps> = (
     }
   };
 
-  const renderRibbonPanel = () => {
-    if (activeWorkspaceTab === 'content') {
-      return (
-        <div className="grid gap-4 xl:grid-cols-[220px_minmax(0,1fr)_320px]">
-          <RibbonGroup label="Insert Target">
-            <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1 text-xs font-semibold">
-              <button
-                type="button"
-                onClick={() => scrollToEditorSection(citationSectionRef, 'citation_text')}
-                className={`rounded-lg px-3 py-2 transition-colors ${
-                  activeTokenField === 'citation_text'
-                    ? 'bg-slate-900 text-white shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Citation
-              </button>
-              <button
-                type="button"
-                onClick={() => scrollToEditorSection(confermentSectionRef, 'conferment_text')}
-                className={`rounded-lg px-3 py-2 transition-colors ${
-                  activeTokenField === 'conferment_text'
-                    ? 'bg-slate-900 text-white shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Conferment
-              </button>
+  return (
+    <div id="certificate-template-view-container" className="space-y-5 pb-8">
+      <header className="rounded-2xl border border-slate-200 bg-white px-5 py-5 shadow-sm sm:px-7">
+        <div className="flex flex-wrap items-start justify-between gap-5">
+          <div className="min-w-0">
+            <button
+              type="button"
+              onClick={onNavigateBack}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-blue-700"
+            >
+              <ArrowLeft size={14} />
+              Back to Reports
+            </button>
+            <div className="mt-4 flex items-center gap-3">
+              <span className="flex size-10 items-center justify-center rounded-xl bg-blue-50 text-blue-700 ring-1 ring-blue-100">
+                <FileSignature size={19} />
+              </span>
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.17em] text-blue-700">Reports & certificates</p>
+                <h1 className="text-xl font-bold tracking-tight text-slate-950 sm:text-2xl">Certificate editor</h1>
+              </div>
             </div>
-            <p className="mt-3 text-xs text-slate-500">
-              Current target: <span className="font-semibold text-slate-800">{activeFieldLabel}</span>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
+              Set the wording, artwork, and signatories used by new certificate PDFs. Form A-1 and the deliberation matrix use the signatories configured here too.
             </p>
-          </RibbonGroup>
+          </div>
 
-          <RibbonGroup label="Message Tokens">
-            <div className="flex flex-wrap gap-2">
-              {TEMPLATE_TOKENS.map(token => (
-                <button
-                  key={token}
-                  type="button"
-                  onClick={() => handleInsertToken(token)}
-                  className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-semibold text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-100"
-                >
-                  {token}
-                </button>
-              ))}
+          <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${
+              hasPendingBackgroundUpload
+                ? 'bg-amber-50 text-amber-800 ring-1 ring-amber-200'
+                : hasUnsavedTemplateChanges
+                  ? 'bg-blue-50 text-blue-800 ring-1 ring-blue-200'
+                  : 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200'
+            }`}>
+              {!hasPendingBackgroundUpload && !hasUnsavedTemplateChanges && <CheckCircle2 size={13} />}
+              {hasPendingBackgroundUpload ? 'Upload image to continue' : hasUnsavedTemplateChanges ? 'Unsaved changes' : 'All changes saved'}
+            </span>
+            <p className="text-[11px] text-slate-500">Last saved: {templateUpdatedLabel}</p>
+            <button
+              type="button"
+              onClick={handleSaveTemplate}
+              disabled={isSavingTemplate || isUploadingBackground || hasPendingBackgroundUpload || !hasUnsavedTemplateChanges || !isTemplateValid}
+              className="mt-1 inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Save size={15} />
+              {isSavingTemplate ? 'Saving...' : 'Save template'}
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-4">
+          <span className="mr-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">Edit actions</span>
+          <button
+            type="button"
+            onClick={resetEditorToSaved}
+            disabled={!hasUnsavedTemplateChanges && !hasPendingBackgroundUpload}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <RotateCcw size={13} />
+            Discard edits
+          </button>
+          <button
+            type="button"
+            onClick={restoreTemplateDefaults}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            <RotateCcw size={13} />
+            Use default settings
+          </button>
+          <span className="text-xs text-slate-500">Default settings appear in the preview until you save them.</span>
+        </div>
+      </header>
+
+      {(templateNotice || templateError) && (
+        <div
+          role={templateError ? 'alert' : 'status'}
+          className={`rounded-xl border px-4 py-3 text-sm ${
+            templateError ? 'border-red-200 bg-red-50 text-red-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'
+          }`}
+        >
+          {templateError || templateNotice}
+        </div>
+      )}
+
+      <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.04fr)_minmax(0,1fr)] xl:items-start">
+        <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" aria-label="Template settings">
+          <div className="border-b border-slate-200 px-5 pt-5 sm:px-6">
+            <h2 className="text-base font-bold text-slate-900">Template settings</h2>
+            <p className="mt-1 text-xs leading-5 text-slate-500">Choose a section, make your changes, and check the PDF preview alongside it.</p>
+            <div className="mt-5 flex gap-1 overflow-x-auto" role="tablist" aria-label="Certificate settings">
+              {WORKSPACE_TABS.map(tab => {
+                const Icon = tab.icon;
+                const selected = activeWorkspaceTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    id={`certificate-tab-${tab.id}`}
+                    type="button"
+                    role="tab"
+                    aria-selected={selected}
+                    aria-controls="certificate-editor-panel"
+                    onClick={() => setActiveWorkspaceTab(tab.id)}
+                    className={`inline-flex shrink-0 items-center gap-2 border-b-2 px-4 py-3 text-sm font-semibold ${
+                      selected ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    <Icon size={15} />
+                    {tab.label}
+                  </button>
+                );
+              })}
             </div>
-          </RibbonGroup>
+          </div>
 
-          <RibbonGroup label="Preview Record">
+          <div id="certificate-editor-panel" role="tabpanel" aria-labelledby={`certificate-tab-${activeWorkspaceTab}`} tabIndex={0} className="min-h-[520px] space-y-5 p-5 sm:p-6">
+            {activeWorkspaceTab === 'content' && (
+              <>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Certificate message</h3>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">Write the recognition paragraph and the closing line. Placeholders insert details from the selected nomination.</p>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+                  <label htmlFor="certificate-citation" className="block text-sm font-bold text-slate-900">Recognition citation</label>
+                  <p className="mt-1 text-xs text-slate-500">Appears beneath the recipient's name and office.</p>
+                  <textarea
+                    id="certificate-citation"
+                    rows={5}
+                    value={templateForm.citation_text}
+                    onFocus={() => setActiveTokenField('citation_text')}
+                    onChange={event => handleTemplateFieldChange('citation_text', event.target.value)}
+                    className="mt-3 w-full resize-y rounded-lg border border-slate-300 bg-white px-3 py-3 text-sm leading-6 text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+                  <label htmlFor="certificate-conferment" className="block text-sm font-bold text-slate-900">Conferment line</label>
+                  <p className="mt-1 text-xs text-slate-500">Appears below the award title, before the signatories.</p>
+                  <textarea
+                    id="certificate-conferment"
+                    rows={3}
+                    value={templateForm.conferment_text}
+                    onFocus={() => setActiveTokenField('conferment_text')}
+                    onChange={event => handleTemplateFieldChange('conferment_text', event.target.value)}
+                    className="mt-3 w-full resize-y rounded-lg border border-slate-300 bg-white px-3 py-3 text-sm leading-6 text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-900">Insert nomination detail</h4>
+                      <p className="mt-1 text-xs text-slate-600">Choose the field that should receive a placeholder.</p>
+                    </div>
+                    <div className="inline-flex rounded-lg border border-blue-200 bg-white p-1 text-xs font-semibold">
+                      <button type="button" onClick={() => setActiveTokenField('citation_text')} className={`rounded-md px-2.5 py-1.5 ${activeTokenField === 'citation_text' ? 'bg-blue-600 text-white' : 'text-slate-600'}`}>Citation</button>
+                      <button type="button" onClick={() => setActiveTokenField('conferment_text')} className={`rounded-md px-2.5 py-1.5 ${activeTokenField === 'conferment_text' ? 'bg-blue-600 text-white' : 'text-slate-600'}`}>Conferment</button>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {TEMPLATE_TOKENS.map(token => (
+                      <button key={token} type="button" onClick={() => handleInsertToken(token)} className="rounded-md border border-blue-200 bg-white px-2.5 py-1.5 font-mono text-[11px] text-blue-800 hover:bg-blue-100">
+                        {token}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {activeWorkspaceTab === 'design' && (
+              <>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Certificate appearance</h3>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">The default certificate has a clean border. Add artwork only if the text remains easy to read.</p>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 sm:p-5">
+                  <h4 className="text-sm font-bold text-slate-900">Background artwork</h4>
+                  <p className="mt-1 text-xs text-slate-500">Use a landscape JPG, PNG, or WEBP image with open space for the recipient and signatures.</p>
+                  <div className="mt-4 grid gap-4 sm:grid-cols-[180px_minmax(0,1fr)]">
+                    <div className="flex aspect-[1.414/1] items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-white">
+                      {previewBackgroundImage
+                        ? <img src={previewBackgroundImage} alt="Selected certificate background" className="h-full w-full object-cover" />
+                        : <div className="text-center text-slate-400"><ImagePlus size={28} className="mx-auto" /><span className="mt-2 block text-xs">Default border</span></div>}
+                    </div>
+                    <div className="min-w-0 space-y-3">
+                      <p className="break-words text-xs leading-5 text-slate-600">
+                        {pendingBackgroundFile
+                          ? `Selected: ${pendingBackgroundFile.name}. Upload this image before saving.`
+                          : previewBackgroundImage
+                            ? 'A custom background is selected. The live preview shows how it will appear.'
+                            : 'No custom image is selected. The standard certificate design is active.'}
+                      </p>
+                      <input ref={backgroundFileInputRef} id="certificate-background-upload" type="file" accept=".png,.jpg,.jpeg,.webp" onChange={handleSelectBackgroundFile} className="sr-only" />
+                      <div className="flex flex-wrap gap-2">
+                        <label htmlFor="certificate-background-upload" className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                          <ImagePlus size={14} /> {pendingBackgroundFile ? 'Change image' : 'Choose image'}
+                        </label>
+                        <button type="button" onClick={handleUploadBackground} disabled={!pendingBackgroundFile || isUploadingBackground} className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50">
+                          <Upload size={14} /> {isUploadingBackground ? 'Uploading...' : 'Upload image'}
+                        </button>
+                        <button type="button" onClick={handleRemoveBackground} disabled={!previewBackgroundImage && !pendingBackgroundFile} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50">
+                          <Trash2 size={14} /> Remove
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-900">
+                  Background changes take two steps: upload the selected image, then save the template. The PDF preview reflects your current selection before either step is complete.
+                </div>
+              </>
+            )}
+
+            {activeWorkspaceTab === 'signatories' && (
+              <>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Certificate signatories</h3>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">These names and titles appear left to right on certificates and deliberation matrix PDFs.</p>
+                </div>
+
+                <div className="space-y-3">
+                  {CERTIFICATE_SIGNERS.map((signer, index) => (
+                    <div key={signer.position} className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+                      <div className="mb-3 flex items-center gap-2">
+                        <span className="flex size-6 items-center justify-center rounded-full bg-blue-100 text-[11px] font-bold text-blue-700">{index + 1}</span>
+                        <h4 className="text-sm font-bold text-slate-900">{signer.position} signatory</h4>
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div>
+                          <label htmlFor={signer.nameKey} className="block text-xs font-semibold text-slate-600">Full name</label>
+                          <input id={signer.nameKey} type="text" value={templateForm[signer.nameKey]} onChange={event => handleTemplateFieldChange(signer.nameKey, event.target.value)} className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500" />
+                        </div>
+                        <div>
+                          <label htmlFor={signer.titleKey} className="block text-xs font-semibold text-slate-600">Position or title</label>
+                          <input id={signer.titleKey} type="text" value={templateForm[signer.titleKey]} onChange={event => handleTemplateFieldChange(signer.titleKey, event.target.value)} className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500" />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="border-t border-slate-200 pt-5">
+                  <h3 className="text-base font-bold text-slate-900">Form A-1 signatories</h3>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">These fields appear in the nomination summary dossier. They can differ from the certificate signatories.</p>
+                </div>
+                <div className="space-y-3">
+                  {FORM_A1_SIGNERS.map((signer, index) => (
+                    <div key={signer.position} className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+                      <div className="mb-3 flex items-center gap-2">
+                        <span className="flex size-6 items-center justify-center rounded-full bg-slate-200 text-[11px] font-bold text-slate-700">{index + 1}</span>
+                        <h4 className="text-sm font-bold text-slate-900">{signer.position}</h4>
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="sm:col-span-2">
+                          <label htmlFor={signer.labelKey} className="block text-xs font-semibold text-slate-600">Heading on PDF</label>
+                          <input id={signer.labelKey} type="text" value={templateForm[signer.labelKey]} onChange={event => handleTemplateFieldChange(signer.labelKey, event.target.value)} className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500" />
+                        </div>
+                        <div>
+                          <label htmlFor={signer.nameKey} className="block text-xs font-semibold text-slate-600">Full name</label>
+                          <input id={signer.nameKey} type="text" value={templateForm[signer.nameKey]} onChange={event => handleTemplateFieldChange(signer.nameKey, event.target.value)} className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500" />
+                        </div>
+                        <div>
+                          <label htmlFor={signer.titleKey} className="block text-xs font-semibold text-slate-600">Position or title</label>
+                          <input id={signer.titleKey} type="text" value={templateForm[signer.titleKey]} onChange={event => handleTemplateFieldChange(signer.titleKey, event.target.value)} className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500" />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <p className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-900">
+                  Use <code className="rounded bg-white px-1 py-0.5">{'{nominator_name}'}</code> and <code className="rounded bg-white px-1 py-0.5">{'{nominator_position}'}</code> to fill in the nominator's details automatically.
+                </p>
+              </>
+            )}
+
+            {!isTemplateValid && <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">Complete every wording and signatory field before saving.</p>}
+          </div>
+        </section>
+
+        <section className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50 p-4 shadow-sm sm:p-5 xl:sticky xl:top-5" aria-label="Certificate preview">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.17em] text-blue-700">Live PDF preview</p>
+              <h2 className="mt-1 text-base font-bold text-slate-900">Review the certificate</h2>
+              <p className="mt-1 text-xs text-slate-500">The preview reflects your current edits before you save.</p>
+            </div>
+            <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600">Landscape A4</span>
+          </div>
+
+          <div className="mt-4">
+            <label htmlFor="certificate-preview-record" className="block text-xs font-bold text-slate-700">Preview with nomination</label>
             <select
+              id="certificate-preview-record"
               value={selectedPreviewApplicationId}
               onChange={event => setSelectedPreviewApplicationId(event.target.value)}
-              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+              disabled={!applications.length}
+              className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
             >
+              {!applications.length && <option value="">Sample certificate (preview only)</option>}
               {applications.map(application => (
                 <option key={application.id} value={application.id}>
                   {application.nominee_name} - {application.award_name || 'Tacloban PRAISE Award'}
                 </option>
               ))}
             </select>
-            <p className="mt-3 text-xs text-slate-500">Last saved: <span className="font-medium text-slate-700">{templateUpdatedLabel}</span></p>
-          </RibbonGroup>
-        </div>
-      );
-    }
+          </div>
 
-    if (activeWorkspaceTab === 'design') {
-      return (
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-          <RibbonGroup label="Background Artwork">
-            <div className="flex flex-wrap items-center gap-2">
-              <label
-                htmlFor="certificate-background-upload"
-                className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-              >
-                <ImagePlus size={13} />
-                <span>{pendingBackgroundFile ? 'Change Image' : 'Choose Image'}</span>
-              </label>
-              <input
-                ref={backgroundFileInputRef}
-                id="certificate-background-upload"
-                type="file"
-                accept=".png,.jpg,.jpeg,.webp"
-                onChange={handleSelectBackgroundFile}
-                className="hidden"
-              />
-              <button
-                type="button"
-                onClick={handleUploadBackground}
-                disabled={!pendingBackgroundFile || isUploadingBackground}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Upload size={13} />
-                <span>{isUploadingBackground ? 'Uploading...' : 'Upload'}</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleRemoveBackground}
-                disabled={!previewBackgroundImage && !pendingBackgroundFile}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Trash2 size={13} />
-                <span>Remove</span>
-              </button>
+          <div className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white p-2 shadow-sm sm:p-3">
+            <div className="relative aspect-[1.414/1] w-full overflow-hidden rounded-lg bg-white">
+              {previewPdfUrl && !previewLoadError && (
+                <iframe key={previewPdfUrl} title="Certificate PDF preview" src={`${previewPdfUrl}#toolbar=0&navpanes=0&scrollbar=0&zoom=page-fit&pagemode=none`} className="h-full w-full border-0 bg-white" />
+              )}
+              {isPreviewLoading && <div className="absolute inset-0 flex items-center justify-center bg-white/90 px-4 text-center text-sm text-slate-600">Rendering certificate preview...</div>}
+              {previewLoadError && !isPreviewLoading && <div className="absolute inset-0 flex items-center justify-center bg-white px-4 text-center text-sm text-red-700">{previewLoadError}</div>}
+              {!previewPdfUrl && !isPreviewLoading && !previewLoadError && <div className="absolute inset-0 flex items-center justify-center bg-white px-4 text-center text-sm text-slate-500">Select a nomination to preview the certificate.</div>}
             </div>
-            <p className="mt-3 text-xs text-slate-500">
-              Use a landscape certificate image with enough quiet space for the title, recipient, and signatures.
-            </p>
-          </RibbonGroup>
+          </div>
 
-          <RibbonGroup label="Background Status">
-            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
-              {pendingBackgroundFile
-                ? `Selected image: ${pendingBackgroundFile.name}. Upload it before saving the template.`
-                : previewBackgroundImage
-                  ? 'Custom certificate background is active in the preview and will be used in generated PDFs after saving.'
-                  : 'No custom background image is set. The certificate is using the standard clean layout.'}
-            </div>
-          </RibbonGroup>
-        </div>
-      );
-    }
-
-    return (
-      <div className="grid gap-4 xl:grid-cols-3">
-        {[
-          {
-            title: 'Left Signatory',
-            name: templateForm.left_signatory_name,
-            role: templateForm.left_signatory_title,
-          },
-          {
-            title: 'Center Signatory',
-            name: templateForm.center_signatory_name,
-            role: templateForm.center_signatory_title,
-          },
-          {
-            title: 'Right Signatory',
-            name: templateForm.right_signatory_name,
-            role: templateForm.right_signatory_title,
-          },
-        ].map(signatory => (
+          <p className="mt-3 text-xs text-slate-500">
+            {applications.length
+              ? `Showing ${previewApplication.application_number} for ${previewApplication.nominee_name}.`
+              : 'Showing sample recipient details until a nomination is available.'}
+          </p>
           <button
-            key={signatory.title}
             type="button"
-            onClick={() => scrollToEditorSection(signatoriesSectionRef)}
-            className="rounded-2xl border border-slate-200 bg-white px-4 py-4 text-left shadow-xs transition-colors hover:border-slate-400 hover:bg-slate-50"
+            onClick={() => {
+              if (!previewApplication) return;
+              void pdfGenerator.generateAwardCertificate(previewApplication, previewAward, previewTemplateSettings);
+            }}
+            disabled={!previewApplication || isPreviewLoading || Boolean(previewLoadError)}
+            className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">{signatory.title}</p>
-            <p className="mt-3 text-sm font-semibold text-slate-900">{signatory.name}</p>
-            <p className="mt-1 text-xs text-slate-500">{signatory.role}</p>
+            <Printer size={15} /> Download preview PDF
           </button>
-        ))}
-      </div>
-    );
-  };
-
-  return (
-    <div id="certificate-template-view-container" className="space-y-6">
-      <div className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-xs">
-        <div className="border-b border-slate-200 bg-slate-950 px-6 py-5 text-white">
-          <div className="flex flex-col gap-4 2xl:flex-row 2xl:items-center 2xl:justify-between">
-            <div>
-              <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-200">
-                <Sparkles size={12} />
-                <span>Certificate Template</span>
-              </div>
-              <h2 className="mt-3 text-2xl font-bold">Certificate Editor Workspace</h2>
-              <p className="mt-1 max-w-3xl text-sm text-slate-300">
-                Edit certificate content, background artwork, and signatories in a cleaner document-style workspace.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                onClick={onNavigateBack}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold text-white hover:bg-white/10"
-              >
-                <ArrowLeft size={14} />
-                <span>Back to Reports</span>
-              </button>
-              <button
-                type="button"
-                onClick={resetEditorToSaved}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold text-white hover:bg-white/10"
-              >
-                <RotateCcw size={14} />
-                <span>Reset</span>
-              </button>
-              <button
-                type="button"
-                onClick={restoreTemplateDefaults}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold text-white hover:bg-white/10"
-              >
-                <RotateCcw size={14} />
-                <span>Defaults</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (!previewApplication) {
-                    return;
-                  }
-                  void pdfGenerator.generateAwardCertificate(
-                    previewApplication,
-                    awards.find(award => award.id === previewApplication.award_id),
-                    previewTemplateSettings
-                  );
-                }}
-                disabled={!previewApplication}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-400 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Printer size={14} />
-                <span>Preview PDF</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveTemplate}
-                disabled={isSavingTemplate || isUploadingBackground || hasPendingBackgroundUpload || !hasUnsavedTemplateChanges || !isTemplateValid}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-xs font-bold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Save size={14} />
-                <span>{isSavingTemplate ? 'Saving...' : 'Save Template'}</span>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className="border-b border-slate-200 bg-white">
-          <div className="flex items-end gap-6 overflow-x-auto px-6 pt-4">
-            {WORKSPACE_TABS.map(tab => {
-              const TabIcon = tab.icon;
-              const isActive = activeWorkspaceTab === tab.id;
-
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveWorkspaceTab(tab.id)}
-                  className={`inline-flex shrink-0 items-center gap-2 border-b-2 px-1 pb-3 text-sm font-semibold transition-colors ${
-                    isActive
-                      ? 'border-slate-900 text-slate-950'
-                      : 'border-transparent text-slate-500 hover:text-slate-800'
-                  }`}
-                >
-                  <TabIcon size={14} />
-                  <span>{tab.label}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="border-t border-slate-200 bg-slate-50 px-6 py-4">
-            {renderRibbonPanel()}
-          </div>
-        </div>
-
-        {(templateNotice || templateError) && (
-          <div className={`border-b px-6 py-3 text-sm ${
-            templateError
-              ? 'border-red-200 bg-red-50 text-red-700'
-              : 'border-emerald-200 bg-emerald-50 text-emerald-700'
-          }`}>
-            {templateError || templateNotice}
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 xl:grid-cols-[380px_minmax(0,1fr)]">
-          <aside className="border-r-0 border-slate-200 bg-white xl:border-r">
-            <div className="border-b border-slate-200 px-5 py-5">
-              <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                <Type size={12} />
-                <span>Editor</span>
-              </div>
-              <h3 className="mt-2 text-lg font-bold text-slate-900">Certificate Content</h3>
-              <p className="mt-1 text-sm text-slate-500">
-                Keep the wording precise and formal. Use the section shortcuts below to jump to the active block.
-              </p>
-
-              <div className="mt-4 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => scrollToEditorSection(citationSectionRef, 'citation_text')}
-                  className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
-                >
-                  Citation
-                </button>
-                <button
-                  type="button"
-                  onClick={() => scrollToEditorSection(confermentSectionRef, 'conferment_text')}
-                  className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
-                >
-                  Conferment
-                </button>
-                <button
-                  type="button"
-                  onClick={() => scrollToEditorSection(signatoriesSectionRef)}
-                  className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
-                >
-                  Signatories
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-5 p-5">
-              <div
-                ref={citationSectionRef}
-                className={`rounded-2xl border ${
-                  activeTokenField === 'citation_text'
-                    ? 'border-blue-300 bg-blue-50/30'
-                    : 'border-slate-200 bg-slate-50/50'
-                }`}
-              >
-                <div className="border-b border-slate-200 px-4 py-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Message Block</p>
-                      <h4 className="mt-2 text-base font-bold text-slate-900">Certificate Citation</h4>
-                      <p className="mt-1 text-sm text-slate-500">
-                        Main recognition paragraph shown before the award title.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTokenField('citation_text')}
-                      className={`rounded-full px-3 py-1 text-[11px] font-semibold ${
-                        activeTokenField === 'citation_text'
-                          ? 'bg-slate-900 text-white'
-                          : 'bg-white text-slate-600 border border-slate-200'
-                      }`}
-                    >
-                      Active
-                    </button>
-                  </div>
-                </div>
-
-                <div className="p-4">
-                  <textarea
-                    rows={10}
-                    value={templateForm.citation_text}
-                    onFocus={() => setActiveTokenField('citation_text')}
-                    onChange={event => handleTemplateFieldChange('citation_text', event.target.value)}
-                    className="min-h-[250px] w-full rounded-xl border border-slate-200 bg-white px-4 py-4 text-sm leading-8 text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-              </div>
-
-              <div
-                ref={confermentSectionRef}
-                className={`rounded-2xl border ${
-                  activeTokenField === 'conferment_text'
-                    ? 'border-blue-300 bg-blue-50/30'
-                    : 'border-slate-200 bg-slate-50/50'
-                }`}
-              >
-                <div className="border-b border-slate-200 px-4 py-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Closing Block</p>
-                      <h4 className="mt-2 text-base font-bold text-slate-900">Conferment Line</h4>
-                      <p className="mt-1 text-sm text-slate-500">
-                        Closing statement shown below the award and above the reference details.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTokenField('conferment_text')}
-                      className={`rounded-full px-3 py-1 text-[11px] font-semibold ${
-                        activeTokenField === 'conferment_text'
-                          ? 'bg-slate-900 text-white'
-                          : 'bg-white text-slate-600 border border-slate-200'
-                      }`}
-                    >
-                      Active
-                    </button>
-                  </div>
-                </div>
-
-                <div className="p-4">
-                  <textarea
-                    rows={7}
-                    value={templateForm.conferment_text}
-                    onFocus={() => setActiveTokenField('conferment_text')}
-                    onChange={event => handleTemplateFieldChange('conferment_text', event.target.value)}
-                    className="min-h-[180px] w-full rounded-xl border border-slate-200 bg-white px-4 py-4 text-sm leading-8 text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-              </div>
-
-              <div
-                ref={signatoriesSectionRef}
-                className="rounded-2xl border border-slate-200 bg-slate-50/50"
-              >
-                <div className="border-b border-slate-200 px-4 py-4">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Signature Block</p>
-                  <h4 className="mt-2 text-base font-bold text-slate-900">Certificate Signatories</h4>
-                </div>
-
-                <div className="space-y-4 p-4">
-                  <div className="rounded-xl border border-slate-200 bg-white p-4">
-                    <h5 className="text-xs font-bold uppercase tracking-wide text-slate-800">Left Signatory</h5>
-                    <div className="mt-3 space-y-3">
-                      <div className="space-y-1.5">
-                        <label className="block text-[11px] font-semibold text-slate-600">Name</label>
-                        <input
-                          type="text"
-                          value={templateForm.left_signatory_name}
-                          onChange={event => handleTemplateFieldChange('left_signatory_name', event.target.value)}
-                          className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <label className="block text-[11px] font-semibold text-slate-600">Title</label>
-                        <input
-                          type="text"
-                          value={templateForm.left_signatory_title}
-                          onChange={event => handleTemplateFieldChange('left_signatory_title', event.target.value)}
-                          className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-slate-200 bg-white p-4">
-                    <h5 className="text-xs font-bold uppercase tracking-wide text-slate-800">Center Signatory</h5>
-                    <div className="mt-3 space-y-3">
-                      <div className="space-y-1.5">
-                        <label className="block text-[11px] font-semibold text-slate-600">Name</label>
-                        <input
-                          type="text"
-                          value={templateForm.center_signatory_name}
-                          onChange={event => handleTemplateFieldChange('center_signatory_name', event.target.value)}
-                          className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <label className="block text-[11px] font-semibold text-slate-600">Title</label>
-                        <input
-                          type="text"
-                          value={templateForm.center_signatory_title}
-                          onChange={event => handleTemplateFieldChange('center_signatory_title', event.target.value)}
-                          className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-slate-200 bg-white p-4">
-                    <h5 className="text-xs font-bold uppercase tracking-wide text-slate-800">Right Signatory</h5>
-                    <div className="mt-3 space-y-3">
-                      <div className="space-y-1.5">
-                        <label className="block text-[11px] font-semibold text-slate-600">Name</label>
-                        <input
-                          type="text"
-                          value={templateForm.right_signatory_name}
-                          onChange={event => handleTemplateFieldChange('right_signatory_name', event.target.value)}
-                          className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <label className="block text-[11px] font-semibold text-slate-600">Title</label>
-                        <input
-                          type="text"
-                          value={templateForm.right_signatory_title}
-                          onChange={event => handleTemplateFieldChange('right_signatory_title', event.target.value)}
-                          className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </aside>
-
-          <section className="bg-[linear-gradient(180deg,_#f8fafc_0%,_#f1f5f9_100%)] p-5 xl:p-7">
-            <div className="mx-auto max-w-[1120px] space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="inline-flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-700">
-                    <FileSignature size={12} />
-                    <span>Live Preview</span>
-                  </div>
-                  <h4 className="mt-1 text-lg font-bold text-slate-900">
-                    {previewApplication ? `${previewApplication.nominee_name} Certificate Preview` : 'Certificate Preview'}
-                  </h4>
-                </div>
-                <div className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-500">
-                  Updates as you type
-                </div>
-              </div>
-
-              <div className="rounded-[26px] border border-slate-200 bg-white p-4 shadow-[0_20px_60px_rgba(15,23,42,0.08)] xl:p-6">
-                <div className="flex justify-center rounded-[24px] bg-slate-100 p-3 xl:p-4">
-                  <div
-                    style={previewCanvasStyle}
-                    className={`relative aspect-[1.414/1] w-full overflow-hidden rounded-[20px] ${
-                      previewBackgroundImage
-                        ? 'border border-slate-200 bg-slate-100'
-                        : 'border-8 border-[#d8aa43] bg-white'
-                    }`}
-                  >
-                    {previewBackgroundImage && (
-                      <>
-                        <div
-                          className="absolute inset-0 bg-cover bg-center"
-                          style={{ backgroundImage: `url(${previewBackgroundImage})` }}
-                        />
-                        <div className="absolute inset-0 bg-white/34" />
-                      </>
-                    )}
-
-                    <div className="relative z-10 h-full rounded-[16px] bg-white">
-                      {previewPdfUrl && !previewLoadError && (
-                        <iframe
-                          key={previewPdfUrl}
-                          title="Certificate PDF Preview"
-                          src={`${previewPdfUrl}#toolbar=0&navpanes=0&scrollbar=0&zoom=page-fit&pagemode=none`}
-                          className="h-full w-full rounded-[16px] border-0 bg-white"
-                        />
-                      )}
-
-                      {isPreviewLoading && (
-                        <div className="absolute inset-0 flex items-center justify-center rounded-[16px] bg-white/88 text-sm font-medium text-slate-500">
-                          Rendering certificate preview...
-                        </div>
-                      )}
-
-                      {previewLoadError && !isPreviewLoading && (
-                        <div className="absolute inset-0 flex items-center justify-center rounded-[16px] bg-white px-6 text-center text-sm text-red-600">
-                          {previewLoadError}
-                        </div>
-                      )}
-
-                      {!previewPdfUrl && !isPreviewLoading && !previewLoadError && (
-                        <div className="absolute inset-0 flex items-center justify-center rounded-[16px] bg-white px-6 text-center text-sm text-slate-500">
-                          Select a preview record to render the certificate.
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-        </div>
+          <p className="mt-2 text-center text-[11px] leading-4 text-slate-500">Save the template to use these changes in future generated PDFs.</p>
+        </section>
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-# Tacloban PRAISE Management System
+# HRMDO PRAISE MANAGEMENT
 
 React frontend plus a PHP/MySQL API for XAMPP deployment.
 

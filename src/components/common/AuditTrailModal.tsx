@@ -119,7 +119,7 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
                     {log.remarks && (
                       <div className="mt-2 text-xs text-slate-700 bg-white p-2.5 rounded-md border border-slate-200">
                         <span className="font-semibold text-slate-900">Remarks: </span>
-                        {log.remarks}
+                        <span className="safe-long-text block whitespace-pre-wrap">{log.remarks}</span>
                       </div>
                     )}
                   </div>

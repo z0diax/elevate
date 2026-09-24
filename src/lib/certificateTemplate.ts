@@ -11,6 +11,15 @@ export const DEFAULT_CERTIFICATE_TEMPLATE_SETTINGS: CertificateTemplateSettings 
   center_signatory_title: 'City Administrator / PRAISE Chairperson',
   right_signatory_name: 'Hon. Alfred S. Romualdez',
   right_signatory_title: 'City Mayor, Tacloban City',
+  form_a1_prepared_label: 'PREPARED BY (Nominator):',
+  form_a1_prepared_name: '{nominator_name}',
+  form_a1_prepared_title: '{nominator_position}',
+  form_a1_verified_label: 'VERIFIED BY (Secretariat):',
+  form_a1_verified_name: 'Atty. Paul Vincent G. Yu',
+  form_a1_verified_title: 'PRAISE Secretariat Lead',
+  form_a1_confirmed_label: 'CONFIRMED BY (HRMDO Head):',
+  form_a1_confirmed_name: 'Marites S. Bocar',
+  form_a1_confirmed_title: 'City Gov Dept Head II, HRMDO',
   background_image_url: '',
 };
 
@@ -26,6 +35,15 @@ export function normalizeCertificateTemplateSettings(
     center_signatory_title: String(settings?.center_signatory_title || DEFAULT_CERTIFICATE_TEMPLATE_SETTINGS.center_signatory_title),
     right_signatory_name: String(settings?.right_signatory_name || DEFAULT_CERTIFICATE_TEMPLATE_SETTINGS.right_signatory_name),
     right_signatory_title: String(settings?.right_signatory_title || DEFAULT_CERTIFICATE_TEMPLATE_SETTINGS.right_signatory_title),
+    form_a1_prepared_label: String(settings?.form_a1_prepared_label || DEFAULT_CERTIFICATE_TEMPLATE_SETTINGS.form_a1_prepared_label),
+    form_a1_prepared_name: String(settings?.form_a1_prepared_name || DEFAULT_CERTIFICATE_TEMPLATE_SETTINGS.form_a1_prepared_name),
+    form_a1_prepared_title: String(settings?.form_a1_prepared_title || DEFAULT_CERTIFICATE_TEMPLATE_SETTINGS.form_a1_prepared_title),
+    form_a1_verified_label: String(settings?.form_a1_verified_label || DEFAULT_CERTIFICATE_TEMPLATE_SETTINGS.form_a1_verified_label),
+    form_a1_verified_name: String(settings?.form_a1_verified_name || DEFAULT_CERTIFICATE_TEMPLATE_SETTINGS.form_a1_verified_name),
+    form_a1_verified_title: String(settings?.form_a1_verified_title || DEFAULT_CERTIFICATE_TEMPLATE_SETTINGS.form_a1_verified_title),
+    form_a1_confirmed_label: String(settings?.form_a1_confirmed_label || DEFAULT_CERTIFICATE_TEMPLATE_SETTINGS.form_a1_confirmed_label),
+    form_a1_confirmed_name: String(settings?.form_a1_confirmed_name || DEFAULT_CERTIFICATE_TEMPLATE_SETTINGS.form_a1_confirmed_name),
+    form_a1_confirmed_title: String(settings?.form_a1_confirmed_title || DEFAULT_CERTIFICATE_TEMPLATE_SETTINGS.form_a1_confirmed_title),
     background_image_url: String(settings?.background_image_url || DEFAULT_CERTIFICATE_TEMPLATE_SETTINGS.background_image_url),
     updated_at: settings?.updated_at ? String(settings.updated_at) : undefined,
   };
@@ -53,6 +71,8 @@ export function renderCertificateTemplateText(template: string, application: App
     award_year: String(application.award_year || new Date().getFullYear()),
     application_number: application.application_number,
     weighted_score: `${application.final_weighted_score || 95}%`,
+    nominator_name: application.nominator_name,
+    nominator_position: application.nominator_position,
   };
 
   return template.replace(/\{([a-z_]+)\}/gi, (_match, token) => replacements[token.toLowerCase()] || '');

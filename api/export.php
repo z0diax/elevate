@@ -5,9 +5,13 @@
 ini_set('display_errors', '0');
 ini_set('log_errors', '1');
 require_once __DIR__ . '/config/database.php';
+require_once __DIR__ . '/config/cors.php';
+require_once __DIR__ . '/config/session_auth.php';
 
 $database = new Database();
 $db = $database->getConnection();
+if (!$db) sendResponse(503, [], 'Database connection failed.');
+require_auth($db, ['ADMINISTRATOR']);
 
 $format = $_GET['format'] ?? 'sql';
 

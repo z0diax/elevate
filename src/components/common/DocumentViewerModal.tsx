@@ -73,12 +73,13 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
   }, [document]);
 
   const fileUrl = document?.file_url || '';
+  const previewUrl = fileUrl ? `${fileUrl}${fileUrl.includes('?') ? '&' : '?'}preview=1` : '';
   const previewMode = useMemo(() => {
     if (!fileUrl) return 'none';
-    if (document?.file_type?.startsWith('image/') || /\.(png|jpe?g|gif|webp)$/i.test(fileUrl)) {
+    if (document?.file_type === 'image/jpeg' || document?.file_type === 'image/png') {
       return 'image';
     }
-    if (document?.file_type === 'application/pdf' || /\.pdf($|\?)/i.test(fileUrl)) {
+    if (document?.file_type === 'application/pdf') {
       return 'pdf';
     }
     return 'download';
@@ -190,7 +191,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
 
               <div className="flex flex-wrap items-center gap-3">
                 <a
-                  href={fileUrl || '#'}
+                  href={(previewMode === 'pdf' || previewMode === 'image' ? previewUrl : fileUrl) || '#'}
                   target="_blank"
                   rel="noreferrer"
                   className={`inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-md shadow-xs transition-colors ${
@@ -221,7 +222,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
             {previewMode === 'image' && (
               <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
                 <img
-                  src={fileUrl}
+                  src={previewUrl}
                   alt={document.document_name}
                   className="max-h-[42dvh] w-full bg-white object-contain sm:max-h-[60vh]"
                 />
@@ -231,7 +232,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
             {previewMode === 'pdf' && (
               <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
                 <iframe
-                  src={fileUrl}
+                  src={previewUrl}
                   title={document.document_name}
                   className="h-[42dvh] w-full sm:h-[60vh]"
                 />

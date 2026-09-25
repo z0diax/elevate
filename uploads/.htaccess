@@ -1,5 +1,8 @@
 Options -Indexes -ExecCGI -Includes
 
+# Legacy application attachments remain readable by PHP, never by HTTP.
+Require all denied
+
 # Uploads are static documents, never server-side programs.
 <IfModule mod_php.c>
     php_flag engine off

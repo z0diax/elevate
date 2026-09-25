@@ -7,6 +7,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/config/cors.php';
 require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/config/session_auth.php';
+require_once __DIR__ . '/config/document_storage.php';
 
 const MAX_DOCUMENT_SIZE = 10 * 1024 * 1024;
 const DOCUMENT_MIME_TYPES = [
@@ -91,10 +92,9 @@ function validate_document_upload(array $file): array {
     return [$extension, $mime, $size];
 }
 
-function delete_replaced_upload(string $url, string $uploadDir): void {
-    if (!preg_match('~^uploads/([A-Za-z0-9_-]+\.(?:pdf|docx|jpe?g|png))$~i', $url, $matches)) return;
-    $path = $uploadDir . $matches[1];
-    if (is_file($path) && !is_link($path) && !unlink($path)) error_log('Unable to remove replaced upload.');
+function delete_replaced_upload(string $reference): void {
+    $path = document_storage_path($reference);
+    if ($path !== null && !unlink($path)) error_log('[documents.php] Unable to remove replaced upload.');
 }
 
 $database = new Database();
@@ -105,6 +105,41 @@ if (!$db) {
 }
 
 $method = $_SERVER['REQUEST_METHOD'];
+
+if ($method === 'GET' && ($_GET['action'] ?? '') === 'download') {
+    $actor = require_auth($db);
+    $id = $_GET['id'] ?? null;
+    if (!is_string($id) || $id === '' || strlen($id) > 64) sendResponse(404, [], 'Document not found.');
+    $stmt = $db->prepare('SELECT id, application_id, document_name, file_url, file_type FROM application_documents WHERE id = :id LIMIT 1');
+    $stmt->execute([':id' => $id]);
+    $document = $stmt->fetch();
+    if (!$document) sendResponse(404, [], 'Document not found.');
+    require_application_access($db, $actor, (string)$document['application_id']);
+    $path = document_storage_path((string)$document['file_url']);
+    if ($path === null) {
+        error_log('[documents.php:download] Missing or invalid storage for document ID ' . $id);
+        sendResponse(404, [], 'Document file not found.');
+    }
+    $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+    $mime = DOCUMENT_MIME_TYPES[$extension] ?? null;
+    if ($mime === null || $mime !== $document['file_type']) sendResponse(404, [], 'Document file not found.');
+    $size = filesize($path);
+    if ($size === false) sendResponse(404, [], 'Document file not found.');
+    $name = preg_replace('/[\\x00-\\x1F\\x7F<>:"\\/\\\\|?*]+/', '_', (string)$document['document_name']);
+    $name = trim((string)$name, " ._");
+    if ($name === '') $name = 'document';
+    if (strtolower(pathinfo($name, PATHINFO_EXTENSION)) !== $extension) $name .= '.' . $extension;
+    $name = substr($name, 0, 180);
+    $preview = ($_GET['preview'] ?? '') === '1' && in_array($mime, ['application/pdf', 'image/jpeg', 'image/png'], true);
+    header('Content-Type: ' . $mime);
+    header('Content-Length: ' . $size);
+    header('Content-Disposition: ' . ($preview ? 'inline' : 'attachment') . '; filename="' . $name . '"');
+    header('X-Content-Type-Options: nosniff');
+    header('Cache-Control: private, no-store');
+    header('Pragma: no-cache');
+    readfile($path);
+    exit();
+}
 
 if ($method === 'POST') {
     $actor = require_auth($db);
@@ -131,7 +166,7 @@ if ($method === 'POST') {
         sendResponse(400, [], 'Invalid document details.');
     }
 
-    $applicationStmt = $db->prepare("SELECT nominator_id, status FROM applications WHERE id = :id LIMIT 1");
+    $applicationStmt = $db->prepare("SELECT nominator_id, status, award_id FROM applications WHERE id = :id LIMIT 1");
     $applicationStmt->execute([':id' => $applicationId]);
     $application = $applicationStmt->fetch();
     if (!$application) {
@@ -143,40 +178,48 @@ if ($method === 'POST') {
     if (!in_array($application['status'], ['Draft', 'Returned for Revision', 'Incomplete'], true)) {
         sendResponse(409, [], 'Attachments can only be uploaded before submission or during a requested revision.');
     }
+    if ($requirementId !== null && $requirementId !== '') {
+        $requirementStmt = $db->prepare('SELECT id FROM award_document_requirements WHERE id = :id AND award_id = :award_id');
+        $requirementStmt->execute([':id' => $requirementId, ':award_id' => $application['award_id']]);
+        if (!$requirementStmt->fetch()) sendResponse(400, [], 'Attachment requirement does not belong to this award.');
+    }
     if ($documentId === '' && $requirementId) {
         $existingStmt = $db->prepare('SELECT * FROM application_documents WHERE application_id = :application_id AND requirement_id = :requirement_id LIMIT 1');
         $existingStmt->execute([':application_id' => $applicationId, ':requirement_id' => $requirementId]);
         $existingDocument = $existingStmt->fetch();
         if ($existingDocument) {
             if ($application['status'] !== 'Draft') {
+                $existingDocument['file_url'] = public_document_url((string)$existingDocument['id']);
                 sendResponse(200, $existingDocument, 'Document was already uploaded.');
             }
             $documentId = $existingDocument['id'];
         }
     }
-    $uploadDir = __DIR__ . '/../uploads/';
-    if (!is_dir($uploadDir)) {
-        if (!mkdir($uploadDir, 0755, true) && !is_dir($uploadDir)) {
-            error_log('[documents.php:upload] Unable to create upload storage directory.');
-            sendResponse(500, [], 'Upload storage is unavailable.');
-        }
+    $uploadDir = prepare_private_document_dir();
+    if ($uploadDir === null) {
+        error_log('[documents.php:upload] Private storage is unavailable or within the web root.');
+        sendResponse(500, [], 'Upload storage is unavailable.');
     }
 
     $safeName = 'doc_' . bin2hex(random_bytes(16)) . '.' . $extension;
     $targetPath = $uploadDir . $safeName;
-    $fileUrl = 'uploads/' . $safeName;
+    $fileUrl = 'private/' . $safeName;
     $documentStatus = $documentId !== '' && $application['status'] !== 'Draft' ? 'For Verification' : 'Submitted';
     $fileMoved = false;
     $oldFileUrl = null;
     try {
         $db->beginTransaction();
         if ($documentId !== '') {
-            $oldStmt = $db->prepare('SELECT file_url FROM application_documents WHERE id = :id AND application_id = :application_id FOR UPDATE');
+            $oldStmt = $db->prepare('SELECT file_url, requirement_id FROM application_documents WHERE id = :id AND application_id = :application_id FOR UPDATE');
             $oldStmt->execute([':id' => $documentId, ':application_id' => $applicationId]);
             $oldDocument = $oldStmt->fetch();
             if (!$oldDocument) {
                 $db->rollBack();
                 sendResponse(404, [], 'Document not found.');
+            }
+            if ($requirementId !== null && $requirementId !== '' && $oldDocument['requirement_id'] !== $requirementId) {
+                $db->rollBack();
+                sendResponse(400, [], 'Document does not belong to that requirement.');
             }
             $oldFileUrl = (string)$oldDocument['file_url'];
         }
@@ -253,12 +296,12 @@ if ($method === 'POST') {
         sendInternalError($e, 'documents.php:upload', 'Failed to store uploaded file.');
     }
 
-    if ($oldFileUrl !== null) delete_replaced_upload($oldFileUrl, $uploadDir);
+    if ($oldFileUrl !== null) delete_replaced_upload($oldFileUrl);
     sendResponse(201, [
         'id' => $documentId,
         'application_id' => $applicationId,
         'document_name' => $documentName,
-        'file_url' => $fileUrl,
+        'file_url' => public_document_url((string)$documentId),
         'file_size' => $fileSize,
         'file_type' => $detectedMime,
         'status' => $documentStatus,

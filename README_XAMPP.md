@@ -13,7 +13,7 @@ This project runs on XAMPP with:
 2. Start Apache and MySQL from the XAMPP control panel
 3. Run `npm install`
 4. Run `npm run build`
-5. Open `http://localhost/tacloban-praise/api/setup_db.php`
+5. Run `C:\xampp\php\php.exe C:\xampp\htdocs\tacloban-praise\setup_db.php` locally
 6. Open `http://localhost/tacloban-praise/`
 7. Sign in with the bootstrap administrator account:
 
@@ -56,7 +56,7 @@ private $port = "3306";
 New uploads and replacements accept PDF, DOCX, JPG, JPEG, and PNG up to 10 MB per file. PHP needs Fileinfo and image inspection (`getimagesize`). DOCX validation uses ZipArchive or the bundled PharData ZIP reader. Set `upload_max_filesize = 10M` and `post_max_size = 12M` (or larger) in the deployment's PHP configuration so the application can enforce its own limit. Restart Apache after changing PHP settings. Keep `uploads/.htaccess` in place and ensure Apache allows directory overrides for this project.
 # Award evaluation routing upgrade
 
-For an existing XAMPP database, run `database_migrations/20260925_award_evaluation_routing.sql` once against `tacloban_praise_db`. The migration adds award routes, route members, and nomination assignment snapshots. A fresh setup through `api/setup_db.php` already includes these tables.
+For an existing XAMPP database, run `database_migrations/20260925_award_evaluation_routing.sql` once against `tacloban_praise_db`. The migration adds award routes, route members, and nomination assignment snapshots. A fresh command-line setup already includes these tables.
 
 After upgrading, an Administrator must configure **Evaluation Routing** for each award in Awards Management before Secretariat can forward a verified nomination. Existing nominations with only `assigned_evaluators` JSON continue to use that legacy panel; newly routed nominations use `application_evaluator_assignments` as their assignment source. Editing a route affects future nominations only.
 

@@ -230,7 +230,7 @@ function normalizeDocument(document: any): ApplicationDocument {
     application_id: String(document.application_id),
     requirement_id: document.requirement_id || undefined,
     document_name: String(document.document_name),
-    file_url: resolveProjectUrl(String(document.file_url || '')),
+    file_url: document.file_url ? resolveProjectUrl(`api/documents.php?action=download&id=${encodeURIComponent(String(document.id))}`) : '',
     file_size: document.file_size !== null && document.file_size !== undefined ? Number(document.file_size) : undefined,
     file_type: document.file_type || undefined,
     status: document.status,
@@ -461,9 +461,10 @@ async function loadOffices(): Promise<Office[]> {
 async function loadAuditLogs(user?: UserProfile | null, applications?: Application[]): Promise<ApplicationHistory[]> {
   const activeUser = user || currentUser;
 
-  if (activeUser?.role === 'NOMINEE' || activeUser?.role === 'HEAD_OF_OFFICE') {
+  if (activeUser?.role === 'NOMINEE' || activeUser?.role === 'HEAD_OF_OFFICE' || activeUser?.role === 'EVALUATOR') {
     const relatedApplications = (applications || cachedApplications).filter(application =>
       application.nominee_id === activeUser.id ||
+      (activeUser.role === 'EVALUATOR' && application.assigned_evaluators?.includes(activeUser.id)) ||
       application.nominator_id === activeUser.id ||
       (activeUser.role === 'HEAD_OF_OFFICE'
         && Boolean(activeUser.office_id)

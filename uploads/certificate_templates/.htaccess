@@ -1,0 +1,6 @@
+Options -Indexes -ExecCGI -Includes
+
+# Certificate template images are intentionally public assets.
+<FilesMatch "(?i)\.(?:jpe?g|png|webp)$">
+    Require all granted
+</FilesMatch>

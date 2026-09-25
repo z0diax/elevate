@@ -58,13 +58,13 @@ if ($method === 'POST' && ($_GET['action'] ?? '') === 'start') {
 }
 
 if ($method === 'POST') {
-    $actor = require_auth($db, ['ADMINISTRATOR', 'EVALUATOR']);
+    $actor = require_auth($db, ['EVALUATOR']);
     $data = getJsonInput();
 
     $appId = $data['application_id'] ?? '';
     $evaluatorId = $actor['id'];
     $evaluatorName = $actor['full_name'];
-    $evaluatorOffice = $data['evaluator_office'] ?? ($actor['office_name'] ?? '');
+    $evaluatorOffice = $actor['office_name'] ?? '';
     $scores = $data['scores'] ?? [];
     $generalRemarks = trim((string)($data['general_remarks'] ?? ''));
 
@@ -72,7 +72,7 @@ if ($method === 'POST') {
         sendResponse(400, [], 'Application ID and Evaluator ID are required.');
     }
 
-    $stmtApp = $db->prepare("SELECT assigned_evaluators, status, processing_stage FROM applications WHERE id = :id");
+    $stmtApp = $db->prepare("SELECT award_id, assigned_evaluators, status, processing_stage FROM applications WHERE id = :id");
     $stmtApp->execute([':id' => $appId]);
     $application = $stmtApp->fetch();
     if (!$application) {
@@ -89,11 +89,11 @@ if ($method === 'POST') {
     $assignedEvaluators = is_array($assignedEvaluators)
         ? array_values(array_unique(array_filter($assignedEvaluators, 'is_string')))
         : [];
-    $assignmentStmt = $db->prepare("SELECT evaluator_id, status FROM application_evaluator_assignments WHERE application_id = :id AND status <> 'Reassigned'");
+    $assignmentStmt = $db->prepare("SELECT evaluator_id, status FROM application_evaluator_assignments WHERE application_id = :id");
     $assignmentStmt->execute([':id' => $appId]);
     $assignments = $assignmentStmt->fetchAll();
     if ($assignments) {
-        $assignedEvaluators = array_column($assignments, 'evaluator_id');
+        $assignedEvaluators = array_column(array_filter($assignments, static fn($assignment) => $assignment['status'] !== 'Reassigned'), 'evaluator_id');
     }
     if (!$assignedEvaluators) {
         sendResponse(409, [], 'This nomination has no assigned evaluators and cannot complete evaluation.');
@@ -101,6 +101,29 @@ if ($method === 'POST') {
     if (!in_array($actor['id'], $assignedEvaluators, true)) {
         sendResponse(403, [], 'This application is not assigned to your evaluator account.');
     }
+    $criteriaStmt = $db->prepare('SELECT id, criterion_name, weight_percentage, max_score FROM award_criteria WHERE award_id = :award_id');
+    $criteriaStmt->execute([':award_id' => $application['award_id']]);
+    $criteria = [];
+    foreach ($criteriaStmt->fetchAll() as $criterion) $criteria[$criterion['id']] = $criterion;
+    if (!$criteria || !is_array($scores) || count($scores) !== count($criteria)) sendResponse(400, [], 'A score is required for every award criterion.');
+    $validatedScores = [];
+    foreach ($scores as $score) {
+        if (!is_array($score) || !is_string($score['criterion_id'] ?? null) || !isset($criteria[$score['criterion_id']]) || isset($validatedScores[$score['criterion_id']])) {
+            sendResponse(400, [], 'Invalid evaluation criterion.');
+        }
+        $criterion = $criteria[$score['criterion_id']];
+        $raw = $score['score'] ?? ($score['raw_score'] ?? null);
+        if (!is_numeric($raw) || !is_finite((float)$raw) || (float)$raw < 0 || (float)$raw > (float)$criterion['max_score']) {
+            sendResponse(400, [], 'Score is outside the permitted range.');
+        }
+        $validatedScores[$score['criterion_id']] = [
+            'criterion_id' => $criterion['id'], 'criterion_name' => $criterion['criterion_name'],
+            'score' => (float)$raw, 'max_score' => (float)$criterion['max_score'],
+            'weight_percentage' => (float)$criterion['weight_percentage'],
+            'remarks' => (string)($score['remarks'] ?? ($score['evaluator_remarks'] ?? '')),
+        ];
+    }
+    $scores = array_values($validatedScores);
 
     $db->beginTransaction();
     try {

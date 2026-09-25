@@ -1,12 +1,17 @@
 <?php
 require_once __DIR__ . '/config/cors.php';
 require_once __DIR__ . '/config/database.php';
+require_once __DIR__ . '/config/session_auth.php';
 
 $database = new Database();
 $db = $database->getConnection();
 
 if ($db) {
     try {
+        $actor = get_session_user($db);
+        if (!$actor || $actor['role'] !== 'ADMINISTRATOR') {
+            sendResponse(200, ['database_connected' => true], 'XAMPP MySQL Database is connected and operational.');
+        }
         $stmt = $db->query("SELECT COUNT(*) as app_count FROM applications");
         $apps = $stmt->fetch();
 

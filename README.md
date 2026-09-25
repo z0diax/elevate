@@ -15,7 +15,7 @@ Prerequisite: Node.js
 2. Run `npm install`
 3. Run `npm run build`
 4. Start Apache and MySQL in XAMPP
-5. Open `http://localhost/tacloban-praise/api/setup_db.php`
+5. Run `C:\xampp\php\php.exe C:\xampp\htdocs\tacloban-praise\setup_db.php` locally
 6. Open `http://localhost/tacloban-praise/`
 
 The XAMPP-specific deployment notes are in `README_XAMPP.md`.

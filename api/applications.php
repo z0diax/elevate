@@ -7,6 +7,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/config/cors.php';
 require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/config/session_auth.php';
+require_once __DIR__ . '/config/document_storage.php';
 
 $database = new Database();
 $db = $database->getConnection();
@@ -69,6 +70,7 @@ function getFullApplication($db, string $appId): ?array {
     $documents = $docStmt->fetchAll();
     foreach ($documents as &$document) {
         $document['file_size'] = $document['file_size'] !== null ? (int)$document['file_size'] : null;
+        $document['file_url'] = $document['file_url'] !== '' ? public_document_url((string)$document['id']) : '';
     }
     $app['documents'] = $documents;
 
@@ -198,7 +200,23 @@ if ($method === 'GET') {
         sendResponse(200, $application);
     }
 
-    $stmt = $db->query("SELECT id FROM applications ORDER BY created_at DESC");
+    $role = $actor['role'];
+    if ($role === 'ADMINISTRATOR') {
+        $stmt = $db->prepare('SELECT id FROM applications ORDER BY created_at DESC');
+        $stmt->execute();
+    } elseif ($role === 'EVALUATOR') {
+        $stmt = $db->prepare("SELECT a.id FROM applications a WHERE a.status <> 'Draft' AND (EXISTS (SELECT 1 FROM application_evaluator_assignments x WHERE x.application_id = a.id AND x.evaluator_id = :id AND x.status <> 'Reassigned') OR (NOT EXISTS (SELECT 1 FROM application_evaluator_assignments x WHERE x.application_id = a.id) AND JSON_CONTAINS(COALESCE(a.assigned_evaluators, '[]'), JSON_QUOTE(:legacy_id)))) ORDER BY a.created_at DESC");
+        $stmt->execute([':id' => $actor['id'], ':legacy_id' => $actor['id']]);
+    } elseif ($role === 'SECRETARIAT') {
+        $stmt = $db->prepare("SELECT id FROM applications WHERE processing_stage IN ('Document Verification', 'Evaluation', 'Deliberation', 'Final Decision', 'Awarded') AND status <> 'Draft' ORDER BY created_at DESC");
+        $stmt->execute();
+    } elseif ($role === 'HEAD_OF_OFFICE') {
+        $stmt = $db->prepare("SELECT id FROM applications WHERE nominator_id = :id OR nominee_id = :nominee_id OR (office_id = :office_id AND status <> 'Draft') ORDER BY created_at DESC");
+        $stmt->execute([':id' => $actor['id'], ':nominee_id' => $actor['id'], ':office_id' => $actor['office_id'] ?? '']);
+    } else {
+        $stmt = $db->prepare('SELECT id FROM applications WHERE nominator_id = :id OR nominee_id = :nominee_id ORDER BY created_at DESC');
+        $stmt->execute([':id' => $actor['id'], ':nominee_id' => $actor['id']]);
+    }
     $results = [];
     foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $id) {
         $application = getFullApplication($db, (string)$id);
@@ -270,7 +288,7 @@ if ($method === 'POST') {
             ':award_id' => $data['award_id'],
             ':award_name' => $awardName,
             ':award_year' => $year,
-            ':nominee_id' => $data['nominee_id'] ?? null,
+            ':nominee_id' => $actor['role'] === 'NOMINEE' ? $actor['id'] : ($data['nominee_id'] ?? null),
             ':nominee_name' => $data['nominee_name'],
             ':employee_id' => $data['employee_id'] ?? null,
             ':position_title' => $data['position_title'] ?? 'Staff',
@@ -370,9 +388,7 @@ if ($method === 'PUT') {
             $uploadedIds = [];
             foreach ($documentsStmt->fetchAll() as $document) {
                 $fileUrl = (string)$document['file_url'];
-                if (preg_match('#^uploads/[A-Za-z0-9._-]+$#', $fileUrl)
-                    && (int)$document['file_size'] > 0
-                    && is_file(__DIR__ . '/../' . $fileUrl)) {
+                if ((int)$document['file_size'] > 0 && document_storage_path($fileUrl) !== null) {
                     $uploadedIds[] = $document['requirement_id'];
                 }
             }
@@ -477,13 +493,16 @@ if ($method === 'PUT') {
 
     if ($action === 'endorse') {
         $decision = $data['decision'] ?? 'Endorsed';
+        if (!in_array($decision, ['Endorsed', 'Returned for Revision', 'Rejected'], true)) {
+            sendResponse(400, [], 'Invalid endorsement decision.');
+        }
         if ($actor['role'] !== 'HEAD_OF_OFFICE' && $actor['role'] !== 'ADMINISTRATOR') {
             sendResponse(403, [], 'Only a Head of Office can record an endorsement decision.');
         }
         if ($current['processing_stage'] !== 'Endorsement' || !in_array($current['status'], ['For Endorsement', 'Submitted'], true)) {
             sendResponse(409, [], 'This nomination is no longer awaiting Head of Office endorsement.');
         }
-        if ($actor['role'] === 'HEAD_OF_OFFICE' && !empty($actor['office_id']) && $current['office_id'] !== $actor['office_id']) {
+        if ($actor['role'] === 'HEAD_OF_OFFICE' && (empty($actor['office_id']) || $current['office_id'] !== $actor['office_id'])) {
             sendResponse(403, [], 'You can only endorse nominations from your assigned office.');
         }
         if ($decision === 'Endorsed') {
@@ -521,8 +540,8 @@ if ($method === 'PUT') {
             }
         }
         $remarks = trim((string)($data['remarks'] ?? ''));
-        $endorserName = $data['endorser_name'] ?? $actor['full_name'];
-        $endorserTitle = $data['endorser_title'] ?? ($actor['position_title'] ?? 'Department Head');
+        $endorserName = $actor['full_name'];
+        $endorserTitle = $actor['position_title'] ?? 'Department Head';
 
         $newStatus = 'For Verification';
         $stage = 'Document Verification';
@@ -584,23 +603,30 @@ if ($method === 'PUT') {
         $docId = $data['document_id'] ?? '';
         $status = $data['status'] ?? 'Verified';
         $remarks = trim((string)($data['remarks'] ?? ''));
-        $verifiedBy = $data['verified_by'] ?? $actor['full_name'];
+        $verifiedBy = $actor['full_name'];
 
         if ($docId === '') {
             sendResponse(400, [], 'document_id is required.');
         }
+        if (!in_array($status, ['Verified', 'Rejected', 'Missing'], true)) {
+            sendResponse(400, [], 'Invalid document verification status.');
+        }
+        $documentStmt = $db->prepare('SELECT id FROM application_documents WHERE id = :id AND application_id = :application_id');
+        $documentStmt->execute([':id' => $docId, ':application_id' => $appId]);
+        if (!$documentStmt->fetch()) sendResponse(404, [], 'Document not found for this nomination.');
 
         $db->beginTransaction();
         try {
             $db->prepare("
                 UPDATE application_documents
                 SET status = :status, verification_remarks = :remarks, verified_by = :verified_by, verified_at = NOW()
-                WHERE id = :id
+                WHERE id = :id AND application_id = :application_id
             ")->execute([
                 ':status' => $status,
                 ':remarks' => $remarks !== '' ? $remarks : null,
                 ':verified_by' => $verifiedBy,
                 ':id' => $docId,
+                ':application_id' => $appId,
             ]);
 
             $docStatusesStmt = $db->prepare("SELECT status FROM application_documents WHERE application_id = :id");
@@ -648,7 +674,7 @@ if ($method === 'PUT') {
         if ($current['processing_stage'] !== 'Endorsement' || !in_array($current['status'], ['For Endorsement', 'Submitted'], true)) {
             sendResponse(409, [], 'This nomination is no longer awaiting Head of Office document inspection.');
         }
-        if (!empty($actor['office_id']) && $current['office_id'] !== $actor['office_id']) {
+        if (empty($actor['office_id']) || $current['office_id'] !== $actor['office_id']) {
             sendResponse(403, [], 'You can only inspect documents for nominations from your assigned office.');
         }
 
@@ -878,6 +904,7 @@ if ($method === 'PUT') {
             sendResponse(403, [], 'Only Secretariat or an Administrator can record the committee decision.');
         }
         $decision = $data['decision'] ?? 'Approved';
+        if (!in_array($decision, ['Approved', 'Not Approved'], true)) sendResponse(400, [], 'Invalid committee decision.');
         $remarks = trim((string)($data['remarks'] ?? ''));
         $awardNow = !empty($data['award_now']);
 
@@ -965,13 +992,13 @@ if ($method === 'DELETE') {
         sendResponse(404, [], 'Application not found.');
     }
 
-    // Keep only managed local upload paths; external document links must never be deleted from disk.
+    // Resolve database references before deleting records; never use client paths.
     $localUploadPaths = [];
-    foreach ($application['documents'] as $document) {
-        $fileUrl = (string)($document['file_url'] ?? '');
-        if (preg_match('#^uploads/[A-Za-z0-9._-]+$#', $fileUrl)) {
-            $localUploadPaths[] = __DIR__ . '/../' . $fileUrl;
-        }
+    $fileStmt = $db->prepare('SELECT file_url FROM application_documents WHERE application_id = :id');
+    $fileStmt->execute([':id' => $appId]);
+    foreach ($fileStmt->fetchAll(PDO::FETCH_COLUMN) as $reference) {
+        $path = document_storage_path((string)$reference);
+        if ($path !== null) $localUploadPaths[] = $path;
     }
 
     $db->beginTransaction();

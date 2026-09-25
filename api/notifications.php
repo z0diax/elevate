@@ -17,12 +17,12 @@ $method = $_SERVER['REQUEST_METHOD'];
 $actor = require_auth($db);
 
 if ($method === 'GET') {
-    $userId = $actor['role'] === 'ADMINISTRATOR' ? ($_GET['user_id'] ?? $actor['id']) : $actor['id'];
-    $role = $actor['role'] === 'ADMINISTRATOR' ? ($_GET['role'] ?? $actor['role']) : $actor['role'];
+    $userId = $actor['id'];
+    $role = $actor['role'];
 
     $stmt = $db->prepare("
         SELECT * FROM notifications
-        WHERE user_id = :uid OR target_role = :role OR (user_id IS NULL AND target_role IS NULL)
+        WHERE user_id = :uid OR (user_id IS NULL AND target_role = :role) OR (user_id IS NULL AND target_role IS NULL)
         ORDER BY created_at DESC LIMIT 50
     ");
     $stmt->execute([':uid' => $userId, ':role' => $role]);
@@ -38,24 +38,25 @@ if ($method === 'GET') {
         $stmt = $db->prepare("
             UPDATE notifications
             SET is_read = 1
-            WHERE user_id = :uid OR target_role = :role OR (user_id IS NULL AND target_role IS NULL)
+            WHERE user_id = :uid
         ");
         $stmt->execute([
             ':uid' => $actor['id'],
-            ':role' => $actor['role'],
         ]);
         sendResponse(200, [], "All notifications marked as read.");
     } elseif (!empty($data['id'])) {
+        $owned = $db->prepare('SELECT id FROM notifications WHERE id = :id AND user_id = :uid');
+        $owned->execute([':id' => $data['id'], ':uid' => $actor['id']]);
+        if (!$owned->fetch()) sendResponse(404, [], 'Notification not found.');
         $stmt = $db->prepare("
             UPDATE notifications
             SET is_read = 1
             WHERE id = :id
-              AND (user_id = :uid OR target_role = :role OR (user_id IS NULL AND target_role IS NULL))
+              AND user_id = :uid
         ");
         $stmt->execute([
             ':id' => $data['id'],
             ':uid' => $actor['id'],
-            ':role' => $actor['role'],
         ]);
         sendResponse(200, [], "Notification marked as read.");
     }

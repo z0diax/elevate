@@ -14,6 +14,7 @@ if (!$db) sendResponse(503, [], 'Database connection failed.');
 require_auth($db, ['ADMINISTRATOR']);
 
 $format = $_GET['format'] ?? 'sql';
+if (!in_array($format, ['sql', 'json'], true)) sendResponse(400, [], 'Invalid export format.');
 
 if ($format === 'json') {
     header('Content-Type: application/json');

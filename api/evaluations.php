@@ -20,8 +20,8 @@ $method = $_SERVER['REQUEST_METHOD'];
 if ($method === 'POST' && ($_GET['action'] ?? '') === 'start') {
     $actor = require_auth($db, ['EVALUATOR']);
     $data = getJsonInput();
-    $appId = (string)($data['application_id'] ?? '');
-    if ($appId === '') sendResponse(400, [], 'Application ID is required.');
+    requireFields($data, ['application_id']);
+    $appId = requireId($data['application_id'] ?? null, 'application ID');
     try {
         $db->beginTransaction();
         $appStmt = $db->prepare('SELECT status, processing_stage, assigned_evaluators FROM applications WHERE id = :id FOR UPDATE');
@@ -61,16 +61,13 @@ if ($method === 'POST') {
     $actor = require_auth($db, ['EVALUATOR']);
     $data = getJsonInput();
 
-    $appId = $data['application_id'] ?? '';
+    requireFields($data, ['application_id', 'scores', 'general_remarks']);
+    $appId = requireId($data['application_id'] ?? null, 'application ID');
     $evaluatorId = $actor['id'];
     $evaluatorName = $actor['full_name'];
     $evaluatorOffice = $actor['office_name'] ?? '';
     $scores = $data['scores'] ?? [];
-    $generalRemarks = trim((string)($data['general_remarks'] ?? ''));
-
-    if ($appId === '' || $evaluatorId === '') {
-        sendResponse(400, [], 'Application ID and Evaluator ID are required.');
-    }
+    $generalRemarks = trim(requireText($data['general_remarks'] ?? '', 'general remarks', 65535));
 
     $stmtApp = $db->prepare("SELECT award_id, assigned_evaluators, status, processing_stage FROM applications WHERE id = :id");
     $stmtApp->execute([':id' => $appId]);
@@ -105,25 +102,25 @@ if ($method === 'POST') {
     $criteriaStmt->execute([':award_id' => $application['award_id']]);
     $criteria = [];
     foreach ($criteriaStmt->fetchAll() as $criterion) $criteria[$criterion['id']] = $criterion;
-    if (!$criteria || !is_array($scores) || count($scores) !== count($criteria)) sendResponse(400, [], 'A score is required for every award criterion.');
+    if (!$criteria || !is_array($scores) || !array_is_list($scores) || count($scores) > 100 || count($scores) !== count($criteria)) sendResponse(400, [], 'A score is required for every award criterion.');
     $validatedScores = [];
     foreach ($scores as $score) {
         if (!is_array($score) || !is_string($score['criterion_id'] ?? null) || !isset($criteria[$score['criterion_id']]) || isset($validatedScores[$score['criterion_id']])) {
             sendResponse(400, [], 'Invalid evaluation criterion.');
         }
+        requireFields($score, ['criterion_id', 'score', 'raw_score', 'remarks', 'evaluator_remarks']);
         $criterion = $criteria[$score['criterion_id']];
         $raw = $score['score'] ?? ($score['raw_score'] ?? null);
-        if (!is_numeric($raw) || !is_finite((float)$raw) || (float)$raw < 0 || (float)$raw > (float)$criterion['max_score']) {
-            sendResponse(400, [], 'Score is outside the permitted range.');
-        }
+        $raw = requireDecimal($raw, 'score', 0, (float)$criterion['max_score']);
         $validatedScores[$score['criterion_id']] = [
             'criterion_id' => $criterion['id'], 'criterion_name' => $criterion['criterion_name'],
-            'score' => (float)$raw, 'max_score' => (float)$criterion['max_score'],
+            'score' => $raw, 'max_score' => (float)$criterion['max_score'],
             'weight_percentage' => (float)$criterion['weight_percentage'],
-            'remarks' => (string)($score['remarks'] ?? ($score['evaluator_remarks'] ?? '')),
+            'remarks' => requireText($score['remarks'] ?? ($score['evaluator_remarks'] ?? ''), 'score remarks', 65535),
         ];
     }
     $scores = array_values($validatedScores);
+    if (array_sum(array_column($scores, 'score')) > 999.99) sendResponse(400, [], 'Total raw score exceeds the supported range.');
 
     $db->beginTransaction();
     try {

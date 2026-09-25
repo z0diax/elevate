@@ -722,18 +722,30 @@ export const praiseService = {
   },
 
   async createAward(award: Omit<Award, 'id'>): Promise<Award> {
+    const payload = {
+      ...award,
+      criteria: award.criteria?.map(({ criterion_name, criterion_description, weight_percentage, max_score }) => ({ criterion_name, criterion_description, weight_percentage, max_score })),
+      document_requirements: award.document_requirements?.map(({ document_name, description, is_mandatory }) => ({ document_name, description, is_mandatory })),
+      eligibility_requirements: award.eligibility_requirements?.map(({ requirement_description, is_mandatory, order_index }) => ({ requirement_description, is_mandatory, order_index })),
+    };
     const createdAward = normalizeAward(await apiRequest<any>('awards.php', {
       method: 'POST',
-      body: JSON.stringify(award),
+      body: JSON.stringify(payload),
     }));
     await loadAwards();
     return createdAward;
   },
 
   async updateAward(id: string, updates: Partial<Award>): Promise<Award> {
+    const payload = {
+      ...updates,
+      ...(updates.criteria && { criteria: updates.criteria.map(({ criterion_name, criterion_description, weight_percentage, max_score }) => ({ criterion_name, criterion_description, weight_percentage, max_score })) }),
+      ...(updates.document_requirements && { document_requirements: updates.document_requirements.map(({ document_name, description, is_mandatory }) => ({ document_name, description, is_mandatory })) }),
+      ...(updates.eligibility_requirements && { eligibility_requirements: updates.eligibility_requirements.map(({ requirement_description, is_mandatory, order_index }) => ({ requirement_description, is_mandatory, order_index })) }),
+    };
     const updatedAward = normalizeAward(await apiRequest<any>('awards.php', {
       method: 'PUT',
-      body: JSON.stringify({ id, ...updates }),
+      body: JSON.stringify({ id, ...payload }),
     }));
     await loadAwards();
     return updatedAward;
@@ -756,9 +768,10 @@ export const praiseService = {
   },
 
   async submitNomination(data: SubmitNominationPayload): Promise<Application> {
+    const { nominator_id: _nominatorId, nominator_name: _nominatorName, nominator_position: _nominatorPosition, nominating_office: _nominatingOffice, office_name: _officeName, ...payload } = data;
     const application = normalizeApplication(await apiRequest<any>('applications.php', {
       method: 'POST',
-      body: JSON.stringify(data),
+      body: JSON.stringify(payload),
     }));
     try {
       await loadApplications();
@@ -836,8 +849,6 @@ export const praiseService = {
       body: JSON.stringify({
         decision,
         remarks,
-        endorser_name: currentUser?.full_name,
-        endorser_title: currentUser?.position_title,
       }),
     }));
     await loadApplications();
@@ -852,7 +863,6 @@ export const praiseService = {
         document_id: docId,
         status,
         remarks,
-        verified_by: currentUser?.full_name,
       }),
     }));
     await loadApplications();
@@ -916,10 +926,9 @@ export const praiseService = {
     await apiRequest('evaluations.php', {
       method: 'POST',
       body: JSON.stringify({
-        ...payload,
-        evaluator_id: payload.evaluator_id || currentUser?.id,
-        evaluator_name: payload.evaluator_name || currentUser?.full_name,
-        evaluator_office: currentUser?.office_name,
+        application_id: payload.application_id,
+        general_remarks: payload.general_remarks,
+        scores: payload.scores.map(score => ({ criterion_id: score.criterion_id, score: score.score ?? score.raw_score, remarks: score.remarks ?? score.evaluator_remarks ?? '' })),
       }),
     });
     await loadApplications();
@@ -971,7 +980,7 @@ export const praiseService = {
     settings: Omit<CertificateTemplateSettings, 'updated_at'>
   ): Promise<CertificateTemplateSettings> {
     const payload = {
-      ...settings,
+      ...Object.fromEntries(Object.entries(settings).filter(([key]) => !['id', 'created_at', 'updated_at'].includes(key))),
       background_image_url: toProjectRelativePath(settings.background_image_url || ''),
     };
 

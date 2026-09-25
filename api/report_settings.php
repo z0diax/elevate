@@ -178,7 +178,7 @@ function fetch_report_settings(PDO $db): array {
 }
 
 function require_non_empty_string(array $data, string $field): string {
-    $value = trim((string)($data[$field] ?? ''));
+    $value = trim(requireText($data[$field] ?? null, $field, in_array($field, ['citation_text', 'conferment_text'], true) ? 65535 : 255, true));
     if ($value === '') {
         sendResponse(400, [], "Field '{$field}' is required.");
     }
@@ -187,7 +187,9 @@ function require_non_empty_string(array $data, string $field): string {
 }
 
 function optional_string(array $data, string $field): ?string {
-    $value = trim((string)($data[$field] ?? ''));
+    if (!isset($data[$field])) return null;
+    $value = trim(requireText($data[$field], $field, 500));
+    if ($value !== '' && !preg_match('~^uploads/certificate_templates/certificate_background_[0-9]+_[0-9]{4}\.(?:jpg|png|webp)$~D', $value)) sendResponse(400, [], 'Invalid certificate background image.');
     return $value === '' ? null : $value;
 }
 
@@ -230,17 +232,21 @@ if ($method === 'POST') {
     if (!isset($_FILES['background_image'])) {
         sendResponse(400, [], 'background_image file is required.');
     }
+    requireFields($_FILES, ['background_image']);
+    requireFields($_POST, []);
 
     $file = $_FILES['background_image'];
-    if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+    if (!is_array($file) || is_array($file['name'] ?? null) || ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
         sendResponse(400, [], 'Certificate background upload failed.');
     }
 
-    if (($file['size'] ?? 0) > 8 * 1024 * 1024) {
+    if (!is_int($file['size'] ?? null) || $file['size'] <= 0 || $file['size'] > 8 * 1024 * 1024) {
         sendResponse(400, [], 'Certificate background image must not exceed 8 MB.');
     }
 
-    $mimeType = $file['type'] ?? '';
+    if (!is_string($file['tmp_name'] ?? null) || !is_uploaded_file($file['tmp_name'])) sendResponse(400, [], 'Invalid certificate background upload.');
+    $mimeType = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
+    if (getimagesize($file['tmp_name']) === false) sendResponse(400, [], 'Invalid certificate background image.');
     $allowedMimeTypes = [
         'image/jpeg' => 'jpg',
         'image/png' => 'png',
@@ -275,6 +281,7 @@ if ($method === 'PUT') {
     require_auth($db, ['ADMINISTRATOR', 'SECRETARIAT']);
 
     $data = getJsonInput();
+    requireFields($data, array_values(array_diff(array_keys(default_report_settings()), ['id'])));
     $payload = [
         'citation_text' => require_non_empty_string($data, 'citation_text'),
         'conferment_text' => require_non_empty_string($data, 'conferment_text'),

@@ -15,8 +15,7 @@ if ($method === 'GET' && ($_GET['action'] ?? '') === 'evaluators') {
     sendResponse(200, $stmt->fetchAll());
 }
 
-$awardId = (string)($_GET['award_id'] ?? '');
-if ($awardId === '') sendResponse(400, [], 'Award ID is required.');
+$awardId = requireId($_GET['award_id'] ?? null, 'award ID');
 
 if ($method === 'GET') {
     $stmt = $db->prepare('SELECT * FROM award_evaluation_routes WHERE award_id = :award_id');
@@ -34,15 +33,17 @@ if ($method === 'GET') {
 if ($method !== 'PUT') sendResponse(405, [], 'Method not allowed.');
 if ($actor['role'] !== 'ADMINISTRATOR') sendResponse(403, [], 'Only an Administrator can change evaluation routing.');
 $data = getJsonInput();
-$count = filter_var($data['required_evaluators'] ?? null, FILTER_VALIDATE_INT);
+requireFields($data, ['required_evaluators', 'evaluator_ids', 'is_active']);
+$count = requireIntRange($data['required_evaluators'] ?? null, 'required evaluators', 1, 100);
 $ids = $data['evaluator_ids'] ?? null;
-$active = !array_key_exists('is_active', $data) || (bool)$data['is_active'];
-if (!$count || $count < 1 || $count > 100 || !is_array($ids) || count($ids) !== $count || count(array_unique($ids)) !== $count) {
+$active = !array_key_exists('is_active', $data) || requireBool($data['is_active'], 'is_active');
+if (!is_array($ids) || !array_is_list($ids) || count($ids) !== $count) {
     sendResponse(400, [], 'Select exactly the required number of distinct evaluators (1–100).');
 }
 foreach ($ids as $id) {
-    if (!is_string($id) || $id === '') sendResponse(400, [], 'Each evaluator selection is required.');
+    requireId($id, 'evaluator ID');
 }
+if (count(array_unique($ids)) !== $count) sendResponse(400, [], 'Select distinct evaluators.');
 $placeholders = implode(',', array_fill(0, count($ids), '?'));
 $valid = $db->prepare("SELECT COUNT(*) FROM profiles WHERE role = 'EVALUATOR' AND is_active = 1 AND id IN ($placeholders)");
 $valid->execute($ids);

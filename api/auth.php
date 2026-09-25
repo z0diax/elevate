@@ -20,6 +20,14 @@ if (!$db) {
 $method = $_SERVER['REQUEST_METHOD'];
 $action = $_GET['action'] ?? '';
 
+function validate_account_office(PDO $db, $officeId): void {
+    if ($officeId === null || $officeId === '') return;
+    $officeId = requireId($officeId, 'office ID');
+    $stmt = $db->prepare('SELECT id FROM offices WHERE id = :id AND is_active = 1');
+    $stmt->execute([':id' => $officeId]);
+    if (!$stmt->fetch()) sendResponse(400, [], 'Office not found.');
+}
+
 if ($method === 'GET') {
     if ($action === 'current') {
         $currentUser = get_session_user($db);
@@ -33,6 +41,7 @@ if ($method === 'GET') {
     $actor = require_auth($db);
 
     if (isset($_GET['id'])) {
+        $_GET['id'] = requireId($_GET['id'], 'user ID');
         if ($actor['role'] !== 'ADMINISTRATOR' && (string)$_GET['id'] !== (string)$actor['id']) {
             sendResponse(403, [], 'You are not authorized to view this user.');
         }
@@ -58,6 +67,7 @@ if ($method === 'GET') {
         sendResponse(200, [$actor]);
     }
     $role = $_GET['role'] ?? null;
+    if ($role !== null && !in_array($role, ['ADMINISTRATOR', 'SECRETARIAT', 'HEAD_OF_OFFICE', 'EVALUATOR', 'NOMINEE'], true)) sendResponse(400, [], 'Invalid user role.');
     $sql = "
         SELECT id, email, full_name, role, office_id, office_name, position_title,
                employee_id, contact_number, barangay, avatar_url, is_active,
@@ -80,11 +90,12 @@ if ($method === 'GET') {
 }
 
 if ($method === 'POST') {
-    $data = getJsonInput();
+    $data = $action === 'logout' ? [] : getJsonInput();
 
     if ($action === 'login') {
-        $email = trim((string)($data['email'] ?? ''));
-        $password = (string)($data['password'] ?? '');
+        requireFields($data, ['email', 'password']);
+        $email = trim(requireText($data['email'] ?? '', 'email', 255));
+        $password = requireText($data['password'] ?? '', 'password', 1024);
 
         if ($email === '' || $password === '') {
             sendResponse(400, [], 'Email and password are required.');
@@ -122,9 +133,10 @@ if ($method === 'POST') {
     }
 
     if ($action === 'register_nominee') {
-        $fullName = trim((string)($data['full_name'] ?? ''));
-        $email = trim((string)($data['email'] ?? ''));
-        $password = (string)($data['password'] ?? '');
+        requireFields($data, ['full_name', 'email', 'password']);
+        $fullName = trim(requireText($data['full_name'] ?? '', 'full name', 255));
+        $email = trim(requireText($data['email'] ?? '', 'email', 255));
+        $password = requireText($data['password'] ?? '', 'password', 1024);
 
         if ($fullName === '' || $email === '' || $password === '') {
             sendResponse(400, [], 'Full name, email, and password are required.');
@@ -165,6 +177,7 @@ if ($method === 'POST') {
     }
 
     require_auth($db, ['ADMINISTRATOR']);
+    requireFields($data, ['full_name', 'email', 'role', 'password', 'office_id', 'office_name', 'position_title', 'employee_id', 'contact_number', 'barangay', 'is_active', 'must_change_password']);
 
     if (empty($data['full_name']) || empty($data['email']) || empty($data['role']) || empty($data['password'])) {
         sendResponse(400, [], 'full_name, email, role, and password are required.');
@@ -172,6 +185,14 @@ if ($method === 'POST') {
     if (!in_array($data['role'], ['ADMINISTRATOR', 'SECRETARIAT', 'HEAD_OF_OFFICE', 'EVALUATOR', 'NOMINEE'], true)) {
         sendResponse(400, [], 'Invalid user role.');
     }
+    requireEmail($data['email']);
+    requireText($data['full_name'], 'full name', 255, true);
+    requireText($data['password'], 'password', 1024, true);
+    if (strlen($data['password']) < 8) sendResponse(400, [], 'Password must be at least 8 characters long.');
+    foreach (['office_name' => 255, 'position_title' => 255, 'employee_id' => 50, 'contact_number' => 50, 'barangay' => 255] as $field => $max) if (isset($data[$field])) requireText($data[$field], $field, $max);
+    if (isset($data['office_id'])) $data['office_id'] = optionalId($data['office_id'], 'office ID');
+    validate_account_office($db, $data['office_id'] ?? null);
+    foreach (['is_active', 'must_change_password'] as $field) if (array_key_exists($field, $data)) $data[$field] = requireBool($data[$field], $field);
 
     $id = 'usr-' . time() . '-' . rand(100, 999);
     $stmt = $db->prepare("
@@ -217,8 +238,19 @@ if ($method === 'PUT') {
     require_auth($db, ['ADMINISTRATOR']);
 
     $data = getJsonInput();
+    requireFields($data, ['id', 'full_name', 'role', 'office_id', 'office_name', 'position_title', 'employee_id', 'contact_number', 'barangay', 'is_active', 'must_change_password', 'password']);
     if (empty($data['id'])) {
         sendResponse(400, [], 'User id is required for update.');
+    }
+    requireId($data['id'], 'user ID');
+    if (isset($data['full_name'])) requireText($data['full_name'], 'full name', 255, true);
+    foreach (['office_name' => 255, 'position_title' => 255, 'employee_id' => 50, 'contact_number' => 50, 'barangay' => 255] as $field => $max) if (isset($data[$field])) requireText($data[$field], $field, $max);
+    if (isset($data['office_id'])) $data['office_id'] = optionalId($data['office_id'], 'office ID');
+    validate_account_office($db, $data['office_id'] ?? null);
+    foreach (['is_active', 'must_change_password'] as $field) if (array_key_exists($field, $data)) $data[$field] = requireBool($data[$field], $field);
+    if (array_key_exists('password', $data)) {
+        requireText($data['password'], 'password', 1024);
+        if ($data['password'] !== '' && strlen($data['password']) < 8) sendResponse(400, [], 'Password must be at least 8 characters long.');
     }
     if (isset($data['role']) && !in_array($data['role'], ['ADMINISTRATOR', 'SECRETARIAT', 'HEAD_OF_OFFICE', 'EVALUATOR', 'NOMINEE'], true)) {
         sendResponse(400, [], 'Invalid user role.');
@@ -309,7 +341,7 @@ if ($method === 'PUT') {
 if ($method === 'DELETE') {
     $actor = require_auth($db, ['ADMINISTRATOR']);
     $data = getJsonInput();
-    $userId = (string)($_GET['id'] ?? ($data['id'] ?? ''));
+    $userId = requireId($_GET['id'] ?? ($data['id'] ?? null), 'user ID');
 
     if ($userId === '') {
         sendResponse(400, [], 'User id is required for deletion.');

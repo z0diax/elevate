@@ -34,7 +34,9 @@ if ($method === 'GET') {
     sendResponse(200, $notifications);
 } elseif ($method === 'PUT') {
     $data = getJsonInput();
+    requireFields($data, ['mark_all_read', 'id']);
     if (isset($data['mark_all_read'])) {
+        if (!requireBool($data['mark_all_read'], 'mark_all_read') || isset($data['id'])) sendResponse(400, [], 'Invalid notification request.');
         $stmt = $db->prepare("
             UPDATE notifications
             SET is_read = 1
@@ -45,6 +47,7 @@ if ($method === 'GET') {
         ]);
         sendResponse(200, [], "All notifications marked as read.");
     } elseif (!empty($data['id'])) {
+        $data['id'] = requireId($data['id'], 'notification ID');
         $owned = $db->prepare('SELECT id FROM notifications WHERE id = :id AND user_id = :uid');
         $owned->execute([':id' => $data['id'], ':uid' => $actor['id']]);
         if (!$owned->fetch()) sendResponse(404, [], 'Notification not found.');

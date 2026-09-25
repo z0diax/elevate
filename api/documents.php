@@ -154,6 +154,8 @@ if ($method === 'POST') {
     }
 
     $file = $_FILES['file'];
+    requireFields($_POST, ['application_id', 'document_id', 'requirement_id', 'document_name']);
+    requireFields($_FILES, ['file']);
     if (!is_array($file) || is_array($file['name'] ?? null)) sendResponse(400, [], 'Upload one file at a time.');
     [$extension, $detectedMime, $fileSize] = validate_document_upload($file);
     $applicationId = $_POST['application_id'] ?? '';
@@ -161,11 +163,10 @@ if ($method === 'POST') {
     $requirementId = $_POST['requirement_id'] ?? null;
     $documentName = $_POST['document_name'] ?? $file['name'];
 
-    if (!is_string($applicationId) || $applicationId === '' || !is_string($documentId)
-        || ($requirementId !== null && !is_string($requirementId))
-        || !is_string($documentName) || trim($documentName) === '' || strlen($documentName) > 255) {
-        sendResponse(400, [], 'Invalid document details.');
-    }
+    $applicationId = requireId($applicationId, 'application ID');
+    $documentId = optionalId($documentId, 'document ID') ?? '';
+    $requirementId = optionalId($requirementId, 'requirement ID');
+    $documentName = requireText($documentName, 'document name', 255, true);
 
     $applicationStmt = $db->prepare("SELECT nominator_id, status, award_id FROM applications WHERE id = :id LIMIT 1");
     $applicationStmt->execute([':id' => $applicationId]);

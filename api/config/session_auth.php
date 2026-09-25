@@ -105,6 +105,7 @@ function require_auth($db, array $roles = []): array {
 }
 
 function require_application_access(PDO $db, array $actor, string $applicationId): array {
+    $applicationId = requireId($applicationId, 'application ID');
     $stmt = $db->prepare('SELECT id, nominator_id, nominee_id, office_id, status, processing_stage, assigned_evaluators FROM applications WHERE id = :id LIMIT 1');
     $stmt->execute([':id' => $applicationId]);
     $application = $stmt->fetch();

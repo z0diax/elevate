@@ -64,10 +64,10 @@ function getFullAward($db, string $awardId): ?array {
     return $award;
 }
 
-function replace_award_relations($db, string $awardId, array $criteria = [], array $documents = [], array $eligibility = []): void {
-    $db->prepare("DELETE FROM award_criteria WHERE award_id = :award_id")->execute([':award_id' => $awardId]);
-    $db->prepare("DELETE FROM award_document_requirements WHERE award_id = :award_id")->execute([':award_id' => $awardId]);
-    $db->prepare("DELETE FROM award_eligibility_requirements WHERE award_id = :award_id")->execute([':award_id' => $awardId]);
+function replace_award_relations($db, string $awardId, ?array $criteria = null, ?array $documents = null, ?array $eligibility = null): void {
+    if ($criteria !== null) $db->prepare("DELETE FROM award_criteria WHERE award_id = :award_id")->execute([':award_id' => $awardId]);
+    if ($documents !== null) $db->prepare("DELETE FROM award_document_requirements WHERE award_id = :award_id")->execute([':award_id' => $awardId]);
+    if ($eligibility !== null) $db->prepare("DELETE FROM award_eligibility_requirements WHERE award_id = :award_id")->execute([':award_id' => $awardId]);
 
     if (!empty($criteria)) {
         $stmt = $db->prepare("
@@ -76,7 +76,7 @@ function replace_award_relations($db, string $awardId, array $criteria = [], arr
         ");
         foreach ($criteria as $index => $criterion) {
             $stmt->execute([
-                ':id' => $criterion['id'] ?? ('crit-' . $awardId . '-' . ($index + 1)),
+                ':id' => 'crit-' . bin2hex(random_bytes(16)),
                 ':award_id' => $awardId,
                 ':criterion_name' => $criterion['criterion_name'] ?? 'Criterion',
                 ':criterion_description' => $criterion['criterion_description'] ?? '',
@@ -93,7 +93,7 @@ function replace_award_relations($db, string $awardId, array $criteria = [], arr
         ");
         foreach ($documents as $index => $document) {
             $stmt->execute([
-                ':id' => $document['id'] ?? ('dreq-' . $awardId . '-' . ($index + 1)),
+                ':id' => 'dreq-' . bin2hex(random_bytes(16)),
                 ':award_id' => $awardId,
                 ':document_name' => $document['document_name'] ?? 'Document Requirement',
                 ':description' => $document['description'] ?? '',
@@ -109,7 +109,7 @@ function replace_award_relations($db, string $awardId, array $criteria = [], arr
         ");
         foreach ($eligibility as $index => $requirement) {
             $stmt->execute([
-                ':id' => $requirement['id'] ?? ('elig-' . $awardId . '-' . ($index + 1)),
+                ':id' => 'elig-' . bin2hex(random_bytes(16)),
                 ':award_id' => $awardId,
                 ':requirement_description' => $requirement['requirement_description'] ?? 'Eligibility requirement',
                 ':is_mandatory' => !empty($requirement['is_mandatory']) ? 1 : 0,
@@ -120,33 +120,32 @@ function replace_award_relations($db, string $awardId, array $criteria = [], arr
 }
 
 function validate_award_payload(array $data, bool $requireCriteria = false): void {
-    if (isset($data['award_year']) && (!is_numeric($data['award_year']) || (int)$data['award_year'] < 2020 || (int)$data['award_year'] > 2100)) {
-        sendResponse(400, [], 'Award year must be between 2020 and 2100.');
-    }
-
-    if (isset($data['min_qualifying_score']) && (!is_numeric($data['min_qualifying_score']) || (float)$data['min_qualifying_score'] < 0 || (float)$data['min_qualifying_score'] > 100)) {
-        sendResponse(400, [], 'Minimum qualifying score must be between 0 and 100.');
-    }
+    requireFields($data, ['id', 'name', 'code', 'description', 'remarks', 'award_year', 'min_qualifying_score', 'is_on_the_spot', 'is_active', 'criteria', 'document_requirements', 'eligibility_requirements']);
+    if (isset($data['id'])) requireId($data['id'], 'award ID');
+    foreach (['name' => 255, 'code' => 50, 'description' => 65535, 'remarks' => 65535] as $field => $max) if (isset($data[$field])) requireText($data[$field], $field, $max, $field === 'name' || $field === 'code');
+    if (isset($data['award_year'])) requireIntRange($data['award_year'], 'award year', 2020, 2100);
+    if (isset($data['min_qualifying_score'])) requireDecimal($data['min_qualifying_score'], 'minimum qualifying score', 0, 100);
+    foreach (['is_on_the_spot', 'is_active'] as $field) if (array_key_exists($field, $data)) requireBool($data[$field], $field);
 
     if (!array_key_exists('criteria', $data)) {
         if ($requireCriteria) {
             sendResponse(400, [], 'At least one evaluation criterion is required.');
         }
     } else {
-        if (!is_array($data['criteria']) || empty($data['criteria'])) {
+        if (!is_array($data['criteria']) || !array_is_list($data['criteria']) || empty($data['criteria']) || count($data['criteria']) > 100) {
             sendResponse(400, [], 'At least one evaluation criterion is required.');
         }
 
         $totalWeight = 0.0;
         foreach ($data['criteria'] as $criterion) {
-            if (!is_array($criterion) || trim((string)($criterion['criterion_name'] ?? '')) === '') {
-                sendResponse(400, [], 'Each evaluation criterion must have a name.');
-            }
+            if (!is_array($criterion)) sendResponse(400, [], 'Invalid criterion.');
+            requireFields($criterion, ['criterion_name', 'criterion_description', 'weight_percentage', 'max_score']);
+            requireText($criterion['criterion_name'] ?? null, 'criterion name', 255, true);
+            if (isset($criterion['criterion_description'])) requireText($criterion['criterion_description'], 'criterion description', 65535);
 
             $weight = $criterion['weight_percentage'] ?? null;
-            if (!is_numeric($weight) || (float)$weight < 0 || (float)$weight > 100) {
-                sendResponse(400, [], 'Each criterion weight must be between 0 and 100.');
-            }
+            requireDecimal($weight, 'criterion weight', 0, 100);
+            if (isset($criterion['max_score'])) requireDecimal($criterion['max_score'], 'maximum score', 0.01, 100);
             $totalWeight += (float)$weight;
         }
 
@@ -156,21 +155,33 @@ function validate_award_payload(array $data, bool $requireCriteria = false): voi
     }
 
     if (array_key_exists('document_requirements', $data)) {
-        if (!is_array($data['document_requirements'])) {
+        if (!is_array($data['document_requirements']) || !array_is_list($data['document_requirements']) || count($data['document_requirements']) > 100) {
             sendResponse(400, [], 'Document requirements must be a list.');
         }
 
         foreach ($data['document_requirements'] as $requirement) {
-            if (!is_array($requirement) || trim((string)($requirement['document_name'] ?? '')) === '') {
-                sendResponse(400, [], 'Each attachment requirement must have a document name.');
-            }
+            if (!is_array($requirement)) sendResponse(400, [], 'Invalid document requirement.');
+            requireFields($requirement, ['document_name', 'description', 'is_mandatory']);
+            requireText($requirement['document_name'] ?? null, 'document name', 255, true);
+            if (isset($requirement['description'])) requireText($requirement['description'], 'description', 65535);
+            if (isset($requirement['is_mandatory'])) requireBool($requirement['is_mandatory'], 'is_mandatory');
+        }
+    }
+    if (isset($data['eligibility_requirements'])) {
+        if (!is_array($data['eligibility_requirements']) || !array_is_list($data['eligibility_requirements']) || count($data['eligibility_requirements']) > 100) sendResponse(400, [], 'Invalid eligibility requirements.');
+        foreach ($data['eligibility_requirements'] as $requirement) {
+            if (!is_array($requirement)) sendResponse(400, [], 'Invalid eligibility requirement.');
+            requireFields($requirement, ['requirement_description', 'is_mandatory', 'order_index']);
+            requireText($requirement['requirement_description'] ?? null, 'requirement description', 65535, true);
+            if (isset($requirement['is_mandatory'])) requireBool($requirement['is_mandatory'], 'is_mandatory');
+            if (isset($requirement['order_index'])) requireIntRange($requirement['order_index'], 'order index', 0, 10000);
         }
     }
 }
 
 if ($method === 'GET') {
     if (isset($_GET['id'])) {
-        $award = getFullAward($db, (string)$_GET['id']);
+        $award = getFullAward($db, requireId($_GET['id'], 'award ID'));
         if (!$award) {
             sendResponse(404, [], 'Award not found.');
         }
@@ -214,8 +225,8 @@ if ($method === 'POST') {
             ':remarks' => $data['remarks'] ?? '',
             ':award_year' => (int)($data['award_year'] ?? date('Y')),
             ':min_qualifying_score' => (float)($data['min_qualifying_score'] ?? 85),
-            ':is_on_the_spot' => !empty($data['is_on_the_spot']) ? 1 : 0,
-            ':is_active' => !isset($data['is_active']) || $data['is_active'] ? 1 : 0,
+            ':is_on_the_spot' => isset($data['is_on_the_spot']) && requireBool($data['is_on_the_spot'], 'is_on_the_spot') ? 1 : 0,
+            ':is_active' => !isset($data['is_active']) || requireBool($data['is_active'], 'is_active') ? 1 : 0,
         ]);
 
         replace_award_relations(
@@ -242,6 +253,7 @@ if ($method === 'PUT') {
     if (empty($data['id'])) {
         sendResponse(400, [], 'Award id is required.');
     }
+    requireId($data['id'], 'award ID');
     if (!getFullAward($db, (string)$data['id'])) {
         sendResponse(404, [], 'Award not found.');
     }
@@ -270,17 +282,17 @@ if ($method === 'PUT') {
             ':remarks' => $data['remarks'] ?? null,
             ':award_year' => isset($data['award_year']) ? (int)$data['award_year'] : null,
             ':min_qualifying_score' => isset($data['min_qualifying_score']) ? (float)$data['min_qualifying_score'] : null,
-            ':is_on_the_spot' => array_key_exists('is_on_the_spot', $data) ? (!empty($data['is_on_the_spot']) ? 1 : 0) : null,
-            ':is_active' => array_key_exists('is_active', $data) ? (!empty($data['is_active']) ? 1 : 0) : null,
+            ':is_on_the_spot' => array_key_exists('is_on_the_spot', $data) ? (requireBool($data['is_on_the_spot'], 'is_on_the_spot') ? 1 : 0) : null,
+            ':is_active' => array_key_exists('is_active', $data) ? (requireBool($data['is_active'], 'is_active') ? 1 : 0) : null,
         ]);
 
         if (array_key_exists('criteria', $data) || array_key_exists('document_requirements', $data) || array_key_exists('eligibility_requirements', $data)) {
             replace_award_relations(
                 $db,
                 $data['id'],
-                $data['criteria'] ?? [],
-                $data['document_requirements'] ?? [],
-                $data['eligibility_requirements'] ?? []
+                $data['criteria'] ?? null,
+                $data['document_requirements'] ?? null,
+                $data['eligibility_requirements'] ?? null
             );
         }
 
@@ -296,7 +308,7 @@ if ($method === 'PUT') {
 if ($method === 'DELETE') {
     require_auth($db, ['ADMINISTRATOR']);
     $data = getJsonInput();
-    $awardId = (string)($_GET['id'] ?? ($data['id'] ?? ''));
+    $awardId = requireId($_GET['id'] ?? ($data['id'] ?? null), 'award ID');
 
     if ($awardId === '') {
         sendResponse(400, [], 'Award id is required for deletion.');

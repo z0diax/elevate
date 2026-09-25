@@ -190,7 +190,7 @@ if ($method === 'GET') {
     $actor = require_auth($db);
 
     if (isset($_GET['id'])) {
-        $application = getFullApplication($db, (string)$_GET['id']);
+        $application = getFullApplication($db, requireId($_GET['id'], 'application ID'));
         if (!$application) {
             sendResponse(404, [], 'Application not found.');
         }
@@ -231,6 +231,7 @@ if ($method === 'GET') {
 if ($method === 'POST') {
     $actor = require_auth($db, ['ADMINISTRATOR', 'SECRETARIAT', 'HEAD_OF_OFFICE', 'NOMINEE']);
     $data = getJsonInput();
+    requireFields($data, ['award_id', 'award_year', 'nominee_id', 'nominee_name', 'employee_id', 'position_title', 'office_id', 'division_section', 'employment_category', 'contact_number', 'email', 'barangay', 'nomination_type', 'justification', 'accomplishments', 'supporting_narrative', 'date_of_nomination', 'submission_id', 'documents']);
 
     if (empty($data['award_id']) || empty($data['nominee_name']) || empty($data['office_id'])) {
         sendResponse(400, [], 'Missing required fields: award_id, nominee_name, office_id.');
@@ -238,8 +239,33 @@ if ($method === 'POST') {
     if (!empty($data['documents'])) {
         sendResponse(400, [], 'Upload nomination attachments through the documents endpoint.');
     }
+    $data['award_id'] = requireId($data['award_id'], 'award ID');
+    $data['office_id'] = requireId($data['office_id'], 'office ID');
+    $data['nominee_name'] = requireText($data['nominee_name'], 'nominee name', 255, true);
+    if (isset($data['nominee_id'])) $data['nominee_id'] = optionalId($data['nominee_id'], 'nominee ID');
+    if (isset($data['award_year'])) $data['award_year'] = requireIntRange($data['award_year'], 'award year', 2020, 2100);
+    if (isset($data['date_of_nomination'])) requireDate($data['date_of_nomination'], 'nomination date');
+    if (!empty($data['email'])) requireEmail($data['email']);
+    if (isset($data['employment_category']) && !in_array($data['employment_category'], ['Permanent', 'Casual', 'Contractual', 'Job Order', 'Barangay Official', 'Barangay Worker'], true)) sendResponse(400, [], 'Invalid employment category.');
+    if (isset($data['nomination_type']) && !in_array($data['nomination_type'], ['Individual', 'Group / Team'], true)) sendResponse(400, [], 'Invalid nomination type.');
+    foreach (['employee_id' => 50, 'position_title' => 255, 'division_section' => 255, 'employment_category' => 100, 'contact_number' => 50, 'barangay' => 255, 'nomination_type' => 50, 'justification' => 65535, 'accomplishments' => 65535, 'supporting_narrative' => 65535] as $field => $max) {
+        if (isset($data[$field])) requireText($data[$field], $field, $max);
+    }
+    $officeStmt = $db->prepare('SELECT name FROM offices WHERE id = :id AND is_active = 1');
+    $officeStmt->execute([':id' => $data['office_id']]);
+    $officeName = $officeStmt->fetchColumn();
+    if ($officeName === false) sendResponse(400, [], 'Office not found.');
+    $data['office_name'] = $officeName;
+    if (!empty($data['nominee_id']) && $actor['role'] !== 'NOMINEE') {
+        $nomineeStmt = $db->prepare('SELECT full_name FROM profiles WHERE id = :id AND is_active = 1');
+        $nomineeStmt->execute([':id' => $data['nominee_id']]);
+        $nomineeName = $nomineeStmt->fetchColumn();
+        if ($nomineeName === false) sendResponse(400, [], 'Nominee account not found.');
+        $data['nominee_name'] = $nomineeName;
+    }
 
-    $submissionId = (string)($data['submission_id'] ?? '');
+    $submissionId = $data['submission_id'] ?? '';
+    if (!is_string($submissionId)) sendResponse(400, [], 'Invalid submission ID.');
     if ($submissionId !== '' && !preg_match('/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i', $submissionId)) {
         sendResponse(400, [], 'Invalid submission ID.');
     }
@@ -255,7 +281,7 @@ if ($method === 'POST') {
 
     $db->beginTransaction();
     try {
-        $year = (int)($data['award_year'] ?? date('Y'));
+        $year = $data['award_year'] ?? (int)date('Y');
 
         $stmtCount = $db->query("SELECT COUNT(*) FROM applications");
         $totalCount = (int)$stmtCount->fetchColumn() + 1;
@@ -263,7 +289,11 @@ if ($method === 'POST') {
 
         $stmtAward = $db->prepare("SELECT name FROM awards WHERE id = :id");
         $stmtAward->execute([':id' => $data['award_id']]);
-        $awardName = $stmtAward->fetchColumn() ?: ($data['award_name'] ?? 'Tacloban PRAISE Award');
+        $awardName = $stmtAward->fetchColumn();
+        if ($awardName === false) {
+            $db->rollBack();
+            sendResponse(400, [], 'Award not found.');
+        }
 
         $stmt = $db->prepare("
             INSERT INTO applications (
@@ -301,9 +331,9 @@ if ($method === 'POST') {
             ':barangay' => $data['barangay'] ?? null,
             ':nomination_type' => $data['nomination_type'] ?? 'Individual',
             ':nominator_id' => $actor['id'],
-            ':nominator_name' => $data['nominator_name'] ?? $actor['full_name'],
-            ':nominator_position' => $data['nominator_position'] ?? ($actor['position_title'] ?? 'Nominator'),
-            ':nominating_office' => $data['nominating_office'] ?? ($data['office_name'] ?? ''),
+            ':nominator_name' => $actor['full_name'],
+            ':nominator_position' => $actor['position_title'] ?? 'Nominator',
+            ':nominating_office' => $actor['office_name'] ?: $officeName,
             ':justification' => $data['justification'] ?? '',
             ':accomplishments' => $data['accomplishments'] ?? '',
             ':supporting_narrative' => $data['supporting_narrative'] ?? '',
@@ -335,10 +365,23 @@ if ($method === 'PUT') {
     $data = getJsonInput();
     $action = $_GET['action'] ?? ($data['action'] ?? '');
     $appId = $_GET['id'] ?? ($data['id'] ?? ($data['application_id'] ?? ''));
-
-    if ($appId === '') {
-        sendResponse(400, [], 'Application ID is required.');
-    }
+    $appId = requireId($appId, 'application ID');
+    $actionFields = [
+        'finalize_submission' => ['expected_requirement_ids'],
+        'resubmit' => ['remarks'],
+        'endorse' => ['decision', 'remarks'],
+        'verify_document' => ['document_id', 'status', 'remarks'],
+        'inspect_document' => ['document_id', 'status', 'remarks'],
+        'mark_verified' => ['remarks'],
+        'assign_evaluators' => ['remarks'],
+        'return_for_revision' => ['remarks'],
+        'deliberation' => ['decision', 'remarks', 'award_now'],
+    ];
+    if (!isset($actionFields[$action])) sendResponse(400, [], 'Unknown action specified.');
+    requireFields($data, array_merge(['id', 'application_id', 'action'], $actionFields[$action]));
+    if (isset($data['remarks'])) requireText($data['remarks'], 'remarks', 65535);
+    if (isset($data['document_id'])) requireId($data['document_id'], 'document ID');
+    if (isset($data['award_now'])) $data['award_now'] = requireBool($data['award_now'], 'award_now');
 
     $current = getFullApplication($db, $appId);
     if (!$current) {
@@ -354,9 +397,11 @@ if ($method === 'PUT') {
         }
 
         $expectedIds = $data['expected_requirement_ids'] ?? [];
-        if (!is_array($expectedIds) || count($expectedIds) !== count(array_unique(array_filter($expectedIds, 'is_string')))) {
+        if (!is_array($expectedIds) || !array_is_list($expectedIds) || count($expectedIds) > 100) {
             sendResponse(400, [], 'Invalid attachment requirements.');
         }
+        foreach ($expectedIds as $expectedId) requireId($expectedId, 'requirement ID');
+        if (count($expectedIds) !== count(array_unique($expectedIds))) sendResponse(400, [], 'Duplicate attachment requirement.');
 
         $db->beginTransaction();
         try {
@@ -981,7 +1026,7 @@ if ($method === 'PUT') {
 if ($method === 'DELETE') {
     require_auth($db, ['ADMINISTRATOR']);
     $data = getJsonInput();
-    $appId = (string)($_GET['id'] ?? ($data['id'] ?? ($data['application_id'] ?? '')));
+    $appId = requireId($_GET['id'] ?? ($data['id'] ?? ($data['application_id'] ?? null)), 'application ID');
 
     if ($appId === '') {
         sendResponse(400, [], 'Application ID is required.');

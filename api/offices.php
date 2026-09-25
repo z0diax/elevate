@@ -57,14 +57,15 @@ if ($method === 'GET') {
     require_auth($db, ['ADMINISTRATOR']);
 
     $data = getJsonInput();
+    requireFields($data, ['name', 'code', 'head_name', 'head_title']);
     if (empty($data['name']) || empty($data['code']) || empty($data['head_name'])) {
         sendResponse(400, [], "Missing required fields: name, code, head_name.");
     }
 
-    $name = trim((string)$data['name']);
-    $code = trim((string)$data['code']);
-    $headName = trim((string)$data['head_name']);
-    $headTitle = trim((string)($data['head_title'] ?? 'Department Head'));
+    $name = trim(requireText($data['name'], 'office name', 255, true));
+    $code = trim(requireText($data['code'], 'office code', 50, true));
+    $headName = trim(requireText($data['head_name'], 'head name', 255, true));
+    $headTitle = trim(requireText($data['head_title'] ?? 'Department Head', 'head title', 255, true));
 
     if (find_office_by_code($db, $code)) {
         sendResponse(409, [], "Office code {$code} already exists. Use a unique office code.");
@@ -102,9 +103,16 @@ if ($method === 'GET') {
     require_auth($db, ['ADMINISTRATOR']);
 
     $data = getJsonInput();
+    requireFields($data, ['id', 'name', 'code', 'head_name', 'head_title', 'is_active']);
     if (empty($data['id']) || empty($data['name']) || empty($data['code']) || empty($data['head_name'])) {
         sendResponse(400, [], "Missing required fields: id, name, code, head_name.");
     }
+    requireId($data['id'], 'office ID');
+    requireText($data['name'], 'office name', 255, true);
+    requireText($data['code'], 'office code', 50, true);
+    requireText($data['head_name'], 'head name', 255, true);
+    if (isset($data['head_title'])) requireText($data['head_title'], 'head title', 255, true);
+    if (array_key_exists('is_active', $data)) $data['is_active'] = requireBool($data['is_active'], 'is_active');
 
     $existing = find_office_by_id($db, (string)$data['id']);
 
@@ -170,7 +178,7 @@ if ($method === 'GET') {
     require_auth($db, ['ADMINISTRATOR']);
 
     $data = getJsonInput();
-    $officeId = trim((string)($data['id'] ?? ($_GET['id'] ?? '')));
+    $officeId = requireId($data['id'] ?? ($_GET['id'] ?? null), 'office ID');
 
     if ($officeId === '') {
         sendResponse(400, [], "Office id is required.");

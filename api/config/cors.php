@@ -83,8 +83,18 @@ set_exception_handler(static function (Throwable $error): void {
 });
 
 function getJsonInput() {
-    $raw = file_get_contents("php://input");
-    if (empty($raw)) return [];
-    $data = json_decode($raw, true);
-    return is_array($data) ? $data : [];
+    $type = $_SERVER['CONTENT_TYPE'] ?? '';
+    if (!preg_match('~^application/json(?:\s*;|\s*$)~i', $type)) sendResponse(415, [], 'JSON content type required.');
+    $raw = file_get_contents('php://input');
+    if ($raw === false || strlen($raw) > 1048576) sendResponse(413, [], 'JSON request is too large.');
+    if (trim($raw) === '') sendResponse(400, [], 'Invalid JSON request.');
+    try {
+        $data = json_decode($raw, true, 64, JSON_THROW_ON_ERROR);
+    } catch (JsonException $e) {
+        sendResponse(400, [], 'Invalid JSON request.');
+    }
+    if (!is_array($data) || !str_starts_with(ltrim($raw), '{')) sendResponse(400, [], 'JSON object required.');
+    return $data;
 }
+
+require_once __DIR__ . '/validation.php';

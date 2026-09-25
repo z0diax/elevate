@@ -87,7 +87,7 @@ if ($method === 'GET') {
         if ($error->getCode() === '23000') {
             sendResponse(409, [], "Office code {$code} already exists. Use a unique office code.");
         }
-        sendResponse(500, [], 'Failed to create office.');
+        sendInternalError($error, 'offices.php:create', 'Failed to create office.');
     }
 
     sendResponse(201, normalize_office([
@@ -160,7 +160,7 @@ if ($method === 'GET') {
         $db->commit();
     } catch (Throwable $error) {
         $db->rollBack();
-        sendResponse(500, [], "Failed to update office: " . $error->getMessage());
+        sendInternalError($error, 'offices.php:update', 'Failed to update office.');
     }
 
     $office = find_office_by_id($db, (string)$data['id']);

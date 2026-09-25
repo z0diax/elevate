@@ -13,6 +13,9 @@ USE `tacloban_praise_db`;
 
 SET FOREIGN_KEY_CHECKS = 0;
 
+DROP TABLE IF EXISTS `application_evaluator_assignments`;
+DROP TABLE IF EXISTS `award_route_evaluators`;
+DROP TABLE IF EXISTS `award_evaluation_routes`;
 DROP TABLE IF EXISTS `notifications`;
 DROP TABLE IF EXISTS `application_history`;
 DROP TABLE IF EXISTS `evaluation_scores`;
@@ -380,5 +383,43 @@ INSERT INTO `award_document_requirements` (`id`, `award_id`, `document_name`, `d
 ('dreq-4-2', 'awd-4', 'Supporting Metrics or Evidence', 'Before-and-after metrics, screenshots, or measurable results.', 1),
 ('dreq-5-1', 'awd-5', 'Official Form A-1 PRAISE Nomination Form', 'Signed frontline award nomination form.', 1),
 ('dreq-5-2', 'awd-5', 'Incident, Service, or Deployment Evidence', 'Relevant reports, certifications, or citations.', 1);
+
+CREATE TABLE IF NOT EXISTS `award_evaluation_routes` (
+  `id` VARCHAR(64) NOT NULL PRIMARY KEY,
+  `award_id` VARCHAR(64) NOT NULL,
+  `required_evaluators` INT NOT NULL DEFAULT 1,
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY `uq_award_route` (`award_id`),
+  CONSTRAINT `fk_route_award` FOREIGN KEY (`award_id`) REFERENCES `awards` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `award_route_evaluators` (
+  `id` VARCHAR(64) NOT NULL PRIMARY KEY,
+  `route_id` VARCHAR(64) NOT NULL,
+  `evaluator_id` VARCHAR(64) NOT NULL,
+  `sequence_no` INT NOT NULL DEFAULT 1,
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  UNIQUE KEY `uq_route_evaluator` (`route_id`, `evaluator_id`),
+  CONSTRAINT `fk_route_evaluator_route` FOREIGN KEY (`route_id`) REFERENCES `award_evaluation_routes` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_route_evaluator_user` FOREIGN KEY (`evaluator_id`) REFERENCES `profiles` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `application_evaluator_assignments` (
+  `id` VARCHAR(64) NOT NULL PRIMARY KEY,
+  `application_id` VARCHAR(64) NOT NULL,
+  `evaluator_id` VARCHAR(64) NOT NULL,
+  `route_id` VARCHAR(64) DEFAULT NULL,
+  `sequence_no` INT NOT NULL DEFAULT 1,
+  `status` ENUM('Pending', 'In Progress', 'Completed', 'Reassigned') NOT NULL DEFAULT 'Pending',
+  `assigned_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `completed_at` DATETIME DEFAULT NULL,
+  UNIQUE KEY `uq_application_evaluator` (`application_id`, `evaluator_id`),
+  KEY `idx_assignment_evaluator` (`evaluator_id`, `status`),
+  CONSTRAINT `fk_assignment_application` FOREIGN KEY (`application_id`) REFERENCES `applications` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_assignment_evaluator` FOREIGN KEY (`evaluator_id`) REFERENCES `profiles` (`id`),
+  CONSTRAINT `fk_assignment_route` FOREIGN KEY (`route_id`) REFERENCES `award_evaluation_routes` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 SET FOREIGN_KEY_CHECKS = 1;

@@ -91,6 +91,11 @@ let cachedAuditLogs: ApplicationHistory[] = [];
 let cachedNotifications: InAppNotification[] = [];
 let cachedCertificateTemplateSettings: CertificateTemplateSettings = DEFAULT_CERTIFICATE_TEMPLATE_SETTINGS;
 let currentUser: UserProfile | null = null;
+let csrfToken: string | null = null;
+
+function rememberCsrfToken(user: any): void {
+  csrfToken = typeof user?.csrf_token === 'string' && user.csrf_token ? user.csrf_token : null;
+}
 
 function clearCaches() {
   cachedUsers = [];
@@ -101,17 +106,24 @@ function clearCaches() {
   cachedNotifications = [];
   cachedCertificateTemplateSettings = DEFAULT_CERTIFICATE_TEMPLATE_SETTINGS;
   currentUser = null;
+  csrfToken = null;
 }
 
 async function apiRequest<T>(endpoint: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method || 'GET').toUpperCase();
+  const headers = new Headers(init?.headers);
+  headers.set('Accept', 'application/json');
+  if (!(init?.body instanceof FormData)) {
+    headers.set('Content-Type', 'application/json');
+  }
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && csrfToken) {
+    headers.set('X-CSRF-Token', csrfToken);
+  }
+
   const response = await fetch(`${API_BASE}/${endpoint}`, {
     credentials: 'same-origin',
-    headers: {
-      Accept: 'application/json',
-      ...(init?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
-      ...(init?.headers || {}),
-    },
     ...init,
+    headers,
   });
 
   let payload: ApiEnvelope<T> | null = null;
@@ -121,14 +133,23 @@ async function apiRequest<T>(endpoint: string, init?: RequestInit): Promise<T> {
     if (response.status === 204) {
       return undefined as T;
     }
-    throw new Error(`Unexpected API response from ${endpoint}.`);
+    throw new Error('The server returned an unexpected response. Please try again.');
+  }
+
+  if (!payload || typeof payload !== 'object' || (payload.status !== 'success' && payload.status !== 'error')) {
+    throw new Error('The server returned an unexpected response. Please try again.');
   }
 
   if (!response.ok || payload.status === 'error') {
     if (response.status === 401) {
       clearCaches();
     }
-    throw new Error(payload.message || `Request failed for ${endpoint}.`);
+    if (response.status >= 500) {
+      throw new Error('The server could not complete the request. Please try again.');
+    }
+    throw new Error(typeof payload.message === 'string' && payload.message
+      ? payload.message
+      : 'The request could not be completed.');
   }
 
   return payload.data;
@@ -305,6 +326,7 @@ function normalizeApplication(application: any): Application {
     documents: Array.isArray(application.documents) ? application.documents.map(normalizeDocument) : [],
     evaluations: Array.isArray(application.evaluations) ? application.evaluations.map(normalizeEvaluation) : [],
     assigned_evaluators: Array.isArray(application.assigned_evaluators) ? application.assigned_evaluators.map(String) : [],
+    evaluator_assignments: Array.isArray(application.evaluator_assignments) ? application.evaluator_assignments : [],
     endorsement: application.endorsement
       ? {
           id: String(application.endorsement.id),
@@ -407,6 +429,7 @@ function normalizeStoredCertificateTemplateSettings(settings: any): CertificateT
 
 async function fetchCurrentSessionUser(): Promise<UserProfile | null> {
   const user = await apiRequest<any | null>('auth.php?action=current');
+  rememberCsrfToken(user);
   currentUser = user ? normalizeUser(user) : null;
   return currentUser;
 }
@@ -562,19 +585,23 @@ export const praiseService = {
   },
 
   async login(email: string, password: string): Promise<UserProfile> {
-    const user = normalizeUser(await apiRequest<any>('auth.php?action=login', {
+    const response = await apiRequest<any>('auth.php?action=login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
-    }));
+    });
+    rememberCsrfToken(response);
+    const user = normalizeUser(response);
     currentUser = user;
     return user;
   },
 
   async registerNominee(fullName: string, email: string, password: string): Promise<UserProfile> {
-    const user = normalizeUser(await apiRequest<any>('auth.php?action=register_nominee', {
+    const response = await apiRequest<any>('auth.php?action=register_nominee', {
       method: 'POST',
       body: JSON.stringify({ full_name: fullName, email, password }),
-    }));
+    });
+    rememberCsrfToken(response);
+    const user = normalizeUser(response);
     currentUser = user;
     return user;
   },
@@ -672,6 +699,21 @@ export const praiseService = {
 
   getAwards(): Award[] {
     return [...cachedAwards];
+  },
+
+  async getAwardEvaluationRoute(awardId: string) {
+    return apiRequest<import('../types').AwardEvaluationRoute | null>(`award_routes.php?award_id=${encodeURIComponent(awardId)}`);
+  },
+
+  async getAvailableEvaluators() {
+    return apiRequest<Array<Pick<UserProfile, 'id' | 'full_name' | 'office_name'>>>('award_routes.php?action=evaluators');
+  },
+
+  async saveAwardEvaluationRoute(awardId: string, requiredEvaluators: number, evaluatorIds: string[], isActive: boolean) {
+    return apiRequest(`award_routes.php?award_id=${encodeURIComponent(awardId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ required_evaluators: requiredEvaluators, evaluator_ids: evaluatorIds, is_active: isActive }),
+    });
   },
 
   getAwardById(id: string): Award | undefined {
@@ -842,6 +884,14 @@ export const praiseService = {
     await loadApplications();
     await loadAuditLogs();
     return application;
+  },
+
+  async startEvaluation(applicationId: string): Promise<void> {
+    await apiRequest('evaluations.php?action=start', {
+      method: 'POST',
+      body: JSON.stringify({ application_id: applicationId }),
+    });
+    await loadApplications();
   },
 
   async submitEvaluation(payload: {

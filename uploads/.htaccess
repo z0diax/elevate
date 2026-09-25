@@ -1,7 +1,15 @@
-# Disable PHP execution in uploads directory for security
-<FilesMatch "(?i)\.(php|phtml|php3|php4|php5|php7|phps|cgi|pl|exe)$">
-    Order Allow,Deny
-    Deny from all
-</FilesMatch>
+Options -Indexes -ExecCGI -Includes
 
-Options -Indexes
+# Uploads are static documents, never server-side programs.
+<IfModule mod_php.c>
+    php_flag engine off
+</IfModule>
+<IfModule php_module>
+    php_flag engine off
+</IfModule>
+RemoveHandler .php .php3 .php4 .php5 .php7 .php8 .phtml .phar .phps .cgi .fcgi .pl .py .rb .sh .shtml
+RemoveType .php .php3 .php4 .php5 .php7 .php8 .phtml .phar .phps .cgi .fcgi .pl .py .rb .sh .shtml
+
+<FilesMatch "(?i)\.(?:php[0-9]?|phtml|phar|phps|cgi|fcgi|pl|py|rb|sh|shtml|asp|aspx|jsp|exe|bat|cmd|js|html?|svg)$">
+    Require all denied
+</FilesMatch>

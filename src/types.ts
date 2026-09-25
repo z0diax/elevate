@@ -90,6 +90,35 @@ export interface Award {
   criteria?: AwardCriterion[];
 }
 
+export interface AwardRouteEvaluator {
+  id: string;
+  route_id: string;
+  evaluator_id: string;
+  sequence_no: number;
+  is_active: boolean;
+  full_name?: string;
+}
+
+export interface AwardEvaluationRoute {
+  id: string;
+  award_id: string;
+  required_evaluators: number;
+  is_active: boolean;
+  evaluators: AwardRouteEvaluator[];
+}
+
+export interface ApplicationEvaluatorAssignment {
+  id: string;
+  application_id: string;
+  evaluator_id: string;
+  route_id: string | null;
+  sequence_no: number;
+  status: 'Pending' | 'In Progress' | 'Completed' | 'Reassigned';
+  evaluator_name?: string;
+  assigned_at: string;
+  completed_at: string | null;
+}
+
 export type DocumentStatus = 'Not Submitted' | 'Submitted' | 'For Verification' | 'Head Approved' | 'Head Rejected' | 'Verified' | 'Rejected' | 'Missing';
 
 export interface ApplicationDocument {
@@ -158,6 +187,7 @@ export interface Application {
   documents?: ApplicationDocument[];
   evaluations?: Evaluation[];
   assigned_evaluators?: string[];
+  evaluator_assignments?: ApplicationEvaluatorAssignment[];
   endorsement?: EndorsementRecord;
 }
 

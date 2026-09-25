@@ -227,9 +227,9 @@ if ($method === 'POST') {
         );
 
         $db->commit();
-    } catch (Exception $e) {
+    } catch (Throwable $e) {
         $db->rollBack();
-        sendResponse(500, [], 'Failed to create award: ' . $e->getMessage());
+        sendInternalError($e, 'awards.php:create', 'Failed to create award.');
     }
 
     sendResponse(201, getFullAward($db, $id), 'Award created.');
@@ -285,9 +285,9 @@ if ($method === 'PUT') {
         }
 
         $db->commit();
-    } catch (Exception $e) {
+    } catch (Throwable $e) {
         $db->rollBack();
-        sendResponse(500, [], 'Failed to update award: ' . $e->getMessage());
+        sendInternalError($e, 'awards.php:update', 'Failed to update award.');
     }
 
     sendResponse(200, getFullAward($db, (string)$data['id']), 'Award updated.');
@@ -318,9 +318,9 @@ if ($method === 'DELETE') {
         // Linked criteria, eligibility, and document requirements are removed by database cascades.
         $db->prepare('DELETE FROM awards WHERE id = :id')->execute([':id' => $awardId]);
         $db->commit();
-    } catch (Exception $e) {
+    } catch (Throwable $e) {
         $db->rollBack();
-        sendResponse(500, [], 'Failed to delete award: ' . $e->getMessage());
+        sendInternalError($e, 'awards.php:delete', 'Failed to delete award.');
     }
 
     sendResponse(200, ['id' => $awardId], 'Award deleted successfully.');

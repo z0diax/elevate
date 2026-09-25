@@ -226,6 +226,12 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (!/\.(pdf|docx|jpe?g|png)$/i.test(file.name)) {
+      setErrorMessage('Unsupported file type. Please upload a PDF, DOCX, JPG, JPEG, or PNG file.');
+      e.target.value = '';
+      return;
+    }
+
     if (file.size === 0) {
       setErrorMessage('The selected attachment is empty. Please choose a valid file.');
       return;
@@ -233,7 +239,8 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
 
     // Check size limit (max 10MB)
     if (file.size > 10 * 1024 * 1024) {
-      alert('File exceeds 10MB limit. Please upload a compressed document.');
+      setErrorMessage('File is too large. Maximum file size is 10 MB.');
+      e.target.value = '';
       return;
     }
 
@@ -854,7 +861,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
                         <span>{doc.file?.name || 'File attached'} ({((doc.file_size || 0) / 1024 / 1024).toFixed(2)} MB)</span>
                       </p>
                     ) : (
-                      <p className="text-[11px] text-slate-400 mt-1">PDF, DOCX, or Scanned Image (Max 10MB)</p>
+                      <p className="text-[11px] text-slate-400 mt-1">Accepted formats: PDF, DOCX, JPG, JPEG, PNG. Maximum file size: 10 MB.</p>
                     )}
                   </div>
 
@@ -864,7 +871,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
                       <span>{doc.is_uploaded ? 'Replace File' : 'Upload File'}</span>
                       <input
                         type="file"
-                        accept=".pdf,.docx,.doc,.jpg,.jpeg,.png"
+                        accept=".pdf,.docx,.jpg,.jpeg,.png"
                         disabled={isSubmitting}
                         onChange={(e) => handleFileUpload(doc.requirement_id || '', doc.requirement_name, e)}
                         className="hidden"

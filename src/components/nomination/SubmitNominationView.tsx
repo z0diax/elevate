@@ -280,9 +280,22 @@ export const SubmitNominationView: React.FC<SubmitNominationViewProps> = ({
                 <p className="break-words text-sm font-semibold text-slate-900">{document.document_name}</p>
                 <p className="mt-1 break-words text-sm text-red-700">{document.verification_remarks || 'This document needs replacement.'}</p>
                 <label className="mt-3 block text-sm font-semibold text-slate-900" htmlFor={'replacement-' + document.id}>Choose replacement</label>
-                <input id={'replacement-' + document.id} type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" disabled={isResubmitting} onChange={event => {
+                <p className="mt-1 text-xs text-slate-500">Accepted formats: PDF, DOCX, JPG, JPEG, PNG. Maximum file size: 10 MB.</p>
+                <input id={'replacement-' + document.id} type="file" accept=".pdf,.docx,.jpg,.jpeg,.png" disabled={isResubmitting} onChange={event => {
                   const file = event.target.files?.[0];
-                  if (file) setReplacementFiles(current => ({ ...current, [document.id]: file }));
+                  if (!file) return;
+                  if (!/\.(pdf|docx|jpe?g|png)$/i.test(file.name)) {
+                    setResubmitError('Unsupported file type. Please upload a PDF, DOCX, JPG, JPEG, or PNG file.');
+                    event.target.value = '';
+                    return;
+                  }
+                  if (file.size === 0 || file.size > 10 * 1024 * 1024) {
+                    setResubmitError(file.size === 0 ? 'The selected attachment is empty.' : 'File is too large. Maximum file size is 10 MB.');
+                    event.target.value = '';
+                    return;
+                  }
+                  setResubmitError('');
+                  setReplacementFiles(current => ({ ...current, [document.id]: file }));
                 }} className="mt-2 block w-full min-w-0 text-sm file:mr-3 file:min-h-11 file:rounded-lg file:border-0 file:bg-blue-50 file:px-4 file:text-sm file:font-semibold file:text-blue-700" />
                 {replacementFiles[document.id] && <p className="mt-2 break-words text-sm text-green-700">Selected: {replacementFiles[document.id].name}</p>}
               </div>

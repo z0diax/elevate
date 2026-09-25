@@ -18,26 +18,11 @@ $actor = require_auth($db);
 
 if ($method === 'GET') {
     if (isset($_GET['application_id'])) {
-        if (in_array($actor['role'], ['NOMINEE', 'HEAD_OF_OFFICE'], true)) {
-            $accessStmt = $db->prepare('SELECT nominator_id, nominee_id, office_id, status FROM applications WHERE id = :id');
-            $accessStmt->execute([':id' => $_GET['application_id']]);
-            $application = $accessStmt->fetch();
-            if (!$application) {
-                sendResponse(404, [], 'Application not found.');
-            }
-            $isOwnNomination = $application['nominator_id'] === $actor['id'] || $application['nominee_id'] === $actor['id'];
-            $isSameOfficeHead = $actor['role'] === 'HEAD_OF_OFFICE'
-                && !empty($actor['office_id'])
-                && $application['office_id'] === $actor['office_id']
-                && $application['status'] !== 'Draft';
-            if (!$isOwnNomination && !$isSameOfficeHead) {
-                sendResponse(403, [], 'You cannot view this nomination history.');
-            }
-        }
+        require_application_access($db, $actor, (string)$_GET['application_id']);
         $stmt = $db->prepare("SELECT * FROM application_history WHERE application_id = :id ORDER BY created_at DESC");
         $stmt->execute([':id' => $_GET['application_id']]);
     } else {
-        if (in_array($actor['role'], ['NOMINEE', 'HEAD_OF_OFFICE'], true)) {
+        if (!in_array($actor['role'], ['ADMINISTRATOR', 'SECRETARIAT'], true)) {
             sendResponse(403, [], 'Request audit logs for an accessible nomination.');
         }
         $stmt = $db->query("SELECT * FROM application_history ORDER BY created_at DESC LIMIT 200");
@@ -50,6 +35,7 @@ if ($method === 'GET') {
     if (empty($data['application_id']) || empty($data['action'])) {
         sendResponse(400, [], "application_id and action are required.");
     }
+    require_application_access($db, $actor, (string)$data['application_id']);
 
     $id = 'log-' . time() . '-' . rand(10, 99);
     $stmt = $db->prepare("
@@ -59,9 +45,9 @@ if ($method === 'GET') {
     $stmt->execute([
         ':id' => $id,
         ':app_id' => $data['application_id'],
-        ':user_id' => $data['user_id'] ?? null,
-        ':user_name' => $data['user_name'] ?? 'System',
-        ':user_role' => $data['user_role'] ?? 'SECRETARIAT',
+        ':user_id' => $actor['id'],
+        ':user_name' => $actor['full_name'],
+        ':user_role' => $actor['role'],
         ':action' => $data['action'],
         ':prev_status' => $data['previous_status'] ?? null,
         ':new_status' => $data['new_status'] ?? '',

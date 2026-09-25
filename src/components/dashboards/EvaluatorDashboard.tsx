@@ -41,6 +41,21 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
   const [errorMsg, setErrorMsg] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const openAssessment = async (application: Application) => {
+    setErrorMsg('');
+    setActiveTab('scorecard');
+    setSelectedAppId(application.id);
+    const alreadySubmitted = application.evaluations?.some(evaluation => evaluation.evaluator_id === currentUser.id && evaluation.is_submitted);
+    if (application.processing_stage === 'Evaluation' && !alreadySubmitted) {
+      try {
+        await praiseService.startEvaluation(application.id);
+        await onRefreshData();
+      } catch (error) {
+        setErrorMsg(error instanceof Error ? error.message : 'Could not start evaluation.');
+      }
+    }
+  };
+
   useEffect(() => {
     if (selectedAppId && !assignedApplications.some(application => application.id === selectedAppId)) {
       setSelectedAppId('');
@@ -229,7 +244,7 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
           </h3>
 
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
-            {assignedApplications.length > 0 && <NominationQueueCards applications={assignedApplications} onOpen={application => { setActiveTab('scorecard'); setSelectedAppId(application.id); }} actionLabel={application => application.processing_stage === 'Evaluation' ? 'Open assessment' : 'View assessment'} />}
+            {assignedApplications.length > 0 && <NominationQueueCards applications={assignedApplications} onOpen={application => void openAssessment(application)} actionLabel={application => application.processing_stage === 'Evaluation' ? 'Open assessment' : 'View assessment'} />}
             {assignedApplications.length === 0 ? (
               <div className="p-12 text-center text-slate-400">
                 <Scale size={32} className="mx-auto mb-2 opacity-30 text-slate-400" />
@@ -271,7 +286,7 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
                       <p className="mt-1 text-[10px] text-slate-500">{application.processing_stage}</p>
                     </td>
                     <td className="px-5 py-4 text-right">
-                      <button type="button" onClick={() => { setActiveTab('scorecard'); setSelectedAppId(application.id); }} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100">
+                      <button type="button" onClick={() => void openAssessment(application)} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100">
                         {application.processing_stage === 'Evaluation' ? 'Open assessment' : 'View assessment'}
                       </button>
                     </td>

@@ -8,6 +8,9 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/config/database.php';
 
+ini_set('display_errors', '0');
+ini_set('log_errors', '1');
+
 header('Content-Type: text/html; charset=UTF-8');
 
 $database = new Database();
@@ -55,7 +58,8 @@ function render_message_page(string $title, string $message, string $accent = '#
 }
 
 if (!$rawDb) {
-    $message = 'Cannot connect to MySQL on localhost:3306. Start MySQL from the XAMPP Control Panel and try again.';
+    http_response_code(503);
+    $message = 'Database connection failed.';
     if ($isApi) {
         respond_json(['status' => 'error', 'message' => $message]);
     }
@@ -103,16 +107,22 @@ try {
             ],
         ]);
     }
-} catch (Exception $exception) {
+} catch (Throwable $exception) {
+    error_log('[setup_db.php:initialize] ' . get_class($exception) . ': ' . $exception->getMessage());
     if (isset($db) && $db instanceof PDO) {
-        $db->exec('SET FOREIGN_KEY_CHECKS = 1;');
+        try {
+            $db->exec('SET FOREIGN_KEY_CHECKS = 1;');
+        } catch (Throwable $resetError) {
+            error_log('[setup_db.php:reset_foreign_keys] ' . get_class($resetError) . ': ' . $resetError->getMessage());
+        }
     }
 
+    http_response_code(500);
     if ($isApi) {
-        respond_json(['status' => 'error', 'message' => $exception->getMessage()]);
+        respond_json(['status' => 'error', 'message' => 'Database setup failed.']);
     }
 
-    render_message_page('Database Setup Failed', $exception->getMessage(), '#f87171');
+    render_message_page('Database Setup Failed', 'Database setup failed.', '#f87171');
 }
 ?>
 <!DOCTYPE html>

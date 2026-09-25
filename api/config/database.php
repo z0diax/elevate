@@ -34,7 +34,7 @@ class Database {
             ];
             $this->conn = new PDO($dsn, $this->username, $this->password, $options);
         } catch(PDOException $exception) {
-            // Return error response for API callers
+            error_log('[database.php:connect] ' . get_class($exception) . ': ' . $exception->getMessage());
             return null;
         }
         return $this->conn;
@@ -47,6 +47,7 @@ class Database {
                 PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
             ]);
         } catch(PDOException $e) {
+            error_log('[database.php:connect_without_db] ' . get_class($e) . ': ' . $e->getMessage());
             return null;
         }
     }

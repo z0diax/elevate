@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Application, Award, Office, UserProfile, UserRole } from '../../types';
+import { Application, Award, AwardEvaluationRoute, Office, UserProfile, UserRole } from '../../types';
 import { StatusBadge } from '../common/StatusBadge';
 import { 
   Users, 
@@ -79,6 +79,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [trackingDocId, setTrackingDocId] = useState<string | null>(null);
   const [isAwardModalOpen, setIsAwardModalOpen] = useState(false);
   const [editingAward, setEditingAward] = useState<Award | null>(null);
+  const [routingAward, setRoutingAward] = useState<Award | null>(null);
+  const [routingExisting, setRoutingExisting] = useState<AwardEvaluationRoute | null>(null);
+  const [routingCount, setRoutingCount] = useState(1);
+  const [routingIds, setRoutingIds] = useState<string[]>(['']);
+  const [routingActive, setRoutingActive] = useState(true);
+  const [routingError, setRoutingError] = useState('');
+  const [availableEvaluators, setAvailableEvaluators] = useState<Array<Pick<UserProfile, 'id' | 'full_name' | 'office_name'>>>([]);
   const [duplicatingAwardName, setDuplicatingAwardName] = useState<string | null>(null);
   const [activeAwardModalTab, setActiveAwardModalTab] = useState<AwardModalTab>('details');
 
@@ -134,6 +141,43 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   useEffect(() => {
     setActiveSubTab(initialSubTab);
   }, [initialSubTab]);
+
+  const openRouting = async (award: Award) => {
+    setRoutingAward(award);
+    setRoutingError('');
+    try {
+      const [route, evaluators] = await Promise.all([
+        praiseService.getAwardEvaluationRoute(award.id),
+        praiseService.getAvailableEvaluators(),
+      ]);
+      setRoutingExisting(route);
+      setRoutingCount(route?.required_evaluators || 1);
+      setRoutingIds(route?.evaluators.map(member => member.evaluator_id) || ['']);
+      setRoutingActive(route?.is_active ?? true);
+      setAvailableEvaluators(evaluators);
+    } catch (error) {
+      setRoutingError(error instanceof Error ? error.message : 'Could not load evaluation routing.');
+    }
+  };
+
+  const saveRouting = async () => {
+    if (routingIds.length !== routingCount || routingIds.some(id => !id) || new Set(routingIds).size !== routingCount) {
+      setRoutingError('Select exactly the required number of different evaluators.');
+      return;
+    }
+    if (!routingAward) return;
+    setIsSaving(true);
+    setRoutingError('');
+    try {
+      await praiseService.saveAwardEvaluationRoute(routingAward.id, routingCount, routingIds, routingActive);
+      setRoutingAward(null);
+      showToast('Evaluation routing saved.');
+    } catch (error) {
+      setRoutingError(error instanceof Error ? error.message : 'Could not save evaluation routing.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   // Statistics Calculations
   const totalApps = applications.length;
@@ -795,6 +839,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </td>
                         <td className="px-4 py-3.5">
                           <StatusBadge status={app.status} size="sm" />
+                          {app.evaluator_assignments && app.evaluator_assignments.length > 0 && (
+                            <div className="mt-1 text-[11px] text-slate-500" title={app.evaluator_assignments.map(assignment => `${assignment.evaluator_name || assignment.evaluator_id}: ${assignment.status}`).join('\n')}>
+                              {app.evaluator_assignments.filter(assignment => assignment.status === 'Completed').length} of {app.evaluator_assignments.filter(assignment => assignment.status !== 'Reassigned').length} evaluations completed
+                            </div>
+                          )}
                         </td>
                         <td className="px-4 py-3.5">
                           {app.final_weighted_score ? (
@@ -922,6 +971,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <span>Duplicate</span>
                   </button>
                   <button
+                    onClick={() => void openRouting(award)}
+                    className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-xs font-semibold rounded-lg text-indigo-700 inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    <Users size={13} />
+                    <span>Evaluation Routing</span>
+                  </button>
+                  <button
                     onClick={() => handleOpenAwardModal(award)}
                     className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-xs font-semibold rounded-lg text-slate-700 dark:text-slate-200 inline-flex items-center gap-1 cursor-pointer"
                   >
@@ -941,6 +997,37 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             ))}
           </div>
+          {routingAward && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
+              <div className="w-full max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">Evaluation Routing: {routingAward.name}</h3>
+                <p className="mt-1 text-xs text-slate-500">{routingExisting ? 'Changes apply to future nominations only.' : 'Set the evaluators for future nominations.'}</p>
+                <label className="mt-4 block text-xs font-semibold text-slate-700 dark:text-slate-200">Required Evaluators</label>
+                <input type="number" min={1} max={100} value={routingCount} onChange={event => {
+                  const count = Math.min(100, Math.max(1, Math.floor(Number(event.target.value) || 1)));
+                  setRoutingCount(count);
+                  setRoutingIds(previous => Array.from({ length: count }, (_, index) => previous[index] || ''));
+                }} className="mt-1 w-24 rounded border border-slate-300 bg-white p-2 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-white" />
+                <div className="mt-4 space-y-3">
+                  {routingIds.map((id, index) => (
+                    <label key={index} className="block text-xs font-semibold text-slate-700 dark:text-slate-200">
+                      Evaluator {index + 1}
+                      <select value={id} onChange={event => setRoutingIds(previous => previous.map((value, position) => position === index ? event.target.value : value))} className="mt-1 block w-full rounded border border-slate-300 bg-white p-2 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-white">
+                        <option value="">Select an active evaluator</option>
+                        {availableEvaluators.map(evaluator => <option key={evaluator.id} value={evaluator.id} disabled={routingIds.some((selected, position) => position !== index && selected === evaluator.id)}>{evaluator.full_name}{evaluator.office_name ? ` — ${evaluator.office_name}` : ''}</option>)}
+                      </select>
+                    </label>
+                  ))}
+                </div>
+                <label className="mt-4 flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200"><input type="checkbox" checked={routingActive} onChange={event => setRoutingActive(event.target.checked)} /> Routing enabled</label>
+                {routingError && <p role="alert" className="mt-3 text-xs text-red-600">{routingError}</p>}
+                <div className="mt-5 flex justify-end gap-2">
+                  <button onClick={() => setRoutingAward(null)} className="rounded px-4 py-2 text-xs font-semibold text-slate-600">Cancel</button>
+                  <button onClick={() => void saveRouting()} disabled={isSaving} className="rounded bg-blue-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-50">Save Routing</button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1753,6 +1840,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <h3 className="text-base font-bold text-slate-950">Current status</h3>
             <StatusBadge status={trackingApp.status} size="md" />
             <p className="break-words text-sm leading-6 text-slate-700">{trackingApp.required_action || 'No pending action recorded.'}</p>
+            {!!trackingApp.evaluator_assignments?.length && <div className="rounded-lg border border-slate-200 p-3 text-sm">
+              <h4 className="font-semibold text-slate-900">Evaluation Progress</h4>
+              <ul className="mt-2 space-y-1">{trackingApp.evaluator_assignments.map(assignment => <li key={assignment.id} className="flex justify-between gap-3 text-slate-600"><span>{assignment.evaluator_name || assignment.evaluator_id}</span><span>{assignment.status}</span></li>)}</ul>
+              <p className="mt-2 font-semibold text-slate-800">{trackingApp.evaluator_assignments.filter(assignment => assignment.status === 'Completed').length} of {trackingApp.evaluator_assignments.filter(assignment => assignment.status !== 'Reassigned').length} evaluations completed</p>
+            </div>}
           </section>}
           {trackingTab === 'documents' && <NominationDocuments application={trackingApp} onOpen={setTrackingDocId} />}
           {trackingTab === 'details' && <NominationDetails application={trackingApp} />}

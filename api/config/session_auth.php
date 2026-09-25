@@ -28,6 +28,28 @@ function get_session_user_id(): ?string {
     return $_SESSION['praise_user_id'] ?? null;
 }
 
+function get_or_create_csrf_token(): string {
+    praise_start_session();
+    if (!isset($_SESSION['csrf_token']) || !is_string($_SESSION['csrf_token']) || $_SESSION['csrf_token'] === '') {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+    }
+    return $_SESSION['csrf_token'];
+}
+
+function require_csrf(): void {
+    $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
+    if (in_array($method, ['GET', 'HEAD', 'OPTIONS'], true)) {
+        return;
+    }
+
+    praise_start_session();
+    $expected = $_SESSION['csrf_token'] ?? null;
+    $provided = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? null;
+    if (!is_string($expected) || $expected === '' || !is_string($provided) || !hash_equals($expected, $provided)) {
+        sendResponse(403, [], 'Invalid or missing CSRF token.');
+    }
+}
+
 function get_session_user($db): ?array {
     $userId = get_session_user_id();
     if (!$userId) {
@@ -52,6 +74,7 @@ function set_auth_session(string $userId): void {
     praise_start_session();
     session_regenerate_id(true);
     $_SESSION['praise_user_id'] = $userId;
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
 
 function clear_auth_session(): void {
@@ -72,9 +95,38 @@ function require_auth($db, array $roles = []): array {
         sendResponse(401, [], 'Authentication required.');
     }
 
+    require_csrf();
+
     if (!empty($roles) && !in_array($user['role'], $roles, true)) {
         sendResponse(403, [], 'You are not authorized to perform this action.');
     }
 
     return $user;
+}
+
+function require_application_access(PDO $db, array $actor, string $applicationId): array {
+    $stmt = $db->prepare('SELECT id, nominator_id, nominee_id, office_id, status, processing_stage, assigned_evaluators FROM applications WHERE id = :id LIMIT 1');
+    $stmt->execute([':id' => $applicationId]);
+    $application = $stmt->fetch();
+    if (!$application) sendResponse(404, [], 'Application not found.');
+    $role = $actor['role'];
+    $own = $application['nominator_id'] === $actor['id'] || $application['nominee_id'] === $actor['id'];
+    if ($application['status'] === 'Draft' && !$own) sendResponse(404, [], 'Application not found.');
+    if ($role === 'ADMINISTRATOR' || $own) return $application;
+    if ($role === 'HEAD_OF_OFFICE' && !empty($actor['office_id']) && $application['office_id'] === $actor['office_id']) return $application;
+    if ($role === 'SECRETARIAT' && in_array($application['processing_stage'], ['Document Verification', 'Evaluation', 'Deliberation', 'Final Decision', 'Awarded'], true)) return $application;
+    if ($role === 'EVALUATOR') {
+        $rows = $db->prepare('SELECT evaluator_id, status FROM application_evaluator_assignments WHERE application_id = :id');
+        $rows->execute([':id' => $applicationId]);
+        $assignments = $rows->fetchAll();
+        if ($assignments) {
+            foreach ($assignments as $assignment) {
+                if ($assignment['evaluator_id'] === $actor['id'] && $assignment['status'] !== 'Reassigned') return $application;
+            }
+        } else {
+            $legacy = json_decode((string)($application['assigned_evaluators'] ?? '[]'), true);
+            if (is_array($legacy) && in_array($actor['id'], $legacy, true)) return $application;
+        }
+    }
+    sendResponse(404, [], 'Application not found.');
 }

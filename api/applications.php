@@ -56,6 +56,13 @@ function getFullApplication($db, string $appId): ?array {
     $app['award_year'] = (int)$app['award_year'];
     $app['final_weighted_score'] = $app['final_weighted_score'] !== null ? (float)$app['final_weighted_score'] : null;
     $app['assigned_evaluators'] = !empty($app['assigned_evaluators']) ? (json_decode($app['assigned_evaluators'], true) ?: []) : [];
+    $assignmentStmt = $db->prepare("SELECT aea.*, p.full_name AS evaluator_name FROM application_evaluator_assignments aea JOIN profiles p ON p.id = aea.evaluator_id WHERE aea.application_id = :id ORDER BY aea.sequence_no, aea.assigned_at");
+    $assignmentStmt->execute([':id' => $appId]);
+    $app['evaluator_assignments'] = $assignmentStmt->fetchAll();
+    // A legacy nomination has no rows. Its JSON panel remains readable until migrated.
+    if ($app['evaluator_assignments']) {
+        $app['assigned_evaluators'] = array_values(array_column(array_filter($app['evaluator_assignments'], static fn($assignment) => $assignment['status'] !== 'Reassigned'), 'evaluator_id'));
+    }
 
     $docStmt = $db->prepare("SELECT * FROM application_documents WHERE application_id = :id ORDER BY uploaded_at ASC");
     $docStmt->execute([':id' => $appId]);
@@ -146,6 +153,17 @@ function canViewApplication(array $application, array $actor): bool {
         return true;
     }
 
+    if ($role === 'EVALUATOR') {
+        if (!empty($application['evaluator_assignments'])) {
+            foreach ($application['evaluator_assignments'] as $assignment) {
+                if ($assignment['evaluator_id'] === $actor['id'] && $assignment['status'] !== 'Reassigned') return true;
+            }
+            return false;
+        }
+        // Legacy applications without assignment rows retain their JSON assignment list.
+        return in_array($actor['id'], $application['assigned_evaluators'] ?? [], true);
+    }
+
     // A filer must retain read-only visibility of their own nomination throughout
     // the workflow, even after it moves beyond their operational workbench.
     if ((string)($application['nominator_id'] ?? '') === (string)($actor['id'] ?? '')
@@ -161,15 +179,6 @@ function canViewApplication(array $application, array $actor): bool {
 
     if ($role === 'HEAD_OF_OFFICE') {
         return !empty($actor['office_id']) && $application['office_id'] === $actor['office_id'];
-    }
-
-    if ($role === 'EVALUATOR') {
-        $assignedEvaluators = is_array($application['assigned_evaluators'] ?? null)
-            ? $application['assigned_evaluators']
-            : (!empty($application['assigned_evaluators'])
-                ? (json_decode((string)$application['assigned_evaluators'], true) ?: [])
-                : []);
-        return in_array($actor['id'], $assignedEvaluators, true);
     }
 
     return false;
@@ -207,6 +216,9 @@ if ($method === 'POST') {
 
     if (empty($data['award_id']) || empty($data['nominee_name']) || empty($data['office_id'])) {
         sendResponse(400, [], 'Missing required fields: award_id, nominee_name, office_id.');
+    }
+    if (!empty($data['documents'])) {
+        sendResponse(400, [], 'Upload nomination attachments through the documents endpoint.');
     }
 
     $submissionId = (string)($data['submission_id'] ?? '');
@@ -283,27 +295,8 @@ if ($method === 'POST') {
             ':required_action' => $requiredAction,
         ]);
 
-        if (!empty($data['documents']) && is_array($data['documents'])) {
-            $docStmt = $db->prepare("
-                INSERT INTO application_documents (id, application_id, requirement_id, document_name, file_url, file_size, file_type, status)
-                VALUES (:id, :application_id, :requirement_id, :document_name, :file_url, :file_size, :file_type, :status)
-            ");
-            foreach ($data['documents'] as $index => $document) {
-                $docStmt->execute([
-                    ':id' => 'doc-' . $appId . '-' . ($index + 1),
-                    ':application_id' => $appId,
-                    ':requirement_id' => $document['requirement_id'] ?? null,
-                    ':document_name' => $document['document_name'] ?? ('Attachment ' . ($index + 1)),
-                    ':file_url' => $document['file_url'] ?? '',
-                    ':file_size' => $document['file_size'] ?? null,
-                    ':file_type' => $document['file_type'] ?? 'application/pdf',
-                    ':status' => $document['status'] ?? 'Submitted',
-                ]);
-            }
-        }
-
         $db->commit();
-    } catch (Exception $e) {
+    } catch (Throwable $e) {
         $db->rollBack();
         if ($submissionId !== '') {
             $existing = findSubmittedNomination($db, $appId, $actor, $data);
@@ -313,7 +306,7 @@ if ($method === 'POST') {
                     : 'Nomination was already submitted.');
             }
         }
-        sendResponse(500, [], 'Failed to create nomination: ' . $e->getMessage());
+        sendInternalError($e, 'applications.php:create', 'Failed to create nomination.');
     }
 
     sendResponse(201, getFullApplication($db, $appId), 'Nomination draft created. Upload attachments to complete submission.');
@@ -404,11 +397,11 @@ if ($method === 'PUT') {
             addHistory($db, $appId, $actor, 'Nomination Submitted', 'Draft', 'For Endorsement',
                 "Nomination created for {$locked['nominee_name']} ({$locked['application_number']}) with required attachments uploaded.");
             $db->commit();
-        } catch (Exception $e) {
+        } catch (Throwable $e) {
             if ($db->inTransaction()) {
                 $db->rollBack();
             }
-            sendResponse(500, [], 'Failed to complete nomination: ' . $e->getMessage());
+            sendInternalError($e, 'applications.php:complete', 'Failed to complete nomination.');
         }
 
         sendResponse(200, getFullApplication($db, $appId), 'Nomination submitted successfully.');
@@ -474,9 +467,9 @@ if ($method === 'PUT') {
 
             addHistory($db, $appId, $actor, 'Nomination Resubmitted', $current['status'], $newStatus, $resubmissionNote);
             $db->commit();
-        } catch (Exception $e) {
+        } catch (Throwable $e) {
             $db->rollBack();
-            sendResponse(500, [], 'Failed to resubmit nomination: ' . $e->getMessage());
+            sendInternalError($e, 'applications.php:resubmit', 'Failed to resubmit nomination.');
         }
 
         sendResponse(200, getFullApplication($db, $appId), 'Nomination resubmitted successfully.');
@@ -573,9 +566,9 @@ if ($method === 'PUT') {
 
             addHistory($db, $appId, $actor, "Head of Office: {$decision}", $current['status'], $newStatus, $remarks);
             $db->commit();
-        } catch (Exception $e) {
+        } catch (Throwable $e) {
             $db->rollBack();
-            sendResponse(500, [], 'Failed to process endorsement: ' . $e->getMessage());
+            sendInternalError($e, 'applications.php:endorse', 'Failed to process endorsement.');
         }
 
         sendResponse(200, getFullApplication($db, $appId), 'Endorsement processed.');
@@ -640,9 +633,9 @@ if ($method === 'PUT') {
 
             addHistory($db, $appId, $actor, "Secretariat {$status} Document", $current['status'], $newStatus, $remarks !== '' ? $remarks : "Document {$docId} set to {$status}");
             $db->commit();
-        } catch (Exception $e) {
+        } catch (Throwable $e) {
             $db->rollBack();
-            sendResponse(500, [], 'Failed to update document verification: ' . $e->getMessage());
+            sendInternalError($e, 'applications.php:verify_document', 'Failed to update document verification.');
         }
 
         sendResponse(200, getFullApplication($db, $appId), 'Document verification updated.');
@@ -703,9 +696,9 @@ if ($method === 'PUT') {
             }
             addHistory($db, $appId, $actor, "Head of Office: {$status}", $current['status'], $current['status'], $remarks);
             $db->commit();
-        } catch (Exception $e) {
+        } catch (Throwable $e) {
             $db->rollBack();
-            sendResponse(500, [], 'Failed to record document inspection: ' . $e->getMessage());
+            sendInternalError($e, 'applications.php:inspect_document', 'Failed to record document inspection.');
         }
 
         sendResponse(200, getFullApplication($db, $appId), 'Document inspection recorded.');
@@ -748,9 +741,9 @@ if ($method === 'PUT') {
 
             addHistory($db, $appId, $actor, 'Secretariat Verified All Documents', $current['status'], 'Verified', $remarks);
             $db->commit();
-        } catch (Exception $e) {
+        } catch (Throwable $e) {
             $db->rollBack();
-            sendResponse(500, [], 'Failed to mark application verified: ' . $e->getMessage());
+            sendInternalError($e, 'applications.php:mark_verified', 'Failed to mark application verified.');
         }
 
         sendResponse(200, getFullApplication($db, $appId), 'Application marked verified.');
@@ -760,6 +753,9 @@ if ($method === 'PUT') {
         if (!in_array($actor['role'], ['SECRETARIAT', 'ADMINISTRATOR'], true)) {
             sendResponse(403, [], 'Only Secretariat staff can route nominations to evaluators.');
         }
+        if ($current['processing_stage'] === 'Evaluation' && in_array($current['status'], ['For Evaluation', 'Under Evaluation'], true) && !empty($current['evaluator_assignments'])) {
+            sendResponse(200, $current, 'Evaluators already assigned.');
+        }
         if ($current['processing_stage'] !== 'Document Verification' || $current['status'] !== 'Verified') {
             sendResponse(409, [], 'Only a verified nomination can be routed to evaluators.');
         }
@@ -767,31 +763,55 @@ if ($method === 'PUT') {
 
         $db->beginTransaction();
         try {
-            // Capture the active panel at routing time; client-provided IDs cannot omit members.
-            $evaluatorIds = $db->query("SELECT id FROM profiles WHERE role = 'EVALUATOR' AND is_active = 1 ORDER BY id")->fetchAll(PDO::FETCH_COLUMN);
-            $evaluatorIds = array_values(array_unique($evaluatorIds));
-            if (!$evaluatorIds) {
+            $locked = $db->prepare('SELECT award_id, application_number, award_name, status FROM applications WHERE id = :id FOR UPDATE');
+            $locked->execute([':id' => $appId]);
+            $lockedApp = $locked->fetch();
+            if ($lockedApp['status'] !== 'Verified') {
                 $db->rollBack();
-                sendResponse(409, [], 'No evaluator accounts are available. Create at least one evaluator account before forwarding this nomination.');
+                sendResponse(409, [], 'This nomination has already left document verification.');
+            }
+            $routeStmt = $db->prepare("SELECT r.id, r.required_evaluators FROM award_evaluation_routes r JOIN awards a ON a.id = r.award_id WHERE r.award_id = :award_id AND r.is_active = 1 AND a.is_active = 1 FOR UPDATE");
+            $routeStmt->execute([':award_id' => $lockedApp['award_id']]);
+            $route = $routeStmt->fetch();
+            if (!$route) {
+                $db->rollBack();
+                sendResponse(409, [], 'Evaluation routing has not been configured or enabled for this award.');
+            }
+            $members = $db->prepare("SELECT p.id FROM award_route_evaluators are JOIN profiles p ON p.id = are.evaluator_id WHERE are.route_id = :route_id AND are.is_active = 1 AND p.is_active = 1 AND p.role = 'EVALUATOR' ORDER BY are.sequence_no");
+            $members->execute([':route_id' => $route['id']]);
+            $evaluatorIds = $members->fetchAll(PDO::FETCH_COLUMN);
+            if (count($evaluatorIds) !== (int)$route['required_evaluators']) {
+                $db->rollBack();
+                sendResponse(409, [], 'Evaluation routing is incomplete or contains inactive evaluators. Ask an Administrator to update this award.');
+            }
+            $existing = $db->prepare('SELECT COUNT(*) FROM application_evaluator_assignments WHERE application_id = :id');
+            $existing->execute([':id' => $appId]);
+            if ((int)$existing->fetchColumn() > 0) {
+                $db->rollBack();
+                sendResponse(409, [], 'This nomination already has evaluator assignments.');
+            }
+            $insert = $db->prepare('INSERT INTO application_evaluator_assignments (id, application_id, evaluator_id, route_id, sequence_no) VALUES (:id, :application_id, :evaluator_id, :route_id, :sequence_no)');
+            $notify = $db->prepare("INSERT INTO notifications (id, user_id, target_role, application_id, application_number, title, message, link_tab) VALUES (:id, :user_id, NULL, :application_id, :application_number, 'New Evaluation Assignment', :message, 'evaluator-queue')");
+            foreach ($evaluatorIds as $index => $evaluatorId) {
+                $insert->execute([':id' => 'assign-' . bin2hex(random_bytes(16)), ':application_id' => $appId, ':evaluator_id' => $evaluatorId, ':route_id' => $route['id'], ':sequence_no' => $index + 1]);
+                $notify->execute([':id' => 'notif-' . bin2hex(random_bytes(16)), ':user_id' => $evaluatorId, ':application_id' => $appId, ':application_number' => $lockedApp['application_number'], ':message' => 'You have been assigned to evaluate a nomination for ' . $lockedApp['award_name'] . '.']);
             }
             $db->prepare("
                 UPDATE applications
-                SET assigned_evaluators = :assigned_evaluators,
-                    final_weighted_score = NULL,
+                SET final_weighted_score = NULL,
                     status = 'For Evaluation',
                     processing_stage = 'Evaluation',
                     required_action = 'Evaluator assessment in progress'
                 WHERE id = :id
             ")->execute([
-                ':assigned_evaluators' => json_encode(array_values($evaluatorIds)),
                 ':id' => $appId,
             ]);
 
-            addHistory($db, $appId, $actor, 'Routed to Evaluators', $current['status'], 'For Evaluation', $remarks);
+            addHistory($db, $appId, $actor, 'Routed to Evaluators', $current['status'], 'For Evaluation', $remarks . ' Evaluation routing applied. Assigned to ' . count($evaluatorIds) . ' evaluators.');
             $db->commit();
-        } catch (Exception $e) {
+        } catch (Throwable $e) {
             $db->rollBack();
-            sendResponse(500, [], 'Failed to assign evaluators: ' . $e->getMessage());
+            sendInternalError($e, 'applications.php:assign_evaluators', 'Failed to assign evaluators.');
         }
 
         sendResponse(200, getFullApplication($db, $appId), 'Evaluators assigned.');
@@ -845,9 +865,9 @@ if ($method === 'PUT') {
 
             addHistory($db, $appId, $actor, 'Returned for Revision', $current['status'], 'Returned for Revision', $remarks);
             $db->commit();
-        } catch (Exception $e) {
+        } catch (Throwable $e) {
             $db->rollBack();
-            sendResponse(500, [], 'Failed to return application for revision: ' . $e->getMessage());
+            sendInternalError($e, 'applications.php:return_for_revision', 'Failed to return application for revision.');
         }
 
         sendResponse(200, getFullApplication($db, $appId), 'Application returned for revision.');
@@ -920,9 +940,9 @@ if ($method === 'PUT') {
 
             addHistory($db, $appId, $actor, "PRAISE Committee Deliberation: {$decision}", $current['status'], $newStatus, $remarks);
             $db->commit();
-        } catch (Exception $e) {
+        } catch (Throwable $e) {
             $db->rollBack();
-            sendResponse(500, [], 'Failed to record deliberation: ' . $e->getMessage());
+            sendInternalError($e, 'applications.php:deliberate', 'Failed to record deliberation.');
         }
 
         sendResponse(200, getFullApplication($db, $appId), 'Deliberation decision recorded.');
@@ -963,14 +983,14 @@ if ($method === 'DELETE') {
             ->execute([':id' => $appId]);
 
         $db->commit();
-    } catch (Exception $e) {
+    } catch (Throwable $e) {
         $db->rollBack();
-        sendResponse(500, [], 'Failed to delete nomination: ' . $e->getMessage());
+        sendInternalError($e, 'applications.php:delete', 'Failed to delete nomination.');
     }
 
     foreach (array_unique($localUploadPaths) as $filePath) {
         if (is_file($filePath)) {
-            @unlink($filePath);
+            if (!@unlink($filePath)) error_log('[applications.php:delete] Unable to remove nomination upload.');
         }
     }
 

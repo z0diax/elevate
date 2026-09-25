@@ -8,6 +8,8 @@ require_once __DIR__ . '/config/cors.php';
 require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/config/session_auth.php';
 
+header('Cache-Control: no-store');
+
 $database = new Database();
 $db = $database->getConnection();
 
@@ -24,12 +26,16 @@ if ($method === 'GET') {
         if (!$currentUser) {
             sendResponse(200, null, 'No active session.');
         }
+        $currentUser['csrf_token'] = get_or_create_csrf_token();
         sendResponse(200, $currentUser);
     }
 
-    require_auth($db);
+    $actor = require_auth($db);
 
     if (isset($_GET['id'])) {
+        if ($actor['role'] !== 'ADMINISTRATOR' && (string)$_GET['id'] !== (string)$actor['id']) {
+            sendResponse(403, [], 'You are not authorized to view this user.');
+        }
         $stmt = $db->prepare("
             SELECT id, email, full_name, role, office_id, office_name, position_title,
                    employee_id, contact_number, barangay, avatar_url, is_active,
@@ -48,6 +54,9 @@ if ($method === 'GET') {
         sendResponse(200, format_profile_record($user));
     }
 
+    if ($actor['role'] !== 'ADMINISTRATOR') {
+        sendResponse(200, [$actor]);
+    }
     $role = $_GET['role'] ?? null;
     $sql = "
         SELECT id, email, full_name, role, office_id, office_name, position_title,
@@ -101,10 +110,13 @@ if ($method === 'POST') {
         set_auth_session($user['id']);
         $db->prepare("UPDATE profiles SET last_login_at = NOW() WHERE id = :id")->execute([':id' => $user['id']]);
 
-        sendResponse(200, format_profile_record($user), 'Login successful.');
+        $profile = format_profile_record($user);
+        $profile['csrf_token'] = get_or_create_csrf_token();
+        sendResponse(200, $profile, 'Login successful.');
     }
 
     if ($action === 'logout') {
+        require_auth($db);
         clear_auth_session();
         sendResponse(200, null, 'Logout successful.');
     }
@@ -147,13 +159,18 @@ if ($method === 'POST') {
         set_auth_session($id);
         $db->prepare('UPDATE profiles SET last_login_at = NOW() WHERE id = :id')->execute([':id' => $id]);
 
-        sendResponse(201, format_profile_record($user), 'Nominee account created successfully.');
+        $profile = format_profile_record($user);
+        $profile['csrf_token'] = get_or_create_csrf_token();
+        sendResponse(201, $profile, 'Nominee account created successfully.');
     }
 
     require_auth($db, ['ADMINISTRATOR']);
 
     if (empty($data['full_name']) || empty($data['email']) || empty($data['role']) || empty($data['password'])) {
         sendResponse(400, [], 'full_name, email, role, and password are required.');
+    }
+    if (!in_array($data['role'], ['ADMINISTRATOR', 'SECRETARIAT', 'HEAD_OF_OFFICE', 'EVALUATOR', 'NOMINEE'], true)) {
+        sendResponse(400, [], 'Invalid user role.');
     }
 
     $id = 'usr-' . time() . '-' . rand(100, 999);
@@ -202,6 +219,9 @@ if ($method === 'PUT') {
     $data = getJsonInput();
     if (empty($data['id'])) {
         sendResponse(400, [], 'User id is required for update.');
+    }
+    if (isset($data['role']) && !in_array($data['role'], ['ADMINISTRATOR', 'SECRETARIAT', 'HEAD_OF_OFFICE', 'EVALUATOR', 'NOMINEE'], true)) {
+        sendResponse(400, [], 'Invalid user role.');
     }
 
     $fields = [
@@ -280,7 +300,7 @@ if ($method === 'PUT') {
         if ($db->inTransaction()) {
             $db->rollBack();
         }
-        sendResponse(500, [], 'Failed to update user account.');
+        sendInternalError($e, 'auth.php:update_user', 'Failed to update user account.');
     }
 
     sendResponse(200, format_profile_record($user), 'User updated successfully.');
@@ -321,9 +341,9 @@ if ($method === 'DELETE') {
         $db->prepare('DELETE FROM profiles WHERE id = :id')
             ->execute([':id' => $userId]);
         $db->commit();
-    } catch (Exception $e) {
-        $db->rollBack();
-        sendResponse(500, [], 'Failed to delete user: ' . $e->getMessage());
+    } catch (Throwable $e) {
+        if ($db->inTransaction()) $db->rollBack();
+        sendInternalError($e, 'auth.php:delete_user', 'Failed to delete user.');
     }
 
     sendResponse(200, ['id' => $userId], 'User deleted successfully.');

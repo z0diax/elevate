@@ -4,6 +4,8 @@ import path from 'path';
 import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
+  const phpApiBasePath = (process.env.PHP_API_PROXY_BASE_PATH ?? path.basename(__dirname))
+    .replace(/^\/+|\/+$/g, '');
   return {
     base: './',
     build: {
@@ -18,6 +20,13 @@ export default defineConfig(() => {
       },
     },
     server: {
+      proxy: {
+        '/api': {
+          target: process.env.PHP_API_PROXY_TARGET || 'http://localhost',
+          changeOrigin: true,
+          rewrite: requestPath => phpApiBasePath ? `/${phpApiBasePath}${requestPath}` : requestPath,
+        },
+      },
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',

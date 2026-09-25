@@ -22,17 +22,9 @@ if ($db) {
                 "users" => (int)$users['user_count']
             ]
         ], "XAMPP MySQL Database is connected and operational.");
-    } catch(Exception $e) {
-        sendResponse(200, [
-            "database_connected" => true,
-            "engine" => "MySQL / MariaDB (XAMPP)",
-            "warning" => "Database connected but tables might need to be created. Visit /api/setup_db.php to auto-initialize."
-        ], "Database connected. Tables need migration.");
+    } catch(Throwable $e) {
+        sendInternalError($e, 'health.php:check', 'Database health check failed.');
     }
 } else {
-    sendResponse(503, [
-        "database_connected" => false,
-        "error" => "Could not connect to MySQL database on localhost:3306.",
-        "hint" => "Ensure MySQL service is started in XAMPP Control Panel and database 'tacloban_praise_db' exists."
-    ], "XAMPP MySQL service not reachable.");
+    sendResponse(503, ["database_connected" => false], 'Database connection failed.');
 }

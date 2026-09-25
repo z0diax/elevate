@@ -2,6 +2,8 @@
 /**
  * Export MySQL Database or JSON Backup for Tacloban PRAISE
  */
+ini_set('display_errors', '0');
+ini_set('log_errors', '1');
 require_once __DIR__ . '/config/database.php';
 
 $database = new Database();
@@ -14,18 +16,23 @@ if ($format === 'json') {
     header('Content-Disposition: attachment; filename="tacloban_praise_backup_' . date('Y-m-d') . '.json"');
 
     if (!$db) {
+        http_response_code(503);
         echo json_encode(["error" => "Database not connected"]);
         exit();
     }
 
+    try {
     $backup = [
         "offices" => $db->query("SELECT * FROM offices")->fetchAll(PDO::FETCH_ASSOC),
         "profiles" => $db->query("SELECT * FROM profiles")->fetchAll(PDO::FETCH_ASSOC),
         "awards" => $db->query("SELECT * FROM awards")->fetchAll(PDO::FETCH_ASSOC),
+        "award_evaluation_routes" => $db->query("SELECT * FROM award_evaluation_routes")->fetchAll(PDO::FETCH_ASSOC),
+        "award_route_evaluators" => $db->query("SELECT * FROM award_route_evaluators")->fetchAll(PDO::FETCH_ASSOC),
         "award_criteria" => $db->query("SELECT * FROM award_criteria")->fetchAll(PDO::FETCH_ASSOC),
         "award_document_requirements" => $db->query("SELECT * FROM award_document_requirements")->fetchAll(PDO::FETCH_ASSOC),
         "award_eligibility_requirements" => $db->query("SELECT * FROM award_eligibility_requirements")->fetchAll(PDO::FETCH_ASSOC),
         "applications" => $db->query("SELECT * FROM applications")->fetchAll(PDO::FETCH_ASSOC),
+        "application_evaluator_assignments" => $db->query("SELECT * FROM application_evaluator_assignments")->fetchAll(PDO::FETCH_ASSOC),
         "application_documents" => $db->query("SELECT * FROM application_documents")->fetchAll(PDO::FETCH_ASSOC),
         "endorsements" => $db->query("SELECT * FROM endorsements")->fetchAll(PDO::FETCH_ASSOC),
         "evaluations" => $db->query("SELECT * FROM evaluations")->fetchAll(PDO::FETCH_ASSOC),
@@ -36,16 +43,24 @@ if ($format === 'json') {
     ];
 
     echo json_encode($backup, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $error) {
+        error_log('[export.php:json] ' . get_class($error) . ': ' . $error->getMessage());
+        http_response_code(500);
+        echo json_encode(["error" => "Failed to export database backup."]);
+    }
     exit();
 } else {
     // Deliver SQL dump file
     $sqlPath = __DIR__ . '/../database.sql';
-    if (file_exists($sqlPath)) {
+    if (is_readable($sqlPath)) {
         header('Content-Type: application/sql');
         header('Content-Disposition: attachment; filename="tacloban_praise_db.sql"');
         readfile($sqlPath);
         exit();
     } else {
-        echo "-- Error: database.sql not found";
+        error_log('[export.php:sql] Deployment SQL file is unavailable.');
+        http_response_code(500);
+        header('Content-Type: text/plain; charset=UTF-8');
+        echo 'Failed to export database backup.';
     }
 }

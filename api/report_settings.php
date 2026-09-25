@@ -253,6 +253,7 @@ if ($method === 'POST') {
 
     $uploadDir = get_certificate_background_upload_dir();
     if (!is_dir($uploadDir) && !mkdir($uploadDir, 0755, true) && !is_dir($uploadDir)) {
+        error_log('[report_settings.php:upload] Unable to create certificate background directory.');
         sendResponse(500, [], 'Failed to prepare the certificate background upload directory.');
     }
 
@@ -261,6 +262,7 @@ if ($method === 'POST') {
     $targetPath = $uploadDir . $safeName;
 
     if (!move_uploaded_file($file['tmp_name'], $targetPath)) {
+        error_log('[report_settings.php:upload] Unable to store certificate background image.');
         sendResponse(500, [], 'Failed to store the uploaded certificate background image.');
     }
 

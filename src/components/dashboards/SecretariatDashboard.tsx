@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Application, Award, UserProfile } from '../../types';
+import { Application, Award, AwardEvaluationRoute, UserProfile } from '../../types';
 import { StatusBadge } from '../common/StatusBadge';
 import { NominationActionModal } from '../nomination/NominationActionModal';
 import { NominationDetails, NominationDocuments, NominationHistory } from '../nomination/NominationReadOnlySections';
@@ -37,6 +37,7 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
   const [isReturning, setIsReturning] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
   const [routingSuccess, setRoutingSuccess] = useState('');
+  const [awardRoute, setAwardRoute] = useState<AwardEvaluationRoute | null>(null);
 
   useEffect(() => {
     if (selectedAppId && !workbenchApplications.some(application => application.id === selectedAppId)) {
@@ -48,6 +49,16 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
   const canProcessVerification = selectedApp?.processing_stage === 'Document Verification'
     && WORKBENCH_STATUSES.has(selectedApp.status);
   const selectedAward = awards.find(award => award.id === selectedApp?.award_id);
+  useEffect(() => {
+    let active = true;
+    setAwardRoute(null);
+    if (selectedApp?.status === 'Verified' && selectedApp.award_id) {
+      void praiseService.getAwardEvaluationRoute(selectedApp.award_id).then(route => {
+        if (active) setAwardRoute(route);
+      }).catch(() => { if (active) setAwardRoute(null); });
+    }
+    return () => { active = false; };
+  }, [selectedApp?.award_id, selectedApp?.status]);
   const selectedDoc = selectedApp?.documents?.find(document => document.id === selectedDocId) || null;
 
   const allDocs = selectedApp?.documents || [];
@@ -126,17 +137,12 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
       return;
     }
 
-    if (!evaluators.length) {
-      alert('No evaluator accounts are available. Create at least one evaluator account before forwarding this nomination.');
-      return;
-    }
-
     setIsBusy(true);
     try {
       await praiseService.routeToEvaluators(selectedApp.id, routingRemarks.trim());
-      showToast(`${selectedApp.application_number} forwarded to all current evaluators.`);
+      showToast(`${selectedApp.application_number} forwarded to the award's configured evaluators.`);
       setRoutingRemarks('');
-      setRoutingSuccess(`${selectedApp.application_number} was forwarded to all current evaluators and remains available for tracking.`);
+      setRoutingSuccess(`${selectedApp.application_number} was forwarded to the award's configured evaluators and remains available for tracking.`);
       await onRefreshData();
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Failed to route the application to evaluators.');
@@ -219,7 +225,11 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
                         <td className="px-5 py-4 text-slate-600">{application.office_name}</td>
                         <td className="px-5 py-4 font-medium text-slate-700">{application.award_name}</td>
                         <td className="px-5 py-4 text-xs text-slate-600">{application.processing_stage}</td>
-                        <td className="px-5 py-4"><StatusBadge status={application.status} size="sm" /></td>
+                        <td className="px-5 py-4"><StatusBadge status={application.status} size="sm" />
+                          {!!application.evaluator_assignments?.length && <div className="mt-1 text-[11px] text-slate-500" title={application.evaluator_assignments.map(assignment => `${assignment.evaluator_name || assignment.evaluator_id}: ${assignment.status}`).join('\n')}>
+                            {application.evaluator_assignments.filter(assignment => assignment.status === 'Completed').length} of {application.evaluator_assignments.filter(assignment => assignment.status !== 'Reassigned').length} evaluations completed
+                          </div>}
+                        </td>
                         <td className="px-5 py-4 text-right">
                           <button type="button" onClick={() => { setActiveTab('documents'); setSelectedAppId(application.id); }} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100">
                             {application.processing_stage === 'Document Verification' && WORKBENCH_STATUSES.has(application.status) ? 'Open review' : 'View nomination'}
@@ -251,7 +261,7 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
               <>
                 <button type="button" onClick={() => { setActiveTab('documents'); setIsReturning(value => !value); }} disabled={isBusy} className="min-h-11 rounded-lg border border-slate-300 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Return for compliance</button>
                 {selectedApp.status === 'Verified' ? (
-                  <button type="button" onClick={() => void handleRouteToEvaluators()} disabled={isBusy || evaluators.length === 0} className="min-h-11 w-full rounded-lg bg-blue-600 px-5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 sm:w-auto">Forward to evaluators</button>
+                  <button type="button" onClick={() => void handleRouteToEvaluators()} disabled={isBusy || !awardRoute?.is_active || awardRoute.evaluators.length !== awardRoute.required_evaluators} className="min-h-11 w-full rounded-lg bg-blue-600 px-5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 sm:w-auto">Forward to evaluators</button>
                 ) : (
                   <button type="button" onClick={() => void handleMarkApplicationVerified()} disabled={isBusy || !allDocsVerified} className="min-h-11 w-full rounded-lg bg-blue-600 px-5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 sm:w-auto">Mark application verified</button>
                 )}
@@ -270,9 +280,9 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
                 {canProcessVerification && selectedApp.status === 'Verified' && (
                   <section className="border-t border-slate-100 pt-5">
                     <h3 className="text-base font-bold text-slate-950">Evaluator panel</h3>
-                    <p className="mt-1 text-sm text-slate-600">{evaluators.length} evaluator(s) will receive this nomination.</p>
+                    <p className="mt-1 text-sm text-slate-600">{awardRoute?.is_active ? `${awardRoute.required_evaluators} configured evaluator(s) will receive this nomination.` : 'Evaluation routing has not been configured or enabled for this award. Ask an Administrator to configure it.'}</p>
                     <ul className="mt-3 grid gap-2 sm:grid-cols-2">
-                      {evaluators.map(evaluator => <li key={evaluator.id} className="break-words rounded-lg bg-slate-50 p-3 text-sm text-slate-800">{evaluator.full_name}</li>)}
+                      {awardRoute?.evaluators.map(member => <li key={member.id} className="break-words rounded-lg bg-slate-50 p-3 text-sm text-slate-800">{member.full_name}</li>)}
                     </ul>
                     <label htmlFor="routing-remarks" className="mt-4 block text-sm font-semibold text-slate-900">Routing instructions (optional)</label>
                     <input id="routing-remarks" type="text" value={routingRemarks} onChange={event => setRoutingRemarks(event.target.value)} className="mt-2 min-h-11 w-full rounded-lg border border-slate-300 px-3 text-sm focus:outline-2 focus:outline-blue-600" />

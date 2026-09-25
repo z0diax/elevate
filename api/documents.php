@@ -26,7 +26,7 @@ if ($method === 'POST') {
             sendResponse(400, [], 'application_id and document_name are required.');
         }
 
-        $docId = 'doc-' . time() . '-' . rand(100, 999);
+        $docId = 'doc-' . bin2hex(random_bytes(16));
         $stmt = $db->prepare("
             INSERT INTO application_documents (id, application_id, requirement_id, document_name, file_url, file_size, file_type, status)
             VALUES (:id, :application_id, :requirement_id, :document_name, :file_url, :file_size, :file_type, :status)
@@ -64,7 +64,7 @@ if ($method === 'POST') {
     if ((string)$application['nominator_id'] !== (string)$actor['id']) {
         sendResponse(403, [], 'Only the original filer can upload or replace nomination documents.');
     }
-    if ($documentId !== '' && !in_array($application['status'], ['Returned for Revision', 'Incomplete'], true)) {
+    if ($documentId !== '' && !in_array($application['status'], ['Draft', 'Returned for Revision', 'Incomplete'], true)) {
         sendResponse(409, [], 'Documents can only be replaced while the nomination is returned for correction.');
     }
     if ($documentId === '' && $requirementId) {
@@ -72,8 +72,14 @@ if ($method === 'POST') {
         $existingStmt->execute([':application_id' => $applicationId, ':requirement_id' => $requirementId]);
         $existingDocument = $existingStmt->fetch();
         if ($existingDocument) {
-            sendResponse(200, $existingDocument, 'Document was already uploaded.');
+            if ($application['status'] !== 'Draft') {
+                sendResponse(200, $existingDocument, 'Document was already uploaded.');
+            }
+            $documentId = $existingDocument['id'];
         }
+    }
+    if ($documentId === '' && !in_array($application['status'], ['Draft', 'Returned for Revision', 'Incomplete'], true)) {
+        sendResponse(409, [], 'New attachments can only be uploaded before submission or during a requested revision.');
     }
 
     $uploadDir = __DIR__ . '/../uploads/';
@@ -82,7 +88,7 @@ if ($method === 'POST') {
     }
 
     $extension = pathinfo($file['name'], PATHINFO_EXTENSION);
-    $safeName = 'doc_' . time() . '_' . rand(1000, 9999) . ($extension ? '.' . strtolower($extension) : '');
+    $safeName = 'doc_' . bin2hex(random_bytes(16)) . ($extension ? '.' . strtolower($extension) : '');
     $targetPath = $uploadDir . $safeName;
 
     if (!move_uploaded_file($file['tmp_name'], $targetPath)) {
@@ -100,7 +106,7 @@ if ($method === 'POST') {
                     file_url = :file_url,
                     file_size = :file_size,
                     file_type = :file_type,
-                    status = 'For Verification',
+                    status = :status,
                     verification_remarks = NULL,
                     verified_by = NULL,
                     verified_at = NULL,
@@ -114,12 +120,13 @@ if ($method === 'POST') {
                 ':file_url' => $fileUrl,
                 ':file_size' => $file['size'],
                 ':file_type' => $file['type'] ?: 'application/octet-stream',
+                ':status' => $application['status'] === 'Draft' ? 'Submitted' : 'For Verification',
             ]);
 
-            $logAction = 'Compliance Document Re-uploaded';
+            $logAction = $application['status'] === 'Draft' ? 'Draft Attachment Replaced' : 'Compliance Document Re-uploaded';
             $logRemarks = $documentName;
         } else {
-            $documentId = 'doc-' . time() . '-' . rand(100, 999);
+            $documentId = 'doc-' . bin2hex(random_bytes(16));
             $stmt = $db->prepare("
                 INSERT INTO application_documents (id, application_id, requirement_id, document_name, file_url, file_size, file_type, status)
                 VALUES (:id, :application_id, :requirement_id, :document_name, :file_url, :file_size, :file_type, 'Submitted')
@@ -142,7 +149,7 @@ if ($method === 'POST') {
             INSERT INTO application_history (id, application_id, user_id, user_name, user_role, action, previous_status, new_status, remarks)
             VALUES (:id, :application_id, :user_id, :user_name, :user_role, :action, :previous_status, :new_status, :remarks)
         ")->execute([
-            ':id' => 'log-' . time() . '-' . rand(10, 99),
+            ':id' => 'log-' . bin2hex(random_bytes(16)),
             ':application_id' => $applicationId,
             ':user_id' => $actor['id'],
             ':user_name' => $actor['full_name'],
@@ -166,7 +173,7 @@ if ($method === 'POST') {
         'file_url' => $fileUrl,
         'file_size' => $file['size'],
         'file_type' => $file['type'] ?: 'application/octet-stream',
-        'status' => $documentId !== '' ? 'For Verification' : 'Submitted',
+        'status' => $application['status'] === 'Draft' ? 'Submitted' : ($documentId !== '' ? 'For Verification' : 'Submitted'),
     ], 'File uploaded successfully.');
 }
 

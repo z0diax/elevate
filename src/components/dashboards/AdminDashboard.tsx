@@ -24,7 +24,9 @@ import { showToast } from '../../lib/toast';
 import { pdfGenerator } from '../../lib/pdfGenerator';
 import { AuditTrailModal } from '../common/AuditTrailModal';
 import { ConfirmationModal } from '../common/ConfirmationModal';
-import { StageProgressTracker } from '../common/StageProgressTracker';
+import { DocumentViewerModal } from '../common/DocumentViewerModal';
+import { NominationActionModal } from '../nomination/NominationActionModal';
+import { NominationDetails, NominationDocuments, NominationHistory } from '../nomination/NominationReadOnlySections';
 
 type ConfirmationRequest = {
   title: string;
@@ -73,6 +75,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Modals & Forms
   const [auditApp, setAuditApp] = useState<Application | null>(null);
   const [trackingApp, setTrackingApp] = useState<Application | null>(null);
+  const [trackingTab, setTrackingTab] = useState('status');
+  const [trackingDocId, setTrackingDocId] = useState<string | null>(null);
   const [isAwardModalOpen, setIsAwardModalOpen] = useState(false);
   const [editingAward, setEditingAward] = useState<Award | null>(null);
   const [duplicatingAwardName, setDuplicatingAwardName] = useState<string | null>(null);
@@ -810,7 +814,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         <td className="px-4 py-3.5">
                           <div className="flex items-center justify-end gap-1 whitespace-nowrap">
                             <button
-                              onClick={() => setTrackingApp(app)}
+                              onClick={() => { setTrackingTab('status'); setTrackingDocId(null); setTrackingApp(app); }}
                               className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded text-[11px] transition-colors cursor-pointer"
                             >
                               Track Stage
@@ -1736,73 +1740,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       )}
 
       {trackingApp && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-3 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="tracking-modal-title">
-          <div className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-slate-50 shadow-2xl">
-            <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-900 px-5 py-4 text-white sm:px-7">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-wider text-blue-300">Nomination progress</p>
-                <h3 id="tracking-modal-title" className="mt-1 text-lg font-bold">{trackingApp.nominee_name}</h3>
-                <p className="mt-1 text-xs text-slate-300">
-                  {trackingApp.application_number} • {trackingApp.award_name}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setTrackingApp(null)}
-                className="rounded-lg border border-slate-600 px-2.5 py-1 text-lg leading-none text-slate-300 hover:bg-slate-700 hover:text-white"
-                aria-label="Close stage tracking"
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="min-w-0 overflow-x-hidden overflow-y-auto p-4 sm:p-6">
-              <div className="space-y-5">
-                <StageProgressTracker
-                  currentStage={trackingApp.processing_stage}
-                  currentStatus={trackingApp.status}
-                />
-
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div className="rounded-xl border border-slate-200 bg-white p-4">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Application status</p>
-                    <p className="mt-2 text-sm font-bold text-slate-900">{trackingApp.status}</p>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-white p-4">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Next action</p>
-                    <p className="mt-2 break-words text-sm font-bold text-slate-900">
-                      {trackingApp.required_action || 'No pending action recorded.'}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-slate-200 bg-white p-4">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Nomination details</p>
-                  <dl className="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-                    <div>
-                      <dt className="text-xs text-slate-500">Nominee</dt>
-                      <dd className="mt-1 font-semibold text-slate-900">{trackingApp.nominee_name}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs text-slate-500">Office</dt>
-                      <dd className="mt-1 font-semibold text-slate-900">{trackingApp.office_name}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs text-slate-500">Award applied</dt>
-                      <dd className="mt-1 font-semibold text-slate-900">{trackingApp.award_name}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs text-slate-500">Submitted</dt>
-                      <dd className="mt-1 font-semibold text-slate-900">
-                        {new Date(trackingApp.created_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })}
-                      </dd>
-                    </div>
-                  </dl>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <NominationActionModal
+          application={trackingApp}
+          title="Nomination tracking"
+          task={trackingApp.required_action || 'Review the current stage and nomination record.'}
+          tabs={[{ id: 'status', label: 'Status' }, { id: 'documents', label: 'Documents' }, { id: 'details', label: 'Nomination details' }, { id: 'history', label: 'History' }]}
+          activeTab={trackingTab}
+          onTabChange={setTrackingTab}
+          onClose={() => setTrackingApp(null)}
+        >
+          {trackingTab === 'status' && <section className="space-y-4">
+            <h3 className="text-base font-bold text-slate-950">Current status</h3>
+            <StatusBadge status={trackingApp.status} size="md" />
+            <p className="break-words text-sm leading-6 text-slate-700">{trackingApp.required_action || 'No pending action recorded.'}</p>
+          </section>}
+          {trackingTab === 'documents' && <NominationDocuments application={trackingApp} onOpen={setTrackingDocId} />}
+          {trackingTab === 'details' && <NominationDetails application={trackingApp} />}
+          {trackingTab === 'history' && <NominationHistory logs={praiseService.getAuditLogsForApplication(trackingApp.id)} />}
+        </NominationActionModal>
+      )}
+      {trackingApp && trackingDocId && trackingApp.documents?.some(document => document.id === trackingDocId) && (
+        <DocumentViewerModal
+          isOpen={true}
+          onClose={() => setTrackingDocId(null)}
+          document={trackingApp.documents.find(document => document.id === trackingDocId) || null}
+          nomineeName={trackingApp.nominee_name}
+          applicationNumber={trackingApp.application_number}
+          userRole={currentUser.role}
+        />
       )}
 
       <ConfirmationModal

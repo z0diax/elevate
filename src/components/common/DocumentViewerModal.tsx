@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ApplicationDocument, UserRole } from '../../types';
 import {
   AlertCircle,
@@ -36,6 +36,27 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
 }) => {
   const [remarks, setRemarks] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const previousFocus = window.document.activeElement instanceof HTMLElement ? window.document.activeElement : null;
+    closeButtonRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onCloseRef.current();
+      if (event.key === 'Tab' && dialogRef.current) {
+        const controls = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled])'));
+        if (!controls.length) return;
+        if (event.shiftKey && window.document.activeElement === controls[0]) { event.preventDefault(); controls[controls.length - 1].focus(); }
+        else if (!event.shiftKey && window.document.activeElement === controls[controls.length - 1]) { event.preventDefault(); controls[0].focus(); }
+      }
+    };
+    window.document.addEventListener('keydown', onKeyDown);
+    return () => { window.document.removeEventListener('keydown', onKeyDown); previousFocus?.focus(); };
+  }, [isOpen]);
 
   const canVerify = (userRole === 'SECRETARIAT' || userRole === 'ADMINISTRATOR') && !!onVerify;
   const canHeadReview = userRole === 'HEAD_OF_OFFICE' && !!onHeadReview;
@@ -84,20 +105,24 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
   return (
     <div
       id="document-viewer-modal-backdrop"
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto"
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/60 backdrop-blur-xs sm:p-4"
     >
       <div
         id="document-viewer-modal-dialog"
-        className="bg-white rounded-xl max-w-4xl w-full max-h-[calc(100dvh-1.5rem)] overflow-y-auto shadow-2xl border border-slate-200 my-4 sm:my-8"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="document-viewer-title"
+        className="flex h-dvh max-h-dvh w-screen min-w-0 flex-col overflow-hidden bg-white shadow-2xl sm:h-auto sm:max-h-[90dvh] sm:w-full sm:max-w-4xl sm:rounded-xl"
       >
-        <div className="flex items-center justify-between px-6 py-4 bg-slate-900 text-white">
+        <div className="flex shrink-0 items-center justify-between gap-3 bg-slate-900 px-4 py-3 text-white sm:px-6 sm:py-4">
           <div className="flex items-center gap-3 min-w-0">
             <div className="p-2 bg-blue-600 rounded-md">
               <FileText size={18} className="text-white" />
             </div>
             <div className="min-w-0">
-              <h3 className="text-sm font-bold truncate max-w-xl">{document.document_name}</h3>
-              <p className="text-xs text-slate-300 truncate">
+              <h3 id="document-viewer-title" className="break-words text-sm font-bold">{document.document_name}</h3>
+              <p className="break-words text-xs text-slate-300">
                 {[applicationNumber, nomineeName].filter(Boolean).join(' • ')}
               </p>
             </div>
@@ -105,14 +130,16 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
 
           <button
             id="close-doc-viewer-btn"
+            ref={closeButtonRef}
             onClick={onClose}
-            className="p-1.5 rounded-md text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+            aria-label="Close document viewer"
+            className="flex size-11 shrink-0 items-center justify-center rounded-md text-slate-300 transition-colors hover:bg-slate-800 hover:text-white focus-visible:outline-2 focus-visible:outline-white"
           >
             <X size={18} />
           </button>
         </div>
 
-        <div className="p-6 space-y-5">
+        <div className="min-h-0 min-w-0 flex-1 space-y-5 overflow-x-hidden overflow-y-auto p-4 sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl bg-slate-50 border border-slate-200">
             <div className="flex items-center gap-3">
               <div className={`p-2 rounded-lg ${
@@ -157,7 +184,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
           <div className="p-4 border border-slate-200 rounded-xl bg-slate-50 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h4 className="text-sm font-bold text-slate-900">{document.document_name}</h4>
+                <h4 className="break-words text-sm font-bold text-slate-900">{document.document_name}</h4>
                 <p className="text-xs text-slate-500 mt-1">{document.file_type || 'Uploaded document'}</p>
               </div>
 
@@ -196,7 +223,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
                 <img
                   src={fileUrl}
                   alt={document.document_name}
-                  className="max-h-[60vh] w-full object-contain bg-white"
+                  className="max-h-[42dvh] w-full bg-white object-contain sm:max-h-[60vh]"
                 />
               </div>
             )}
@@ -206,7 +233,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
                 <iframe
                   src={fileUrl}
                   title={document.document_name}
-                  className="h-[60vh] w-full"
+                  className="h-[42dvh] w-full sm:h-[60vh]"
                 />
               </div>
             )}
@@ -234,7 +261,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
 
           {(canVerify || canHeadReview) && (
             <div className="pt-3 border-t border-slate-200 space-y-3">
-              <label className="block text-xs font-bold text-slate-800">
+              <label className="block text-sm font-semibold text-slate-800">
                 {canHeadReview ? 'Head of Office Inspection Remarks:' : 'Secretariat Verification Remarks / Compliance Notes:'}
               </label>
               <textarea
@@ -242,7 +269,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
                 onChange={event => setRemarks(event.target.value)}
                 placeholder="Enter validation remarks or specific deficiency notes if returning this document..."
                 rows={3}
-                className="safe-long-text w-full min-w-0 max-w-full text-xs p-3 rounded-md border border-slate-300 bg-slate-50 text-slate-900 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+                className="safe-long-text w-full min-w-0 max-w-full rounded-md border border-slate-300 bg-slate-50 p-3 text-sm text-slate-900 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
               />
 
               {errorMsg && (
@@ -252,11 +279,11 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
                 </p>
               )}
 
-              <div className="flex items-center justify-end gap-3 pt-2">
+              <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:justify-end">
                 <button
                   id="reject-doc-btn"
                   onClick={() => handleAction(canHeadReview ? 'Head Rejected' : 'Rejected')}
-                  className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs font-semibold rounded-md flex items-center gap-1.5 transition-colors cursor-pointer"
+                  className="flex min-h-11 items-center justify-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-4 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100"
                 >
                   <XCircle size={14} />
                   <span>{canHeadReview ? 'Reject / Return for Correction' : 'Reject / Require Compliance'}</span>
@@ -264,7 +291,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
                 <button
                   id="verify-doc-btn"
                   onClick={() => handleAction(canHeadReview ? 'Head Approved' : 'Verified')}
-                  className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-xs font-semibold rounded-md flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                  className="flex min-h-11 items-center justify-center gap-1.5 rounded-md bg-green-600 px-4 text-sm font-semibold text-white shadow-xs transition-colors hover:bg-green-700"
                 >
                   <CheckCircle2 size={14} />
                   <span>{canHeadReview ? 'Approve for Endorsement' : 'Verify as Compliant'}</span>
@@ -274,10 +301,10 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
           )}
         </div>
 
-        <div className="px-6 py-3 bg-slate-50 border-t border-slate-200 flex justify-end">
+        <div className="flex shrink-0 justify-end border-t border-slate-200 bg-slate-50 px-4 py-3 sm:px-6">
           <button
             onClick={onClose}
-            className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-md transition-colors cursor-pointer shadow-xs"
+            className="min-h-11 rounded-md bg-slate-900 px-4 text-sm font-semibold text-white shadow-xs transition-colors hover:bg-slate-800"
           >
             Close Viewer
           </button>

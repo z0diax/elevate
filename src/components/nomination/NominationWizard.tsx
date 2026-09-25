@@ -34,6 +34,7 @@ interface NominationWizardProps {
   currentUser: UserProfile;
   onNominationComplete: (appId: string) => void;
   onCancel: () => void;
+  onSubmissionStateChange?: (isSubmitting: boolean) => void;
 }
 
 type UploadedRequirement = {
@@ -65,7 +66,8 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
   offices,
   currentUser,
   onNominationComplete,
-  onCancel
+  onCancel,
+  onSubmissionStateChange,
 }) => {
   const restoredDraft = React.useMemo(() => readNominationDraft(currentUser.id), [currentUser.id]);
   const [submissionId] = useState(() => restoredDraft?.submissionId || createSubmissionId());
@@ -105,15 +107,18 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
   const [uploadedDocs, setUploadedDocs] = useState<UploadedRequirement[]>([]);
 
   const [submittedApp, setSubmittedApp] = useState<Application | null>(null);
-  const [uploadError, setUploadError] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRestoringFiles, setIsRestoringFiles] = useState(true);
+  const [uploadProgress, setUploadProgress] = useState('');
   const submissionInProgress = useRef(false);
   const createdApplicationRef = useRef<Application | null>(null);
   const uploadedDocumentKeys = useRef(new Set<string>());
 
   const selectedAward = awards.find(a => a.id === selectedAwardId) || awards[0];
   const selectedOfficeObj = offices.find(o => o.id === officeId) || offices[0];
+  const hasServerDraft = Boolean(createdApplicationRef.current)
+    || praiseService.getApplications().some(application => application.id === `app-${submissionId}` && application.status === 'Draft');
 
   React.useEffect(() => {
     if (submittedApp) return;
@@ -174,6 +179,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
   // Update document requirements when award changes
   React.useEffect(() => {
     let cancelled = false;
+    setIsRestoringFiles(true);
     const requirements = selectedAward?.document_requirements || [];
     const emptyRequirements = requirements.map(req => ({
       requirement_id: req.id,
@@ -187,6 +193,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
     setUploadedDocs(emptyRequirements);
 
     if (!selectedAwardId || requirements.length === 0) {
+      setIsRestoringFiles(false);
       return () => { cancelled = true; };
     }
 
@@ -205,9 +212,11 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
             is_uploaded: Boolean(file),
           };
         }));
+        setIsRestoringFiles(false);
       })
       .catch(error => {
         console.warn('Unable to restore nomination draft attachments.', error);
+        if (!cancelled) setIsRestoringFiles(false);
       });
 
     return () => { cancelled = true; };
@@ -217,11 +226,18 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (file.size === 0) {
+      setErrorMessage('The selected attachment is empty. Please choose a valid file.');
+      return;
+    }
+
     // Check size limit (max 10MB)
     if (file.size > 10 * 1024 * 1024) {
       alert('File exceeds 10MB limit. Please upload a compressed document.');
       return;
     }
+
+    uploadedDocumentKeys.current.delete(reqId || docName);
 
     setUploadedDocs(prev => prev.map(doc => {
       if (doc.requirement_id === reqId || doc.requirement_name === docName) {
@@ -253,7 +269,8 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
   };
 
   const handleCancel = async () => {
-    await clearSavedDraft();
+    if (submissionInProgress.current) return;
+    if (!hasServerDraft) await clearSavedDraft();
     onCancel();
   };
 
@@ -281,9 +298,10 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
   };
 
   const validateStep3 = () => {
+    if (isRestoringFiles) return 'Please wait while saved attachments are restored.';
     const mandatoryReqs = uploadedDocs.filter(doc => doc.is_mandatory);
     for (const req of mandatoryReqs) {
-      if (!req.is_uploaded || !req.file) {
+      if (!req.is_uploaded || !req.file || req.file.size === 0) {
         return `Mandatory Document Missing: "${req.requirement_name}". Please attach all required files.`;
       }
     }
@@ -309,10 +327,16 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
 
   const handleSubmitNomination = async () => {
     if (submissionInProgress.current) return;
+    const attachmentError = validateStep3();
+    if (attachmentError) {
+      setStep(3);
+      setErrorMessage(attachmentError);
+      return;
+    }
     submissionInProgress.current = true;
     setErrorMessage('');
-    setUploadError('');
     setIsSubmitting(true);
+    onSubmissionStateChange?.(true);
 
     try {
       const createdApplication = createdApplicationRef.current || await praiseService.submitNomination({
@@ -339,23 +363,32 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
         supporting_narrative: supportingNarrative.trim()
       });
       createdApplicationRef.current = createdApplication;
-      setSubmittedApp(createdApplication);
 
-      for (const document of uploadedDocs) {
+      const selectedDocuments = uploadedDocs.filter(document => Boolean(document.file));
+      for (const [index, document] of selectedDocuments.entries()) {
         const documentKey = document.requirement_id || document.requirement_name;
         if (document.file && !uploadedDocumentKeys.current.has(documentKey)) {
+          setUploadProgress(`Uploading attachment ${index + 1} of ${selectedDocuments.length}...`);
           await praiseService.uploadApplicationDocument(
             createdApplication.id,
             document.file,
             document.requirement_name,
-            document.requirement_id
+            document.requirement_id,
+            undefined,
+            false
           );
           uploadedDocumentKeys.current.add(documentKey);
         }
       }
 
+      setUploadProgress('Verifying all attachments...');
+      const finalizedApplication = await praiseService.finalizeNomination(
+        createdApplication.id,
+        selectedDocuments.map(document => document.requirement_id || document.requirement_name)
+      );
       await clearSavedDraft();
-      showToast(`Nomination ${createdApplication.application_number} submitted successfully.`);
+      setSubmittedApp(finalizedApplication);
+      showToast(`Nomination ${finalizedApplication.application_number} submitted successfully.`);
 
       confetti({
         particleCount: 80,
@@ -366,13 +399,15 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
       console.error(err);
       const message = err instanceof Error ? err.message : 'An error occurred while submitting the nomination.';
       if (createdApplicationRef.current) {
-        setUploadError(`Nomination ${createdApplicationRef.current.application_number} was filed, but some attachments could not be uploaded. ${message}`);
+        setErrorMessage(`Nomination ${createdApplicationRef.current.application_number} is saved as a draft. ${message} Retry submission to finish the attachments.`);
       } else {
         setErrorMessage(message);
       }
     } finally {
       setIsSubmitting(false);
+      setUploadProgress('');
       submissionInProgress.current = false;
+      onSubmissionStateChange?.(false);
     }
   };
 
@@ -390,16 +425,6 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
             Your nomination has been recorded in the City of Tacloban PRAISE System.
           </p>
         </div>
-
-        {isSubmitting && <p className="text-sm font-medium text-blue-700">Finishing attachment uploads...</p>}
-        {uploadError && (
-          <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-            <p>{uploadError}</p>
-            <button type="button" onClick={() => void handleSubmitNomination()} className="mt-3 rounded-md bg-amber-700 px-4 py-2 font-semibold text-white hover:bg-amber-800">
-              Retry attachment uploads
-            </button>
-          </div>
-        )}
 
         <div className="p-6 bg-slate-50 rounded-xl border border-slate-200 text-left max-w-lg mx-auto space-y-3">
           <div className="flex justify-between items-center border-b border-slate-200 pb-2">
@@ -840,6 +865,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
                       <input
                         type="file"
                         accept=".pdf,.docx,.doc,.jpg,.jpeg,.png"
+                        disabled={isSubmitting}
                         onChange={(e) => handleFileUpload(doc.requirement_id || '', doc.requirement_name, e)}
                         className="hidden"
                       />
@@ -910,7 +936,8 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
               id="wizard-prev-btn"
               type="button"
               onClick={() => setStep((step - 1) as any)}
-              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-md inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+              disabled={isSubmitting}
+              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-md inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
             >
               <ArrowLeft size={14} />
               <span>Back</span>
@@ -919,9 +946,10 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
             <button
               type="button"
               onClick={() => void handleCancel()}
-              className="px-4 py-2 text-slate-500 hover:text-slate-800 text-xs font-semibold cursor-pointer"
+              disabled={isSubmitting}
+              className="px-4 py-2 text-slate-500 hover:text-slate-800 text-xs font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Cancel
+              {hasServerDraft ? 'Close (draft saved)' : 'Cancel'}
             </button>
           )}
 
@@ -930,7 +958,8 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
               id="wizard-next-btn"
               type="button"
               onClick={handleNext}
-              className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-md inline-flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+              disabled={isSubmitting}
+              className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-md inline-flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
             >
               <span>Continue</span>
               <ArrowRight size={14} />
@@ -940,14 +969,15 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
               id="wizard-submit-btn"
               type="button"
               onClick={handleSubmitNomination}
-              disabled={isSubmitting}
+              disabled={isSubmitting || isRestoringFiles}
               className="px-6 py-2.5 bg-green-600 hover:bg-green-700 text-white text-xs font-semibold rounded-md inline-flex items-center gap-2 shadow-xs transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-70"
             >
               <Sparkles size={16} />
-              <span>{isSubmitting ? 'Submitting...' : 'Officially Submit Nomination'}</span>
+              <span>{isSubmitting ? 'Submitting...' : isRestoringFiles ? 'Restoring attachments...' : 'Officially Submit Nomination'}</span>
             </button>
           )}
         </div>
+        {isSubmitting && <p className="mt-3 text-right text-xs font-semibold text-blue-700" role="status">{uploadProgress || 'Creating nomination draft...'}</p>}
       </div>
     </div>
   );

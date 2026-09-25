@@ -147,6 +147,7 @@ function normalizeUser(user: any): UserProfile {
     contact_number: user.contact_number || undefined,
     barangay: user.barangay || undefined,
     created_at: user.created_at || undefined,
+    is_active: user.is_active === undefined ? true : Boolean(user.is_active),
   };
 }
 
@@ -441,9 +442,9 @@ async function loadAuditLogs(user?: UserProfile | null, applications?: Applicati
     const relatedApplications = (applications || cachedApplications).filter(application =>
       application.nominee_id === activeUser.id ||
       application.nominator_id === activeUser.id ||
-      application.email.toLowerCase() === activeUser.email.toLowerCase() ||
-      application.nominee_name.trim().toLowerCase() === activeUser.full_name.trim().toLowerCase() ||
-      application.nominator_name.trim().toLowerCase() === activeUser.full_name.trim().toLowerCase()
+      (activeUser.role === 'HEAD_OF_OFFICE'
+        && Boolean(activeUser.office_id)
+        && application.office_id === activeUser.office_id)
     );
 
     const logGroups = await Promise.all(
@@ -728,6 +729,20 @@ export const praiseService = {
     return application;
   },
 
+  async finalizeNomination(appId: string, expectedRequirementIds: string[]): Promise<Application> {
+    const application = normalizeApplication(await apiRequest<any>(`applications.php?action=finalize_submission&id=${encodeURIComponent(appId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ expected_requirement_ids: expectedRequirementIds }),
+    }));
+    try {
+      await loadApplications();
+      await loadAuditLogs();
+    } catch (error) {
+      console.warn('Nomination submitted, but the application lists could not be refreshed.', error);
+    }
+    return application;
+  },
+
   async deleteNomination(id: string): Promise<void> {
     await apiRequest('applications.php', {
       method: 'DELETE',
@@ -740,7 +755,7 @@ export const praiseService = {
     }
   },
 
-  async uploadApplicationDocument(applicationId: string, file: File, documentName: string, requirementId?: string, documentId?: string): Promise<ApplicationDocument> {
+  async uploadApplicationDocument(applicationId: string, file: File, documentName: string, requirementId?: string, documentId?: string, refreshAfterUpload = true): Promise<ApplicationDocument> {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('application_id', applicationId);
@@ -757,14 +772,16 @@ export const praiseService = {
       body: formData,
     }));
 
-    try {
-      await loadApplications();
-      await loadAuditLogs();
-      if (currentUser) {
-        await loadNotifications(currentUser);
+    if (refreshAfterUpload) {
+      try {
+        await loadApplications();
+        await loadAuditLogs();
+        if (currentUser) {
+          await loadNotifications(currentUser);
+        }
+      } catch (error) {
+        console.warn('Document saved, but the application lists could not be refreshed.', error);
       }
-    } catch (error) {
-      console.warn('Document saved, but the application lists could not be refreshed.', error);
     }
 
     return document;
@@ -815,11 +832,10 @@ export const praiseService = {
     return application;
   },
 
-  async assignEvaluators(appId: string, evaluatorIds: string[], remarks?: string): Promise<Application> {
+  async assignEvaluators(appId: string, remarks?: string): Promise<Application> {
     const application = normalizeApplication(await apiRequest<any>(`applications.php?action=assign_evaluators&id=${encodeURIComponent(appId)}`, {
       method: 'PUT',
       body: JSON.stringify({
-        evaluator_ids: evaluatorIds,
         remarks: remarks || '',
       }),
     }));
@@ -1007,8 +1023,8 @@ export const praiseService = {
     return application;
   },
 
-  async routeToEvaluators(appId: string, evaluatorIds: string[], remarks?: string): Promise<Application> {
-    return this.assignEvaluators(appId, evaluatorIds, remarks);
+  async routeToEvaluators(appId: string, remarks?: string): Promise<Application> {
+    return this.assignEvaluators(appId, remarks);
   },
 
   async reuploadDocument(appId: string, docId: string, file: File, fileName?: string): Promise<ApplicationDocument> {

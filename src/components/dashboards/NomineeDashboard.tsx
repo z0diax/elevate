@@ -1,6 +1,8 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Application, Award, UserProfile } from '../../types';
 import { FolderOpen, Plus } from 'lucide-react';
+import { NomineeTrackingModal } from '../nomination/NomineeTrackingModal';
+import { NominationQueueCards } from '../nomination/NominationQueueCards';
 
 interface NomineeDashboardProps {
   applications: Application[];
@@ -8,6 +10,7 @@ interface NomineeDashboardProps {
   currentUser: UserProfile;
   onRefreshData: () => void | Promise<void>;
   onNavigateToNomination: () => void;
+  onNavigateToCorrections: () => void;
 }
 
 export const NomineeDashboard: React.FC<NomineeDashboardProps> = ({
@@ -16,14 +19,14 @@ export const NomineeDashboard: React.FC<NomineeDashboardProps> = ({
   currentUser,
   onRefreshData,
   onNavigateToNomination,
+  onNavigateToCorrections,
 }) => {
+  const [trackingAppId, setTrackingAppId] = useState<string | null>(null);
   const myApplications = useMemo(() => applications.filter(application =>
-    application.nominee_id === currentUser.id ||
-    application.nominator_id === currentUser.id ||
-    application.email.toLowerCase() === currentUser.email.toLowerCase() ||
-    application.nominee_name.trim().toLowerCase() === currentUser.full_name.trim().toLowerCase() ||
-    application.nominator_name.trim().toLowerCase() === currentUser.full_name.trim().toLowerCase()
-  ), [applications, currentUser.email, currentUser.full_name, currentUser.id]);
+    application.status !== 'Draft' && (application.nominee_id === currentUser.id ||
+    application.nominator_id === currentUser.id)
+  ), [applications, currentUser.id]);
+  const trackingApp = myApplications.find(application => application.id === trackingAppId);
 
   return (
     <div id="nominee-dashboard-container" className="space-y-6">
@@ -54,6 +57,7 @@ export const NomineeDashboard: React.FC<NomineeDashboardProps> = ({
           </h3>
 
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
+            <NominationQueueCards applications={myApplications} onOpen={application => setTrackingAppId(application.id)} actionLabel={() => 'View nomination'} />
             {myApplications.length === 0 ? (
               <div className="p-10 text-center text-slate-400">
                 <FolderOpen size={32} className="mx-auto mb-2 opacity-30 text-slate-400" />
@@ -66,7 +70,7 @@ export const NomineeDashboard: React.FC<NomineeDashboardProps> = ({
                 </button>
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="hidden overflow-x-auto sm:block">
                 <table className="w-full min-w-[640px] text-left text-sm">
                   <thead className="border-b border-slate-200 bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
                     <tr>
@@ -79,7 +83,7 @@ export const NomineeDashboard: React.FC<NomineeDashboardProps> = ({
                   <tbody className="divide-y divide-slate-100">
                     {myApplications.map(application => (
                       <tr key={application.id} className="hover:bg-slate-50">
-                        <td className="px-5 py-4 font-semibold text-slate-900">{application.nominee_name}</td>
+                        <td className="px-5 py-4 font-semibold text-slate-900"><button type="button" onClick={() => setTrackingAppId(application.id)} className="break-words text-left text-blue-700 hover:underline focus-visible:outline-2 focus-visible:outline-blue-600" aria-label={'View nomination for ' + application.nominee_name}>{application.nominee_name}</button></td>
                         <td className="px-5 py-4 text-slate-600">{application.office_name}</td>
                         <td className="px-5 py-4 font-medium text-slate-700">{application.award_name}</td>
                         <td className="px-5 py-4">
@@ -95,6 +99,11 @@ export const NomineeDashboard: React.FC<NomineeDashboardProps> = ({
             )}
           </div>
       </div>
+      {trackingApp && <NomineeTrackingModal
+        application={trackingApp}
+        onClose={() => setTrackingAppId(null)}
+        onCorrect={() => { setTrackingAppId(null); onNavigateToCorrections(); }}
+      />}
     </div>
   );
 };

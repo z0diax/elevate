@@ -217,56 +217,71 @@ if ($method === 'PUT') {
         'must_change_password' => array_key_exists('must_change_password', $data) ? (!empty($data['must_change_password']) ? 1 : 0) : null,
     ];
 
-    $stmt = $db->prepare("
-        UPDATE profiles SET
-            full_name = COALESCE(:full_name, full_name),
-            role = COALESCE(:role, role),
-            office_id = CASE WHEN :has_office_assignment = 1 THEN :office_id ELSE office_id END,
-            office_name = CASE WHEN :has_office_assignment = 1 THEN :office_name ELSE office_name END,
-            position_title = COALESCE(:position_title, position_title),
-            employee_id = COALESCE(:employee_id, employee_id),
-            contact_number = COALESCE(:contact_number, contact_number),
-            barangay = COALESCE(:barangay, barangay),
-            is_active = COALESCE(:is_active, is_active),
-            must_change_password = COALESCE(:must_change_password, must_change_password)
-        WHERE id = :id
-    ");
-
-    $stmt->execute([
-        ':id' => $data['id'],
-        ':full_name' => $fields['full_name'],
-        ':role' => $fields['role'],
-        ':office_id' => $fields['office_id'],
-        ':office_name' => $fields['office_name'],
-        ':has_office_assignment' => (array_key_exists('office_id', $data) || array_key_exists('office_name', $data)) ? 1 : 0,
-        ':position_title' => $fields['position_title'],
-        ':employee_id' => $fields['employee_id'],
-        ':contact_number' => $fields['contact_number'],
-        ':barangay' => $fields['barangay'],
-        ':is_active' => $fields['is_active'],
-        ':must_change_password' => $fields['must_change_password'],
-    ]);
-
-    if (!empty($data['password'])) {
-        $db->prepare("
-            UPDATE profiles
-            SET password_hash = :password_hash, must_change_password = 0
+    try {
+        $db->beginTransaction();
+        $stmt = $db->prepare("
+            UPDATE profiles SET
+                full_name = COALESCE(:full_name, full_name),
+                role = COALESCE(:role, role),
+                office_id = CASE WHEN :has_office_id_assignment = 1 THEN :office_id ELSE office_id END,
+                office_name = CASE WHEN :has_office_name_assignment = 1 THEN :office_name ELSE office_name END,
+                position_title = COALESCE(:position_title, position_title),
+                employee_id = COALESCE(:employee_id, employee_id),
+                contact_number = COALESCE(:contact_number, contact_number),
+                barangay = COALESCE(:barangay, barangay),
+                is_active = COALESCE(:is_active, is_active),
+                must_change_password = COALESCE(:must_change_password, must_change_password)
             WHERE id = :id
-        ")->execute([
-            ':id' => $data['id'],
-            ':password_hash' => password_hash((string)$data['password'], PASSWORD_DEFAULT),
-        ]);
-    }
+        ");
 
-    $stmt = $db->prepare("
-        SELECT id, email, full_name, role, office_id, office_name, position_title,
-               employee_id, contact_number, barangay, avatar_url, is_active,
-               must_change_password, created_at, updated_at, last_login_at
-        FROM profiles
-        WHERE id = :id
-    ");
-    $stmt->execute([':id' => $data['id']]);
-    $user = $stmt->fetch();
+        $hasOfficeAssignment = (array_key_exists('office_id', $data) || array_key_exists('office_name', $data)) ? 1 : 0;
+        $stmt->execute([
+            ':id' => $data['id'],
+            ':full_name' => $fields['full_name'],
+            ':role' => $fields['role'],
+            ':office_id' => $fields['office_id'],
+            ':office_name' => $fields['office_name'],
+            ':has_office_id_assignment' => $hasOfficeAssignment,
+            ':has_office_name_assignment' => $hasOfficeAssignment,
+            ':position_title' => $fields['position_title'],
+            ':employee_id' => $fields['employee_id'],
+            ':contact_number' => $fields['contact_number'],
+            ':barangay' => $fields['barangay'],
+            ':is_active' => $fields['is_active'],
+            ':must_change_password' => $fields['must_change_password'],
+        ]);
+
+        if (!empty($data['password'])) {
+            $db->prepare("
+                UPDATE profiles
+                SET password_hash = :password_hash, must_change_password = 0
+                WHERE id = :id
+            ")->execute([
+                ':id' => $data['id'],
+                ':password_hash' => password_hash((string)$data['password'], PASSWORD_DEFAULT),
+            ]);
+        }
+
+        $stmt = $db->prepare("
+            SELECT id, email, full_name, role, office_id, office_name, position_title,
+                   employee_id, contact_number, barangay, avatar_url, is_active,
+                   must_change_password, created_at, updated_at, last_login_at
+            FROM profiles
+            WHERE id = :id
+        ");
+        $stmt->execute([':id' => $data['id']]);
+        $user = $stmt->fetch();
+        if (!$user) {
+            $db->rollBack();
+            sendResponse(404, [], 'User not found.');
+        }
+        $db->commit();
+    } catch (Throwable $e) {
+        if ($db->inTransaction()) {
+            $db->rollBack();
+        }
+        sendResponse(500, [], 'Failed to update user account.');
+    }
 
     sendResponse(200, format_profile_record($user), 'User updated successfully.');
 }

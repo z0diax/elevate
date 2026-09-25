@@ -1,20 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Application, Award, UserProfile } from '../../types';
 import { StatusBadge } from '../common/StatusBadge';
-import { StageProgressTracker } from '../common/StageProgressTracker';
+import { NominationActionModal } from '../nomination/NominationActionModal';
+import { NominationDetails, NominationDocuments } from '../nomination/NominationReadOnlySections';
+import { NominationQueueCards } from '../nomination/NominationQueueCards';
 import { DocumentViewerModal } from '../common/DocumentViewerModal';
 import { praiseService } from '../../lib/supabase';
 import { showToast } from '../../lib/toast';
-import {
-  AlertCircle,
-  CheckCircle2,
-  ExternalLink,
-  FileCheck,
-  FileText,
-  Lock,
-  Percent,
-  Scale,
-} from 'lucide-react';
+import { CheckCircle2, Scale } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 interface EvaluatorDashboardProps {
@@ -36,13 +29,12 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
   onRefreshData,
 }) => {
   const assignedApplications = useMemo(() => applications.filter(application => {
-    const isAssigned = application.assigned_evaluators?.includes(currentUser.id);
-    const isEvaluationStatus = ['For Evaluation', 'Under Evaluation', 'Evaluation Completed'].includes(application.status);
-    return isAssigned || isEvaluationStatus;
+    return application.assigned_evaluators?.includes(currentUser.id);
   }), [applications, currentUser.id]);
 
   const [selectedAppId, setSelectedAppId] = useState<string>('');
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState('scorecard');
   const [criterionScores, setCriterionScores] = useState<Record<string, CriterionInput>>({});
   const [generalRemarks, setGeneralRemarks] = useState('');
   const [isLocked, setIsLocked] = useState(false);
@@ -59,6 +51,8 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
   const selectedAward = awards.find(award => award.id === selectedApp?.award_id) || null;
   const selectedDoc = selectedApp?.documents?.find(document => document.id === selectedDocId) || null;
   const existingEvaluation = selectedApp?.evaluations?.find(evaluation => evaluation.evaluator_id === currentUser.id);
+  const canEvaluate = selectedApp?.processing_stage === 'Evaluation'
+    && ['For Evaluation', 'Under Evaluation'].includes(selectedApp.status);
 
   useEffect(() => {
     if (!selectedAward) {
@@ -111,10 +105,9 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
   }
 
   const currentTotalScore = calculateWeightedScore();
-  const meetsMinScore = currentTotalScore >= (selectedAward?.min_qualifying_score || 85);
 
   function handleScoreChange(criterionId: string, rawScore: number, maxScore: number) {
-    if (isLocked) {
+    if (isLocked || !canEvaluate) {
       return;
     }
 
@@ -129,7 +122,7 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
   }
 
   function handleRemarksChange(criterionId: string, remarks: string) {
-    if (isLocked) {
+    if (isLocked || !canEvaluate) {
       return;
     }
 
@@ -143,9 +136,10 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
   }
 
   async function handleSubmitEvaluation() {
-    if (!selectedApp || !selectedAward) {
+    if (!selectedApp || !selectedAward || !canEvaluate) {
       return;
     }
+    setActiveTab('scorecard');
 
     for (const criterion of selectedAward.criteria || []) {
       const value = criterionScores[criterion.id];
@@ -235,14 +229,15 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
           </h3>
 
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
+            {assignedApplications.length > 0 && <NominationQueueCards applications={assignedApplications} onOpen={application => { setActiveTab('scorecard'); setSelectedAppId(application.id); }} actionLabel={application => application.processing_stage === 'Evaluation' ? 'Open assessment' : 'View assessment'} />}
             {assignedApplications.length === 0 ? (
               <div className="p-12 text-center text-slate-400">
                 <Scale size={32} className="mx-auto mb-2 opacity-30 text-slate-400" />
-                <p className="text-xs font-semibold">No active applications currently assigned to your queue.</p>
+                <p className="text-xs font-semibold">No nominations have been assigned to you.</p>
               </div>
             ) : (
               assignedApplications.length > 0 && (
-                <div className="overflow-x-auto">
+                <div className="hidden overflow-x-auto sm:block">
                   <table className="w-full min-w-[820px] text-left text-sm">
                     <thead className="border-b border-slate-200 bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
                       <tr>
@@ -273,10 +268,11 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
                           <CheckCircle2 size={11} /> Scored
                         </span>
                       ) : <StatusBadge status={application.status} size="sm" />}
+                      <p className="mt-1 text-[10px] text-slate-500">{application.processing_stage}</p>
                     </td>
                     <td className="px-5 py-4 text-right">
-                      <button type="button" onClick={() => setSelectedAppId(application.id)} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100">
-                        Open assessment
+                      <button type="button" onClick={() => { setActiveTab('scorecard'); setSelectedAppId(application.id); }} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100">
+                        {application.processing_stage === 'Evaluation' ? 'Open assessment' : 'View assessment'}
                       </button>
                     </td>
                   </tr>
@@ -290,229 +286,85 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
           </div>
         </div>
 
-        {selectedApp && selectedAward ? (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-3 sm:p-6">
-            <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-slate-50 shadow-2xl">
-            <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-900 px-5 py-4 text-white sm:px-7">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-wider text-blue-300">Evaluator assessment</p>
-                <h3 className="mt-1 text-lg font-bold">{selectedApp.nominee_name}</h3>
-                <p className="mt-1 text-xs text-slate-300">{selectedApp.application_number} • {selectedAward.name}</p>
-              </div>
-              <button type="button" onClick={() => setSelectedAppId('')} className="rounded-lg border border-slate-600 px-2.5 py-1 text-lg leading-none text-slate-300 hover:bg-slate-700 hover:text-white" aria-label="Close assessment modal">×</button>
-            </div>
-            <div className="min-w-0 overflow-x-hidden overflow-y-auto p-4 sm:p-6">
-            <div className="space-y-6">
-            <StageProgressTracker
-              currentStage={selectedApp.processing_stage}
-              currentStatus={selectedApp.status}
-            />
-
-            <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-xs space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">{selectedApp.nominee_name}</h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    {[selectedApp.position_title, selectedApp.employment_category, selectedApp.office_name].filter(Boolean).join(' • ')}
+        {selectedApp && selectedAward && (
+          <NominationActionModal
+            application={selectedApp}
+            title={canEvaluate ? 'Evaluator assessment' : 'Assigned nomination'}
+            task={canEvaluate && !isLocked
+              ? 'Score this nomination against the configured award criteria.'
+              : isLocked ? 'Your score has been submitted and is available to review.' : 'This nomination is available to view.'}
+            tabs={[{ id: 'scorecard', label: 'Scorecard' }, { id: 'evidence', label: 'Evidence' }, { id: 'details', label: 'Nomination details' }]}
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            onClose={() => setSelectedAppId('')}
+            footer={canEvaluate && !isLocked ? (
+              <>
+                <span className="mr-auto text-sm font-bold text-slate-900">Weighted score: {currentTotalScore.toFixed(2)}%</span>
+                <button type="button" onClick={() => void handleSubmitEvaluation()} disabled={isSubmitting} className="min-h-11 w-full rounded-lg bg-blue-600 px-5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 sm:w-auto">
+                  {isSubmitting ? 'Submitting...' : 'Submit evaluation'}
+                </button>
+              </>
+            ) : undefined}
+          >
+            {activeTab === 'scorecard' && (
+              <div className="space-y-5">
+                <section className="rounded-xl bg-slate-50 p-4">
+                  <h3 className="text-base font-bold text-slate-950">{isLocked ? 'Score submitted' : canEvaluate ? 'Your task: Score the criteria' : 'Assessment status'}</h3>
+                  <p className="mt-1 text-sm leading-6 text-slate-600">
+                    {selectedApp.assigned_evaluators?.filter(id => selectedApp.evaluations?.some(evaluation => evaluation.evaluator_id === id && evaluation.is_submitted)).length || 0} of {selectedApp.assigned_evaluators?.length || 0} assigned evaluators submitted.
+                    {existingEvaluation?.submitted_at ? ' Your score was submitted on ' + new Date(existingEvaluation.submitted_at).toLocaleDateString('en-PH') + '.' : ''}
                   </p>
-                </div>
-
-                <div className="text-right">
-                  <span className="text-[10px] font-semibold text-slate-400 uppercase">Award Category</span>
-                  <p className="text-xs font-bold text-blue-600">{selectedAward.name}</p>
-                </div>
-              </div>
-
-              <div className="text-xs space-y-3">
-                <div>
-                  <span className="font-bold text-slate-900">Accomplishments & Public Impact:</span>
-                  <p className="safe-long-text mt-1 max-w-full overflow-hidden whitespace-pre-wrap p-3 rounded-lg bg-slate-50 text-slate-700 border border-slate-200 leading-relaxed">
-                    {selectedApp.accomplishments}
-                  </p>
-                </div>
-                <div>
-                  <span className="font-bold text-slate-900">Justification Narrative:</span>
-                  <p className="safe-long-text mt-1 max-w-full overflow-hidden whitespace-pre-wrap p-3 rounded-lg bg-slate-50 text-slate-700 border border-slate-200 leading-relaxed">
-                    {selectedApp.justification}
-                  </p>
-                </div>
-              </div>
-
-              <div className="pt-2 border-t border-slate-100">
-                <h4 className="text-xs font-bold text-slate-800 mb-2 flex items-center gap-1.5">
-                  <FileCheck size={14} className="text-blue-600" />
-                  <span>Authenticated Documents for Assessment ({selectedApp.documents?.length || 0})</span>
-                </h4>
-                <div className="flex flex-wrap gap-2">
-                  {(selectedApp.documents || []).map(document => (
-                    <button
-                      key={document.id}
-                      onClick={() => setSelectedDocId(document.id)}
-                      className="px-3 py-1.5 rounded-md border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-medium text-slate-700 inline-flex items-center gap-1.5 cursor-pointer shadow-2xs"
-                    >
-                      <FileText size={13} className="text-blue-600" />
-                      <span className="truncate max-w-[160px]">{document.document_name}</span>
-                      <ExternalLink size={11} className="text-slate-400" />
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-xs space-y-6">
-              <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 pb-4">
-                <div>
-                  <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                    <Scale size={16} className="text-blue-600" />
-                    <span>Official Criteria Scoring Matrix</span>
-                  </h4>
-                  <p className="text-xs text-slate-500">
-                    Award Qualifying Standard: Minimum <strong>{selectedAward.min_qualifying_score}%</strong>
-                  </p>
-                </div>
-
-                <div className={`px-4 py-2 rounded-lg border text-center ${
-                  meetsMinScore ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'
-                }`}>
-                  <p className="text-[10px] uppercase font-bold text-slate-500">Computed Weighted Score</p>
-                  <p className={`text-2xl font-bold font-mono ${meetsMinScore ? 'text-green-700' : 'text-amber-700'}`}>
-                    {currentTotalScore}%
-                  </p>
-                  <span className={`text-[10px] font-bold ${meetsMinScore ? 'text-green-800' : 'text-amber-800'}`}>
-                    {meetsMinScore ? 'Meets qualifying standard' : 'Below qualifying standard'}
-                  </span>
-                </div>
-              </div>
-
-              {isLocked && (
-                <div className="p-3 bg-green-50 border border-green-200 rounded-md flex items-center gap-2 text-xs text-green-800">
-                  <Lock size={15} />
-                  <span>
-                    Your assessment has been submitted{existingEvaluation?.submitted_at ? ` on ${new Date(existingEvaluation.submitted_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}` : ''}.
-                  </span>
-                </div>
-              )}
-
-              {errorMsg && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-md flex items-center gap-2 text-xs text-red-700">
-                  <AlertCircle size={15} />
-                  <span>{errorMsg}</span>
-                </div>
-              )}
-
-              <div className="space-y-4">
+                </section>
+                {errorMsg && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{errorMsg}</p>}
                 {(selectedAward.criteria || []).map((criterion, index) => {
                   const current = criterionScores[criterion.id] || { raw_score: 0, remarks: '' };
-                  const weighted = Number((((current.raw_score || 0) / (criterion.max_score || 100)) * criterion.weight_percentage).toFixed(2));
-
+                  const max = criterion.max_score || 100;
+                  const weighted = Number(((current.raw_score / max) * criterion.weight_percentage).toFixed(2));
                   return (
-                    <div
-                      key={criterion.id}
-                      id={`criterion-block-${index}`}
-                      className="p-4 rounded-lg border border-slate-200 bg-slate-50/70 space-y-3"
-                    >
+                    <section key={criterion.id} className="border-b border-slate-200 pb-5 last:border-0">
                       <div className="flex flex-wrap items-start justify-between gap-2">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[11px] font-bold flex items-center justify-center shrink-0">
-                              {index + 1}
-                            </span>
-                            <h5 className="text-xs font-bold text-slate-900">{criterion.criterion_name}</h5>
-                          </div>
-                          <p className="text-[11px] text-slate-500 mt-1 pl-7">{criterion.criterion_description}</p>
+                        <div className="min-w-0">
+                          <h3 className="break-words text-base font-bold text-slate-900">{index + 1}. {criterion.criterion_name}</h3>
+                          <p className="mt-1 break-words text-sm leading-6 text-slate-600">{criterion.criterion_description}</p>
                         </div>
-
-                        <div className="flex items-center gap-3 shrink-0">
-                          <span className="text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded">
-                            Weight: {criterion.weight_percentage}%
-                          </span>
-                          <div className="text-right">
-                            <span className="text-[10px] text-slate-400 block">Weighted:</span>
-                            <span className="text-xs font-bold font-mono text-green-700">{weighted}%</span>
-                          </div>
+                        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">Weight {criterion.weight_percentage}%</span>
+                      </div>
+                      <div className="mt-4 grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+                        <div>
+                          <label htmlFor={'score-' + criterion.id} className="block text-sm font-semibold text-slate-800">Score out of {max}</label>
+                          <input id={'score-' + criterion.id} type="number" min={0} max={max} value={current.raw_score} disabled={isLocked || !canEvaluate} onChange={event => handleScoreChange(criterion.id, Number(event.target.value), max)} className="mt-2 min-h-11 w-full rounded-lg border border-slate-300 px-3 text-sm font-semibold focus:outline-2 focus:outline-blue-600 disabled:bg-slate-50" />
+                        </div>
+                        <div>
+                          <label htmlFor={'remarks-' + criterion.id} className="block text-sm font-semibold text-slate-800">Evidence and remarks</label>
+                          <input id={'remarks-' + criterion.id} type="text" value={current.remarks} disabled={isLocked || !canEvaluate} onChange={event => handleRemarksChange(criterion.id, event.target.value)} className="mt-2 min-h-11 w-full rounded-lg border border-slate-300 px-3 text-sm focus:outline-2 focus:outline-blue-600 disabled:bg-slate-50" />
                         </div>
                       </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-2 border-t border-slate-200 items-center">
-                        <div className="sm:col-span-1">
-                          <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                            Score (0-{criterion.max_score || 100}):
-                          </label>
-                          <div className="relative">
-                            <input
-                              type="number"
-                              min={0}
-                              max={criterion.max_score || 100}
-                              disabled={isLocked}
-                              value={current.raw_score}
-                              onChange={event => handleScoreChange(criterion.id, Number(event.target.value), criterion.max_score || 100)}
-                              className="w-full text-xs font-bold font-mono p-2 rounded-md border border-slate-300 bg-white text-slate-900 focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
-                            />
-                            <Percent size={13} className="absolute right-2.5 top-2.5 text-slate-400 pointer-events-none" />
-                          </div>
-                        </div>
-
-                        <div className="sm:col-span-3">
-                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                            Criterion Evaluation Notes / Evidence Cited:
-                          </label>
-                          <input
-                            type="text"
-                            disabled={isLocked}
-                            placeholder="State specific outputs, ratings, or observations..."
-                            value={current.remarks}
-                            onChange={event => handleRemarksChange(criterion.id, event.target.value)}
-                            className="w-full text-xs p-2 rounded-md border border-slate-300 bg-white text-slate-900 focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
-                          />
-                        </div>
-                      </div>
-                    </div>
+                      <p className="mt-2 text-sm text-slate-600">Weighted contribution: <strong className="text-slate-900">{weighted.toFixed(2)} / {criterion.weight_percentage}</strong></p>
+                    </section>
                   );
                 })}
-              </div>
-
-              <div className="space-y-2 pt-2">
-                <label className="block text-xs font-bold text-slate-900">
-                  Evaluator General Remarks & Recommendation:
-                </label>
-                <textarea
-                  rows={3}
-                  disabled={isLocked}
-                  placeholder="Enter overarching feedback, commendations, and recommendation."
-                  value={generalRemarks}
-                  onChange={event => setGeneralRemarks(event.target.value)}
-                  className="safe-long-text w-full min-w-0 max-w-full text-xs p-3 rounded-md border border-slate-300 bg-slate-50 text-slate-900 focus:bg-white focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
-                />
-              </div>
-
-              {!isLocked ? (
-                <div className="flex justify-end pt-4 border-t border-slate-100">
-                  <button
-                    id="submit-evaluation-btn"
-                    onClick={() => void handleSubmitEvaluation()}
-                    disabled={isSubmitting}
-                    className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-md inline-flex items-center gap-2 shadow-xs transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-70"
-                  >
-                    <CheckCircle2 size={16} />
-                    <span>{isSubmitting ? 'Submitting...' : `Officially Submit Evaluation (${currentTotalScore}%)`}</span>
-                  </button>
+                <section className="rounded-xl bg-slate-50 p-4">
+                  <h3 className="text-base font-bold text-slate-950">Score summary</h3>
+                  <dl className="mt-3 space-y-2">
+                    {(selectedAward.criteria || []).map(criterion => {
+                      const value = criterionScores[criterion.id]?.raw_score || 0;
+                      const score = (value / (criterion.max_score || 100)) * criterion.weight_percentage;
+                      return <div key={criterion.id} className="flex justify-between gap-3 text-sm"><dt className="break-words text-slate-600">{criterion.criterion_name}</dt><dd className="shrink-0 font-semibold text-slate-900">{score.toFixed(2)} / {criterion.weight_percentage}</dd></div>;
+                    })}
+                    <div className="flex justify-between border-t border-slate-200 pt-3 text-base font-bold text-slate-950"><dt>Weighted total</dt><dd>{currentTotalScore.toFixed(2)}%</dd></div>
+                  </dl>
+                  <p className="mt-2 text-xs text-slate-600">Minimum qualifying standard: {selectedAward.min_qualifying_score}%. Evaluators submit scores; the committee makes the final decision.</p>
+                </section>
+                <div>
+                  <label htmlFor="general-assessment" className="block text-sm font-semibold text-slate-900">General assessment and recommendation</label>
+                  <textarea id="general-assessment" rows={4} value={generalRemarks} disabled={isLocked || !canEvaluate} onChange={event => setGeneralRemarks(event.target.value)} className="mt-2 min-h-28 w-full rounded-lg border border-slate-300 p-3 text-sm leading-6 focus:outline-2 focus:outline-blue-600 disabled:bg-slate-50" />
                 </div>
-              ) : (
-                <div className="flex justify-end pt-4 border-t border-slate-100">
-                  <button
-                    onClick={() => setIsLocked(false)}
-                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-md cursor-pointer"
-                  >
-                    Edit and resubmit
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-          </div>
-            </div>
-            </div>
-        ) : null}
+              </div>
+            )}
+            {activeTab === 'evidence' && <NominationDocuments application={selectedApp} onOpen={setSelectedDocId} />}
+            {activeTab === 'details' && <NominationDetails application={selectedApp} />}
+          </NominationActionModal>
+        )}
       </div>
 
       {selectedDoc && selectedApp && (

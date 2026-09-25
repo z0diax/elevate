@@ -350,7 +350,9 @@ export default function App() {
 
   const pendingEvaluationCount = applications.filter(application => {
     const isAssigned = currentUser ? application.assigned_evaluators?.includes(currentUser.id) : false;
-    return application.status === 'For Evaluation' || application.status === 'Under Evaluation' || Boolean(isAssigned);
+    return Boolean(isAssigned)
+      && application.processing_stage === 'Evaluation'
+      && (application.status === 'For Evaluation' || application.status === 'Under Evaluation');
   }).length;
 
   const forDeliberationCount = applications.filter(application =>
@@ -358,11 +360,9 @@ export default function App() {
   ).length;
 
   const myApplicationsCount = applications.filter(application =>
-    currentUser && (
-      application.nominee_id === currentUser.id ||
-      application.nominator_id === currentUser.id ||
-      application.nominee_name.toLowerCase() === currentUser.full_name.toLowerCase()
-    )
+    currentUser
+    && application.status !== 'Draft'
+    && (application.nominee_id === currentUser.id || application.nominator_id === currentUser.id)
   ).length;
 
   if (!currentUser) {
@@ -460,7 +460,7 @@ export default function App() {
           {(currentTab === 'secretariat-workbench' || currentTab === 'verification') && (
             <SecretariatDashboard
               applications={applications}
-              evaluators={users.filter(user => user.role === 'EVALUATOR')}
+              evaluators={users.filter(user => user.role === 'EVALUATOR' && user.is_active !== false)}
               awards={awards}
               currentUser={currentUser}
               onRefreshData={refreshData}
@@ -489,6 +489,7 @@ export default function App() {
           {currentTab === 'deliberation' && (
             <DeliberationDashboard
               applications={applications}
+              users={users}
               awards={awards}
               currentUser={currentUser}
               onRefreshData={refreshData}
@@ -502,6 +503,7 @@ export default function App() {
               currentUser={currentUser}
               onRefreshData={refreshData}
               onNavigateToNomination={handleOpenNominationForm}
+              onNavigateToCorrections={() => setCurrentTab('new-nomination')}
             />
           )}
 

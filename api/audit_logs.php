@@ -18,11 +18,27 @@ $actor = require_auth($db);
 
 if ($method === 'GET') {
     if (isset($_GET['application_id'])) {
+        if (in_array($actor['role'], ['NOMINEE', 'HEAD_OF_OFFICE'], true)) {
+            $accessStmt = $db->prepare('SELECT nominator_id, nominee_id, office_id, status FROM applications WHERE id = :id');
+            $accessStmt->execute([':id' => $_GET['application_id']]);
+            $application = $accessStmt->fetch();
+            if (!$application) {
+                sendResponse(404, [], 'Application not found.');
+            }
+            $isOwnNomination = $application['nominator_id'] === $actor['id'] || $application['nominee_id'] === $actor['id'];
+            $isSameOfficeHead = $actor['role'] === 'HEAD_OF_OFFICE'
+                && !empty($actor['office_id'])
+                && $application['office_id'] === $actor['office_id']
+                && $application['status'] !== 'Draft';
+            if (!$isOwnNomination && !$isSameOfficeHead) {
+                sendResponse(403, [], 'You cannot view this nomination history.');
+            }
+        }
         $stmt = $db->prepare("SELECT * FROM application_history WHERE application_id = :id ORDER BY created_at DESC");
         $stmt->execute([':id' => $_GET['application_id']]);
     } else {
-        if ($actor['role'] === 'NOMINEE') {
-            sendResponse(403, [], "Nominee accounts must request audit logs per application.");
+        if (in_array($actor['role'], ['NOMINEE', 'HEAD_OF_OFFICE'], true)) {
+            sendResponse(403, [], 'Request audit logs for an accessible nomination.');
         }
         $stmt = $db->query("SELECT * FROM application_history ORDER BY created_at DESC LIMIT 200");
     }

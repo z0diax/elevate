@@ -12,6 +12,7 @@ export interface UserProfile {
   contact_number?: string;
   barangay?: string;
   created_at?: string;
+  is_active?: boolean;
 }
 
 export interface Office {
@@ -206,7 +207,7 @@ export interface ApplicationHistory {
   application_id: string;
   user_id: string;
   user_name: string;
-  user_role: UserRole;
+  user_role: UserRole | 'SYSTEM';
   action: string;
   previous_status?: ApplicationStatus;
   new_status: ApplicationStatus;

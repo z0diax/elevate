@@ -1,19 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Application, ApplicationDocument, Award, UserProfile } from '../../types';
+import { Application, Award, UserProfile } from '../../types';
 import { StatusBadge } from '../common/StatusBadge';
-import { StageProgressTracker } from '../common/StageProgressTracker';
+import { NominationActionModal } from '../nomination/NominationActionModal';
+import { NominationDetails, NominationDocuments, NominationHistory } from '../nomination/NominationReadOnlySections';
+import { NominationQueueCards } from '../nomination/NominationQueueCards';
 import { DocumentViewerModal } from '../common/DocumentViewerModal';
-import { AuditTrailModal } from '../common/AuditTrailModal';
 import { praiseService } from '../../lib/supabase';
 import { showToast } from '../../lib/toast';
-import {
-  FileCheck2,
-  FileText,
-  History,
-  RotateCcw,
-  Send,
-  Users,
-} from 'lucide-react';
 
 interface SecretariatDashboardProps {
   applications: Application[];
@@ -33,14 +26,12 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
   onRefreshData,
 }) => {
   const workbenchApplications = useMemo(() => applications.filter(application =>
-    application.processing_stage === 'Document Verification'
-    && WORKBENCH_STATUSES.has(application.status)
+    ['Document Verification', 'Evaluation', 'Deliberation', 'Final Decision', 'Awarded'].includes(application.processing_stage)
   ), [applications]);
 
   const [selectedAppId, setSelectedAppId] = useState<string>('');
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
-  const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
-  const [selectedEvaluatorIds, setSelectedEvaluatorIds] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState('documents');
   const [routingRemarks, setRoutingRemarks] = useState('');
   const [returnRemarks, setReturnRemarks] = useState('');
   const [isReturning, setIsReturning] = useState(false);
@@ -54,19 +45,17 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
   }, [selectedAppId, workbenchApplications]);
 
   const selectedApp = workbenchApplications.find(application => application.id === selectedAppId);
+  const canProcessVerification = selectedApp?.processing_stage === 'Document Verification'
+    && WORKBENCH_STATUSES.has(selectedApp.status);
   const selectedAward = awards.find(award => award.id === selectedApp?.award_id);
   const selectedDoc = selectedApp?.documents?.find(document => document.id === selectedDocId) || null;
-
-  useEffect(() => {
-    setSelectedEvaluatorIds(selectedApp?.assigned_evaluators || []);
-  }, [selectedApp?.id, selectedApp?.assigned_evaluators]);
 
   const allDocs = selectedApp?.documents || [];
   const verifiedDocsCount = allDocs.filter(document => document.status === 'Verified').length;
   const allDocsVerified = allDocs.length > 0 && verifiedDocsCount === allDocs.length;
 
   async function handleVerifyDocument(docId: string, status: 'Verified' | 'Rejected', remarks: string) {
-    if (!selectedApp) {
+    if (!selectedApp || !canProcessVerification) {
       return;
     }
 
@@ -84,7 +73,7 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
   }
 
   async function handleMarkApplicationVerified() {
-    if (!selectedApp) {
+    if (!selectedApp || !canProcessVerification) {
       return;
     }
 
@@ -104,7 +93,7 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
   }
 
   async function handleReturnApplication() {
-    if (!selectedApp) {
+    if (!selectedApp || !canProcessVerification) {
       return;
     }
 
@@ -128,7 +117,7 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
   }
 
   async function handleRouteToEvaluators() {
-    if (!selectedApp) {
+    if (!selectedApp || !canProcessVerification) {
       return;
     }
 
@@ -137,17 +126,17 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
       return;
     }
 
-    if (!selectedEvaluatorIds.length) {
-      alert('Please select at least one evaluator.');
+    if (!evaluators.length) {
+      alert('No evaluator accounts are available. Create at least one evaluator account before forwarding this nomination.');
       return;
     }
 
     setIsBusy(true);
     try {
-      await praiseService.routeToEvaluators(selectedApp.id, selectedEvaluatorIds, routingRemarks.trim());
-      showToast(`${selectedApp.application_number} forwarded to the selected evaluator(s).`);
+      await praiseService.routeToEvaluators(selectedApp.id, routingRemarks.trim());
+      showToast(`${selectedApp.application_number} forwarded to all current evaluators.`);
       setRoutingRemarks('');
-      setRoutingSuccess(`${selectedApp.application_number} was forwarded to the selected evaluator(s). It has been removed from the Secretariat workbench.`);
+      setRoutingSuccess(`${selectedApp.application_number} was forwarded to all current evaluators and remains available for tracking.`);
       await onRefreshData();
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Failed to route the application to evaluators.');
@@ -176,13 +165,13 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
           <div className="bg-slate-800 border border-slate-700 px-4 py-2.5 rounded-lg text-center">
             <p className="text-[10px] text-slate-400 uppercase font-bold">In Verification</p>
             <p className="text-xl font-bold text-amber-400">
-              {workbenchApplications.filter(application => ['Endorsed', 'For Verification', 'Incomplete'].includes(application.status)).length}
+              {workbenchApplications.filter(application => application.processing_stage === 'Document Verification' && ['Endorsed', 'For Verification', 'Incomplete'].includes(application.status)).length}
             </p>
           </div>
           <div className="bg-slate-800 border border-slate-700 px-4 py-2.5 rounded-lg text-center">
             <p className="text-[10px] text-slate-400 uppercase font-bold">Ready for Routing</p>
             <p className="text-xl font-bold text-green-400">
-              {workbenchApplications.filter(application => application.status === 'Verified').length}
+              {workbenchApplications.filter(application => application.processing_stage === 'Document Verification' && application.status === 'Verified').length}
             </p>
           </div>
         </div>
@@ -192,23 +181,24 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
         <div className="space-y-3">
           <div className="flex items-center justify-between px-1">
             <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-              Verification Queue ({workbenchApplications.length})
+              Assigned Nominations ({workbenchApplications.length})
             </h3>
             <span className="text-[11px] text-slate-500 font-medium">
-              {selectedApp ? 'Select application' : 'No applications awaiting verification'}
+              {workbenchApplications.some(application => application.processing_stage === 'Document Verification' && WORKBENCH_STATUSES.has(application.status)) ? 'Open a nomination to review or track it' : 'No applications awaiting verification'}
             </span>
           </div>
 
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
+            {workbenchApplications.length > 0 && <NominationQueueCards applications={workbenchApplications} onOpen={application => { setActiveTab('documents'); setSelectedAppId(application.id); }} actionLabel={application => application.processing_stage === 'Document Verification' && WORKBENCH_STATUSES.has(application.status) ? 'Open review' : 'View nomination'} />}
             {workbenchApplications.length === 0 ? (
               <div className="p-12 text-center text-slate-400">
-                <p>No applications are currently awaiting document verification.</p>
+                <p>No nominations have reached Secretariat processing yet.</p>
                 <p className="mt-2 text-xs text-slate-500">
                   Nominations requiring committee decisions are listed under <strong className="font-semibold text-slate-700">PRAISE Deliberation</strong>.
                 </p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="hidden overflow-x-auto sm:block">
                 <table className="w-full min-w-[760px] text-left text-sm">
                   <thead className="border-b border-slate-200 bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
                     <tr>
@@ -216,6 +206,7 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
                       <th className="px-5 py-3">Nominee</th>
                       <th className="px-5 py-3">Office</th>
                       <th className="px-5 py-3">Award applied</th>
+                      <th className="px-5 py-3">Stage</th>
                       <th className="px-5 py-3">Status</th>
                       <th className="px-5 py-3 text-right">Action</th>
                     </tr>
@@ -227,10 +218,11 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
                         <td className="px-5 py-4 font-semibold text-slate-900">{application.nominee_name}</td>
                         <td className="px-5 py-4 text-slate-600">{application.office_name}</td>
                         <td className="px-5 py-4 font-medium text-slate-700">{application.award_name}</td>
+                        <td className="px-5 py-4 text-xs text-slate-600">{application.processing_stage}</td>
                         <td className="px-5 py-4"><StatusBadge status={application.status} size="sm" /></td>
                         <td className="px-5 py-4 text-right">
-                          <button type="button" onClick={() => setSelectedAppId(application.id)} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100">
-                            Open review
+                          <button type="button" onClick={() => { setActiveTab('documents'); setSelectedAppId(application.id); }} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100">
+                            {application.processing_stage === 'Document Verification' && WORKBENCH_STATUSES.has(application.status) ? 'Open review' : 'View nomination'}
                           </button>
                         </td>
                       </tr>
@@ -242,248 +234,66 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
           </div>
         </div>
 
-        {selectedApp ? (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-3 sm:p-6">
-            <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-slate-50 shadow-2xl">
-            <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-900 px-5 py-4 text-white sm:px-7">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-wider text-blue-300">Secretariat document review</p>
-                <h3 className="mt-1 text-lg font-bold">{selectedApp.nominee_name}</h3>
-                <p className="mt-1 text-xs text-slate-300">{selectedApp.application_number} • {selectedApp.award_name}</p>
-              </div>
-              <button type="button" onClick={() => setSelectedAppId('')} className="rounded-lg border border-slate-600 px-2.5 py-1 text-lg leading-none text-slate-300 hover:bg-slate-700 hover:text-white" aria-label="Close review modal">×</button>
-            </div>
-            <div className="overflow-y-auto p-4 sm:p-6">
-            <div className="space-y-6">
-            <StageProgressTracker
-              currentStage={selectedApp.processing_stage}
-              currentStatus={selectedApp.status}
-            />
-
-            <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-xs space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-base font-bold text-slate-900">{selectedApp.nominee_name}</h3>
-                    <StatusBadge status={selectedApp.status} size="sm" />
-                  </div>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    {[selectedApp.position_title, selectedApp.office_name, selectedApp.barangay].filter(Boolean).join(' • ')}
-                  </p>
-                </div>
-
-                <button
-                  id="view-audit-trail-btn"
-                  onClick={() => setIsAuditModalOpen(true)}
-                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-md inline-flex items-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  <History size={14} />
-                  <span>Audit History</span>
-                </button>
-              </div>
-
-              <div className="text-xs space-y-2">
-                <div>
-                  <span className="font-bold text-slate-900">Justification & Merits:</span>
-                  <p className="safe-long-text text-slate-700 mt-1 leading-relaxed bg-slate-50 p-3 rounded-lg border border-slate-200">
-                    {selectedApp.justification}
-                  </p>
-                </div>
-
-                <div>
-                  <span className="font-bold text-slate-900">Accomplishments & Public Impact:</span>
-                  <p className="safe-long-text text-slate-700 mt-1 leading-relaxed bg-slate-50 p-3 rounded-lg border border-slate-200">
-                    {selectedApp.accomplishments}
-                  </p>
-                </div>
-
-                {selectedAward && (
+        {selectedApp && (
+          <NominationActionModal
+            application={selectedApp}
+            title={canProcessVerification ? (selectedApp.status === 'Verified' ? 'Ready for evaluation' : 'Document verification') : 'Nomination tracking'}
+            task={canProcessVerification
+              ? selectedApp.status === 'Verified'
+                ? 'All documents are verified. Forward this nomination to the evaluator panel.'
+                : 'Review each submitted document and record its verification result.'
+              : 'This nomination remains available for tracking.'}
+            tabs={[{ id: 'documents', label: 'Documents' }, { id: 'details', label: 'Nomination details' }, { id: 'history', label: 'History' }]}
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            onClose={() => setSelectedAppId('')}
+            footer={canProcessVerification ? (
+              <>
+                <button type="button" onClick={() => { setActiveTab('documents'); setIsReturning(value => !value); }} disabled={isBusy} className="min-h-11 rounded-lg border border-slate-300 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Return for compliance</button>
+                {selectedApp.status === 'Verified' ? (
+                  <button type="button" onClick={() => void handleRouteToEvaluators()} disabled={isBusy || evaluators.length === 0} className="min-h-11 w-full rounded-lg bg-blue-600 px-5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 sm:w-auto">Forward to evaluators</button>
+                ) : (
+                  <button type="button" onClick={() => void handleMarkApplicationVerified()} disabled={isBusy || !allDocsVerified} className="min-h-11 w-full rounded-lg bg-blue-600 px-5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 sm:w-auto">Mark application verified</button>
+                )}
+              </>
+            ) : undefined}
+          >
+            {activeTab === 'documents' && (
+              <div className="space-y-5">
+                {canProcessVerification ? (
                   <div>
-                    <span className="font-bold text-slate-900">Award Category:</span>
-                    <p className="text-slate-700 mt-1">{selectedAward.name}</p>
+                    <h3 className="text-base font-bold text-slate-950">{selectedApp.status === 'Verified' ? 'Your task: Route to evaluators' : 'Your task: Verify documents'}</h3>
+                    <p className="mt-1 text-sm text-slate-600">{verifiedDocsCount} of {allDocs.length} documents verified.</p>
                   </div>
+                ) : <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-800">This nomination is at the {selectedApp.processing_stage} stage. Verification controls are no longer available.</p>}
+                <NominationDocuments application={selectedApp} onOpen={setSelectedDocId} actionLabel={() => canProcessVerification ? 'Review' : 'View'} />
+                {canProcessVerification && selectedApp.status === 'Verified' && (
+                  <section className="border-t border-slate-100 pt-5">
+                    <h3 className="text-base font-bold text-slate-950">Evaluator panel</h3>
+                    <p className="mt-1 text-sm text-slate-600">{evaluators.length} evaluator(s) will receive this nomination.</p>
+                    <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+                      {evaluators.map(evaluator => <li key={evaluator.id} className="break-words rounded-lg bg-slate-50 p-3 text-sm text-slate-800">{evaluator.full_name}</li>)}
+                    </ul>
+                    <label htmlFor="routing-remarks" className="mt-4 block text-sm font-semibold text-slate-900">Routing instructions (optional)</label>
+                    <input id="routing-remarks" type="text" value={routingRemarks} onChange={event => setRoutingRemarks(event.target.value)} className="mt-2 min-h-11 w-full rounded-lg border border-slate-300 px-3 text-sm focus:outline-2 focus:outline-blue-600" />
+                  </section>
                 )}
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-xs space-y-4">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                    <FileCheck2 size={16} className="text-blue-600" />
-                    <span>Documentary Requirements Verification Checklist</span>
-                  </h4>
-                  <p className="text-xs text-slate-500">
-                    Progress: <strong className="text-blue-600">{verifiedDocsCount}</strong> of {allDocs.length} verified compliant
-                  </p>
-                </div>
-
-                {allDocsVerified && selectedApp.status !== 'Verified' && (
-                  <button
-                    id="mark-app-all-verified-btn"
-                    onClick={() => void handleMarkApplicationVerified()}
-                    disabled={isBusy}
-                    className="px-3.5 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-semibold rounded-md shadow-xs transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-70"
-                  >
-                    Confirm All Documents Verified
-                  </button>
-                )}
-              </div>
-
-              <div className="space-y-2.5">
-                {allDocs.map((document: ApplicationDocument) => (
-                  <div
-                    key={document.id}
-                    id={`doc-row-${document.id}`}
-                    className="p-3.5 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between gap-3"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <FileText size={16} className="text-blue-600 shrink-0" />
-                        <span className="text-xs font-bold text-slate-900 truncate">{document.document_name}</span>
-                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${
-                          document.status === 'Verified'
-                            ? 'bg-green-50 text-green-700 border-green-200'
-                            : document.status === 'Rejected'
-                              ? 'bg-red-50 text-red-700 border-red-200'
-                              : 'bg-amber-50 text-amber-700 border-amber-200'
-                        }`}>
-                          {document.status}
-                        </span>
-                      </div>
-                      {document.verification_remarks && (
-                        <p className="text-[11px] text-slate-500 mt-1 pl-6">
-                          Remarks: <em>{document.verification_remarks}</em>
-                        </p>
-                      )}
+                {canProcessVerification && isReturning && (
+                  <section className="rounded-xl border border-red-200 bg-red-50 p-4">
+                    <label htmlFor="return-remarks" className="block text-sm font-semibold text-red-900">Required correction instructions</label>
+                    <textarea id="return-remarks" rows={3} value={returnRemarks} onChange={event => setReturnRemarks(event.target.value)} className="mt-2 min-h-24 w-full rounded-lg border border-red-200 p-3 text-sm focus:outline-2 focus:outline-red-600" />
+                    <div className="mt-3 flex justify-end gap-2">
+                      <button type="button" onClick={() => setIsReturning(false)} className="min-h-11 px-3 text-sm font-semibold text-slate-600">Cancel</button>
+                      <button type="button" onClick={() => void handleReturnApplication()} disabled={isBusy} className="min-h-11 rounded-lg bg-red-700 px-4 text-sm font-semibold text-white disabled:opacity-50">Send return notice</button>
                     </div>
-
-                    <button
-                      onClick={() => setSelectedDocId(document.id)}
-                      className="px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold rounded-md inline-flex items-center gap-1 cursor-pointer shadow-xs"
-                    >
-                      <span>Inspect & Verify</span>
-                    </button>
-                  </div>
-                ))}
+                  </section>
+                )}
               </div>
-            </div>
-
-            <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-xs space-y-4">
-              <div>
-                <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                  <Users size={16} className="text-blue-600" />
-                  <span>Assign Evaluators & Forward for Scoring</span>
-                </h4>
-                <p className="text-xs text-slate-500">
-                  Select evaluator accounts who will score this nomination against the configured award criteria.
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {evaluators.map(evaluator => {
-                  const isChecked = selectedEvaluatorIds.includes(evaluator.id);
-                  return (
-                    <label
-                      key={evaluator.id}
-                      className={`p-3 rounded-lg border flex items-center gap-3 cursor-pointer transition-colors ${
-                        isChecked
-                          ? 'bg-blue-50 border-blue-500'
-                          : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={event => {
-                          if (event.target.checked) {
-                            setSelectedEvaluatorIds(previous => [...previous, evaluator.id]);
-                          } else {
-                            setSelectedEvaluatorIds(previous => previous.filter(id => id !== evaluator.id));
-                          }
-                        }}
-                        className="rounded text-blue-600 focus:ring-blue-500"
-                      />
-                      <div className="min-w-0">
-                        <p className="text-xs font-bold text-slate-900 truncate">{evaluator.full_name}</p>
-                        <p className="text-[10px] text-slate-500 truncate">
-                          {[evaluator.position_title, evaluator.office_name].filter(Boolean).join(' • ')}
-                        </p>
-                      </div>
-                    </label>
-                  );
-                })}
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Routing Instructions / Special Assessment Directives:
-                </label>
-                <input
-                  type="text"
-                  placeholder="Optional instructions for the evaluator panel"
-                  value={routingRemarks}
-                  onChange={event => setRoutingRemarks(event.target.value)}
-                  className="w-full text-xs p-2.5 rounded-md border border-slate-200 bg-slate-50 text-slate-900 focus:bg-white"
-                />
-              </div>
-
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                <button
-                  id="return-for-revision-btn"
-                  onClick={() => setIsReturning(previous => !previous)}
-                  className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs font-semibold rounded-md inline-flex items-center gap-1.5 cursor-pointer"
-                >
-                  <RotateCcw size={14} />
-                  <span>Return for Revision</span>
-                </button>
-
-                <button
-                  id="forward-to-evaluators-btn"
-                  onClick={() => void handleRouteToEvaluators()}
-                  disabled={isBusy || selectedApp.status !== 'Verified'}
-                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-md inline-flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  <Send size={14} />
-                  <span>Forward to Selected Evaluators ({selectedEvaluatorIds.length})</span>
-                </button>
-              </div>
-
-              {isReturning && (
-                <div className="p-4 rounded-xl bg-red-50 border border-red-200 space-y-3">
-                  <label className="block text-xs font-bold text-red-900">
-                    Mandatory Return Remarks / Deficiency Notice:
-                  </label>
-                  <textarea
-                    rows={2}
-                    placeholder="Specify the missing documents or clarifications required."
-                    value={returnRemarks}
-                    onChange={event => setReturnRemarks(event.target.value)}
-                    className="safe-long-text w-full min-w-0 max-w-full text-xs p-2.5 rounded-md border border-red-200 bg-white text-slate-900"
-                  />
-                  <div className="flex justify-end gap-2">
-                    <button
-                      onClick={() => setIsReturning(false)}
-                      className="px-3 py-1.5 text-xs text-slate-500 font-semibold cursor-pointer"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={() => void handleReturnApplication()}
-                      disabled={isBusy}
-                      className="px-4 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded-md cursor-pointer disabled:cursor-not-allowed disabled:opacity-70"
-                    >
-                      Send Return Notice
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-            </div>
-            </div>
-            </div>
-        ) : null}
+            )}
+            {activeTab === 'details' && <NominationDetails application={selectedApp} />}
+            {activeTab === 'history' && <NominationHistory logs={praiseService.getAuditLogsForApplication(selectedApp.id)} />}
+          </NominationActionModal>
+        )}
       </div>
 
       {selectedDoc && selectedApp && (
@@ -494,19 +304,10 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
           nomineeName={selectedApp.nominee_name}
           applicationNumber={selectedApp.application_number}
           userRole={currentUser.role}
-          onVerify={(status, remarks) => void handleVerifyDocument(selectedDoc.id, status, remarks)}
+          onVerify={canProcessVerification ? (status, remarks) => void handleVerifyDocument(selectedDoc.id, status, remarks) : undefined}
         />
       )}
 
-      {selectedApp && (
-        <AuditTrailModal
-          isOpen={isAuditModalOpen}
-          onClose={() => setIsAuditModalOpen(false)}
-          historyLogs={praiseService.getAuditLogsForApplication(selectedApp.id)}
-          applicationNumber={selectedApp.application_number}
-          nomineeName={selectedApp.nominee_name}
-        />
-      )}
     </div>
   );
 };

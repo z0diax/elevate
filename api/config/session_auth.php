@@ -111,10 +111,9 @@ function require_application_access(PDO $db, array $actor, string $applicationId
     if (!$application) sendResponse(404, [], 'Application not found.');
     $role = $actor['role'];
     $own = $application['nominator_id'] === $actor['id'] || $application['nominee_id'] === $actor['id'];
-    if ($application['status'] === 'Draft' && !$own) sendResponse(404, [], 'Application not found.');
-    if ($role === 'ADMINISTRATOR' || $own) return $application;
-    if ($role === 'HEAD_OF_OFFICE' && !empty($actor['office_id']) && $application['office_id'] === $actor['office_id']) return $application;
-    if ($role === 'SECRETARIAT' && in_array($application['processing_stage'], ['Document Verification', 'Evaluation', 'Deliberation', 'Final Decision', 'Awarded'], true)) return $application;
+    if ($application['status'] === 'Draft' && $application['nominator_id'] !== $actor['id']) sendResponse(404, [], 'Application not found.');
+    if ($application['status'] === 'Draft') return $application;
+    if ($role === 'ADMINISTRATOR') return $application;
     if ($role === 'EVALUATOR') {
         $rows = $db->prepare('SELECT evaluator_id, status FROM application_evaluator_assignments WHERE application_id = :id');
         $rows->execute([':id' => $applicationId]);
@@ -127,6 +126,10 @@ function require_application_access(PDO $db, array $actor, string $applicationId
             $legacy = json_decode((string)($application['assigned_evaluators'] ?? '[]'), true);
             if (is_array($legacy) && in_array($actor['id'], $legacy, true)) return $application;
         }
+        sendResponse(404, [], 'Application not found.');
     }
+    if ($own) return $application;
+    if ($role === 'HEAD_OF_OFFICE' && !empty($actor['office_id']) && $application['office_id'] === $actor['office_id']) return $application;
+    if ($role === 'SECRETARIAT' && in_array($application['processing_stage'], ['Document Verification', 'Evaluation', 'Deliberation', 'Final Decision', 'Awarded'], true)) return $application;
     sendResponse(404, [], 'Application not found.');
 }

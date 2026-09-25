@@ -12,14 +12,22 @@ function private_document_dir(): string {
 }
 
 function prepare_private_document_dir(): ?string {
+    $configured = getenv('PRIVATE_UPLOAD_DIR');
+    if ($configured !== false && trim($configured) !== ''
+        && !preg_match('~^(?:[A-Za-z]:[\\\\/]|/|\\\\\\\\)~', trim($configured))) return null;
     $dir = private_document_dir();
     if (!is_dir($dir) && !@mkdir($dir, 0700, true) && !is_dir($dir)) return null;
     $realDir = realpath($dir);
     if ($realDir === false) return null;
     $documentRoot = realpath((string)($_SERVER['DOCUMENT_ROOT'] ?? ''));
     if ($documentRoot !== false) {
-        $root = rtrim($documentRoot, DIRECTORY_SEPARATOR);
-        if ($realDir === $root || str_starts_with($realDir, $root . DIRECTORY_SEPARATOR)) return null;
+        $root = rtrim(str_replace('\\', '/', $documentRoot), '/');
+        $candidate = str_replace('\\', '/', $realDir);
+        if (DIRECTORY_SEPARATOR === '\\') {
+            $root = strtolower($root);
+            $candidate = strtolower($candidate);
+        }
+        if ($candidate === $root || str_starts_with($candidate, $root . '/')) return null;
     }
     return rtrim($realDir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
 }

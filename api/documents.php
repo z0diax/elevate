@@ -125,11 +125,12 @@ if ($method === 'GET' && ($_GET['action'] ?? '') === 'download') {
     if ($mime === null || $mime !== $document['file_type']) sendResponse(404, [], 'Document file not found.');
     $size = filesize($path);
     if ($size === false) sendResponse(404, [], 'Document file not found.');
-    $name = preg_replace('/[\\x00-\\x1F\\x7F<>:"\\/\\\\|?*]+/', '_', (string)$document['document_name']);
+    $name = preg_replace('/[^A-Za-z0-9._() -]+/', '_', (string)$document['document_name']);
     $name = trim((string)$name, " ._");
     if ($name === '') $name = 'document';
     if (strtolower(pathinfo($name, PATHINFO_EXTENSION)) !== $extension) $name .= '.' . $extension;
-    $name = substr($name, 0, 180);
+    $name = substr($name, 0, 175 - strlen($extension));
+    if (strtolower(pathinfo($name, PATHINFO_EXTENSION)) !== $extension) $name .= '.' . $extension;
     $preview = ($_GET['preview'] ?? '') === '1' && in_array($mime, ['application/pdf', 'image/jpeg', 'image/png'], true);
     header('Content-Type: ' . $mime);
     header('Content-Length: ' . $size);

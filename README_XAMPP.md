@@ -53,7 +53,11 @@ private $port = "3306";
 
 ## Nomination attachment uploads
 
-New uploads and replacements accept PDF, DOCX, JPG, JPEG, and PNG up to 10 MB per file. PHP needs Fileinfo and image inspection (`getimagesize`). DOCX validation uses ZipArchive or the bundled PharData ZIP reader. Set `upload_max_filesize = 10M` and `post_max_size = 12M` (or larger) in the deployment's PHP configuration so the application can enforce its own limit. Restart Apache after changing PHP settings. Keep `uploads/.htaccess` in place and ensure Apache allows directory overrides for this project.
+New uploads and replacements accept PDF, DOCX, JPG, JPEG, and PNG up to 10 MB per file. PHP needs Fileinfo and image inspection (`getimagesize`). DOCX validation uses ZipArchive or the bundled PharData ZIP reader. Set `upload_max_filesize = 10M` and `post_max_size = 12M` (or larger) in the deployment's PHP configuration so the application can enforce its own limit. Restart Apache after changing PHP settings.
+
+Set the PHP/Apache environment variable `PRIVATE_UPLOAD_DIR` to an absolute, writable directory **outside Apache's document root** in production, then restart Apache. For the standard `htdocs/<project>` XAMPP layout, the fallback is `praise_private_uploads` beside `htdocs`. The API refuses uploads if the resolved directory is inside the document root. Back up this private directory with the database.
+
+Keep `uploads/.htaccess` and allow Apache directory overrides: it denies direct HTTP access to legacy nomination documents. The `uploads/certificate_templates/.htaccess` exception keeps intentionally public certificate background images available. Historical `application_documents.file_url` values in the `uploads/<filename>` format remain readable through the authenticated `api/documents.php?action=download&id=<document-id>` endpoint; no destructive migration is required. Existing files can stay in `uploads/` until moved by a separately planned migration. Verify a known `/uploads/<filename>` URL returns 403 after deployment; if overrides are disabled, add an equivalent Apache directory denial before serving the site.
 # Award evaluation routing upgrade
 
 For an existing XAMPP database, run `database_migrations/20260925_award_evaluation_routing.sql` once against `tacloban_praise_db`. The migration adds award routes, route members, and nomination assignment snapshots. A fresh command-line setup already includes these tables.

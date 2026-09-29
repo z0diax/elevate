@@ -10,7 +10,7 @@ require_test_database();
 require_once __DIR__ . '/../api/config/database.php';
 require_once __DIR__ . '/../api/config/validation.php';
 require_once __DIR__ . '/../api/config/session_auth.php';
-require_once __DIR__ . '/../api/config/evaluator_reassignment.php';
+require_once __DIR__ . '/../api/services/EvaluationRoutingService.php';
 
 function check(bool $condition, string $message): void {
     if (!$condition) throw new RuntimeException($message);

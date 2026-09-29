@@ -1,6 +1,85 @@
 <?php
 declare(strict_types=1);
 
+function handle_reassign_evaluator(PDO $db, array $actor, array $data, string $appId): void {
+    try {
+        reassign_application_evaluator($db, $actor, $appId, $data['old_evaluator_id'], $data['new_evaluator_id']);
+    } catch (EvaluatorReassignmentError $error) {
+        sendResponse($error->httpStatus, [], $error->getMessage());
+    } catch (Throwable $error) {
+        sendInternalError($error, 'applications.php:reassign_evaluator', 'Failed to reassign evaluator.');
+    }
+    sendResponse(200, getFullApplication($db, $appId), 'Evaluator reassigned successfully.');
+}
+
+function handle_assign_evaluators(PDO $db, array $actor, array $data, string $appId, array $current): void {
+    if (!in_array($actor['role'], ['SECRETARIAT', 'ADMINISTRATOR'], true)) {
+        sendResponse(403, [], 'Only Secretariat staff can route nominations to evaluators.');
+    }
+    if ($current['processing_stage'] === 'Evaluation' && in_array($current['status'], ['For Evaluation', 'Under Evaluation'], true) && !empty($current['evaluator_assignments'])) {
+        sendResponse(200, $current, 'Evaluators already assigned.');
+    }
+    if ($current['processing_stage'] !== 'Document Verification' || $current['status'] !== 'Verified') {
+        sendResponse(409, [], 'Only a verified nomination can be routed to evaluators.');
+    }
+    $remarks = trim((string)($data['remarks'] ?? 'Assigned PRAISE evaluators.'));
+
+    $db->beginTransaction();
+    try {
+        $locked = $db->prepare('SELECT award_id, application_number, award_name, status FROM applications WHERE id = :id FOR UPDATE');
+        $locked->execute([':id' => $appId]);
+        $lockedApp = $locked->fetch();
+        if ($lockedApp['status'] !== 'Verified') {
+            $db->rollBack();
+            sendResponse(409, [], 'This nomination has already left document verification.');
+        }
+        $routeStmt = $db->prepare("SELECT r.id, r.required_evaluators FROM award_evaluation_routes r JOIN awards a ON a.id = r.award_id WHERE r.award_id = :award_id AND r.is_active = 1 AND a.is_active = 1 FOR UPDATE");
+        $routeStmt->execute([':award_id' => $lockedApp['award_id']]);
+        $route = $routeStmt->fetch();
+        if (!$route) {
+            $db->rollBack();
+            sendResponse(409, [], 'Evaluation routing has not been configured or enabled for this award.');
+        }
+        $members = $db->prepare("SELECT p.id FROM award_route_evaluators are JOIN profiles p ON p.id = are.evaluator_id WHERE are.route_id = :route_id AND are.is_active = 1 AND p.is_active = 1 AND p.role = 'EVALUATOR' ORDER BY are.sequence_no");
+        $members->execute([':route_id' => $route['id']]);
+        $evaluatorIds = $members->fetchAll(PDO::FETCH_COLUMN);
+        if (count($evaluatorIds) !== (int)$route['required_evaluators']) {
+            $db->rollBack();
+            sendResponse(409, [], 'Evaluation routing is incomplete or contains inactive evaluators. Ask an Administrator to update this award.');
+        }
+        $existing = $db->prepare('SELECT COUNT(*) FROM application_evaluator_assignments WHERE application_id = :id');
+        $existing->execute([':id' => $appId]);
+        if ((int)$existing->fetchColumn() > 0) {
+            $db->rollBack();
+            sendResponse(409, [], 'This nomination already has evaluator assignments.');
+        }
+        $insert = $db->prepare('INSERT INTO application_evaluator_assignments (id, application_id, evaluator_id, route_id, sequence_no) VALUES (:id, :application_id, :evaluator_id, :route_id, :sequence_no)');
+        $notify = $db->prepare("INSERT INTO notifications (id, user_id, target_role, application_id, application_number, title, message, link_tab) VALUES (:id, :user_id, NULL, :application_id, :application_number, 'New Evaluation Assignment', :message, 'evaluator-queue')");
+        foreach ($evaluatorIds as $index => $evaluatorId) {
+            $insert->execute([':id' => 'assign-' . bin2hex(random_bytes(16)), ':application_id' => $appId, ':evaluator_id' => $evaluatorId, ':route_id' => $route['id'], ':sequence_no' => $index + 1]);
+            $notify->execute([':id' => 'notif-' . bin2hex(random_bytes(16)), ':user_id' => $evaluatorId, ':application_id' => $appId, ':application_number' => $lockedApp['application_number'], ':message' => 'You have been assigned to evaluate a nomination for ' . $lockedApp['award_name'] . '.']);
+        }
+        $db->prepare("
+            UPDATE applications
+            SET final_weighted_score = NULL,
+                status = 'For Evaluation',
+                processing_stage = 'Evaluation',
+                required_action = 'Evaluator assessment in progress'
+            WHERE id = :id
+        ")->execute([
+            ':id' => $appId,
+        ]);
+
+        addHistory($db, $appId, $actor, 'Routed to Evaluators', $current['status'], 'For Evaluation', $remarks . ' Evaluation routing applied. Assigned to ' . count($evaluatorIds) . ' evaluators.');
+        $db->commit();
+    } catch (Throwable $e) {
+        $db->rollBack();
+        sendInternalError($e, 'applications.php:assign_evaluators', 'Failed to assign evaluators.');
+    }
+
+    sendResponse(200, getFullApplication($db, $appId), 'Evaluators assigned.');
+}
+
 final class EvaluatorReassignmentError extends RuntimeException {
     public function __construct(public readonly int $httpStatus, string $message) {
         parent::__construct($message);

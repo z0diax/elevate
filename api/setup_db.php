@@ -82,10 +82,6 @@ try {
 
     $sqlPath = __DIR__ . '/../database.sql';
     if (!file_exists($sqlPath)) {
-        $sqlPath = __DIR__ . '/../public/tacloban_praise_db.sql';
-    }
-
-    if (!file_exists($sqlPath)) {
         throw new Exception('The deployment SQL file was not found. Expected database.sql in the project root.');
     }
 

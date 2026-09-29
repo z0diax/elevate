@@ -162,7 +162,8 @@ CREATE TABLE `applications` (
   KEY `idx_applications_award` (`award_id`),
   KEY `idx_applications_nominee` (`nominee_id`),
   KEY `idx_applications_office` (`office_id`),
-  KEY `idx_applications_status` (`status`)
+  KEY `idx_applications_status` (`status`),
+  KEY `idx_applications_stage` (`processing_stage`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `application_documents` (
@@ -216,6 +217,7 @@ CREATE TABLE `evaluations` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uniq_application_evaluator` (`application_id`, `evaluator_id`),
   KEY `idx_evaluations_app` (`application_id`),
+  KEY `idx_evaluations_evaluator` (`evaluator_id`),
   CONSTRAINT `fk_evaluations_application`
     FOREIGN KEY (`application_id`) REFERENCES `applications` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

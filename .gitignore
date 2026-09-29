@@ -1,8 +1,24 @@
+# Dependencies and generated output.
 node_modules/
 build/
 dist/
 coverage/
+tmp/
+output/
+__pycache__/
+.pytest_cache/
+*.pyc
+
+# Local editor and OS files.
+.vscode/
 .DS_Store
+*.swp
+*.swo
+*~
+*.bak
+*.old
+
+# Local secrets and logs.
 *.log
 .env*
 !.env.example

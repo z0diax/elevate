@@ -21,12 +21,6 @@ import {
 import { getAppBasePath, getDefaultXamppApiUrl, resolveProjectUrl } from './mysqlService';
 import { isAssignedEvaluator } from './evaluatorAssignments';
 
-export const SUPABASE_URL = '';
-export const SUPABASE_ANON_KEY = '';
-export const isSupabaseConfigured = false;
-export const supabase = null;
-export const SUPABASE_SQL_SCHEMA = '-- Supabase integration is not enabled for this deployment.';
-
 type ApiEnvelope<T> = {
   status: 'success' | 'error';
   message: string;
@@ -1118,7 +1112,4 @@ export const praiseService = {
     return this.uploadApplicationDocument(appId, file, fileName || file.name, undefined, docId);
   },
 
-  async resetToInitialData(): Promise<void> {
-    throw new Error('Demo reset is disabled in deployment mode.');
-  },
 };

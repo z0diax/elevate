@@ -2,7 +2,5 @@
   "name": "HRMDO PRAISE MANAGEMENT",
   "description": "HRMDO Program on Awards and Incentives for Service Excellence (PRAISE) Management System",
   "requestFramePermissions": [],
-  "majorCapabilities": [
-    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
-  ]
+  "majorCapabilities": []
 }

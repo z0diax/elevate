@@ -5,7 +5,7 @@ import { NominationActionModal } from '../nomination/NominationActionModal';
 import { NominationDetails, NominationDocuments } from '../nomination/NominationReadOnlySections';
 import { NominationQueueCards } from '../nomination/NominationQueueCards';
 import { DocumentViewerModal } from '../common/DocumentViewerModal';
-import { praiseService } from '../../lib/supabase';
+import { praiseService } from '../../lib/api';
 import { getEvaluatorAssignmentStatus, getEvaluatorProgress, isAssignedEvaluator } from '../../lib/evaluatorAssignments';
 import { showToast } from '../../lib/toast';
 import { CheckCircle2, Scale } from 'lucide-react';

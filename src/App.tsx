@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Application, ApplicationHistory, Award, CertificateTemplateSettings, InAppNotification, Office, UserProfile } from './types';
 import { DEFAULT_CERTIFICATE_TEMPLATE_SETTINGS } from './lib/certificateTemplate';
 import { pdfGenerator } from './lib/pdfGenerator';
-import { praiseService } from './lib/supabase';
+import { praiseService } from './lib/api';
 import { isAssignedEvaluator } from './lib/evaluatorAssignments';
 import { Header } from './components/common/Header';
 import { Sidebar } from './components/common/Sidebar';

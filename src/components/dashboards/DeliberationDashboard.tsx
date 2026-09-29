@@ -5,7 +5,7 @@ import { DocumentViewerModal } from '../common/DocumentViewerModal';
 import { NominationActionModal } from '../nomination/NominationActionModal';
 import { NominationDetails, NominationDocuments, NominationHistory } from '../nomination/NominationReadOnlySections';
 import { NominationQueueCards } from '../nomination/NominationQueueCards';
-import { praiseService } from '../../lib/supabase';
+import { praiseService } from '../../lib/api';
 import { getAssignedEvaluatorIds, getEvaluatorProgress } from '../../lib/evaluatorAssignments';
 import { showToast } from '../../lib/toast';
 import { pdfGenerator } from '../../lib/pdfGenerator';

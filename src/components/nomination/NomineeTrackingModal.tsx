@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Application } from '../../types';
-import { praiseService } from '../../lib/supabase';
+import { praiseService } from '../../lib/api';
 import { DocumentViewerModal } from '../common/DocumentViewerModal';
 import { NominationActionModal } from './NominationActionModal';
 import { NominationDetails, NominationDocuments, NominationHistory } from './NominationReadOnlySections';

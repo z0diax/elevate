@@ -5,7 +5,7 @@ import { NominationActionModal } from '../nomination/NominationActionModal';
 import { NominationDetails, NominationDocuments, NominationHistory } from '../nomination/NominationReadOnlySections';
 import { NominationQueueCards } from '../nomination/NominationQueueCards';
 import { DocumentViewerModal } from '../common/DocumentViewerModal';
-import { praiseService } from '../../lib/supabase';
+import { praiseService } from '../../lib/api';
 import { showToast } from '../../lib/toast';
 import { pdfGenerator } from '../../lib/pdfGenerator';
 import { Building2, FileText } from 'lucide-react';

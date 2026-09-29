@@ -19,7 +19,7 @@ import {
   ShieldCheck, 
   Sparkles
 } from 'lucide-react';
-import { praiseService } from '../../lib/supabase';
+import { praiseService } from '../../lib/api';
 import { getEvaluatorProgress } from '../../lib/evaluatorAssignments';
 import { showToast } from '../../lib/toast';
 import { pdfGenerator } from '../../lib/pdfGenerator';

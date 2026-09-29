@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, FileText, Plus, RefreshCw, X } from 'lucide-react';
 import { Application, Award, Office, UserProfile } from '../../types';
-import { praiseService } from '../../lib/supabase';
+import { praiseService } from '../../lib/api';
 import { showToast } from '../../lib/toast';
 import { NominationWizard } from './NominationWizard';
 import { NominationActionModal } from './NominationActionModal';

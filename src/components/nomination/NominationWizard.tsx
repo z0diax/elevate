@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { Application, Award, Office, UserProfile } from '../../types';
-import { praiseService } from '../../lib/supabase';
+import { praiseService } from '../../lib/api';
 import { showToast } from '../../lib/toast';
 import { 
   FileText, 

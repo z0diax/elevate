@@ -4,7 +4,7 @@ import {
   normalizeCertificateTemplateSettings,
 } from '../../lib/certificateTemplate';
 import { pdfGenerator } from '../../lib/pdfGenerator';
-import { praiseService } from '../../lib/supabase';
+import { praiseService } from '../../lib/api';
 import { Application, Award, CertificateTemplateSettings } from '../../types';
 import {
   ArrowLeft,

@@ -6,3 +6,11 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Keep runtime uploads out of Git while retaining access controls.
+uploads/*
+!uploads/.htaccess
+!uploads/.gitkeep
+!uploads/certificate_templates/
+uploads/certificate_templates/*
+!uploads/certificate_templates/.htaccess

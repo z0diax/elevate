@@ -39,14 +39,17 @@ export const SubmitNominationView: React.FC<SubmitNominationViewProps> = ({
   const [resubmitError, setResubmitError] = useState('');
   const [isResubmitting, setIsResubmitting] = useState(false);
 
-  const filedApplications = useMemo(() => applications
-    .filter(application => application.nominator_id === currentUser.id && application.status !== 'Draft')
+  const visibleToUserApplications = useMemo(() => applications
+    .filter(application => application.status !== 'Draft' && (
+      application.nominator_id === currentUser.id
+      || (currentUser.role === 'NOMINEE' && application.nominee_id === currentUser.id)
+    ))
     .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime()),
-  [applications, currentUser.id]);
+  [applications, currentUser.id, currentUser.role]);
 
-  const trackingApp = filedApplications.find(application => application.id === trackingAppId) || null;
-  const totalPages = Math.max(1, Math.ceil(filedApplications.length / PAGE_SIZE));
-  const visibleApplications = filedApplications.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const trackingApp = visibleToUserApplications.find(application => application.id === trackingAppId) || null;
+  const totalPages = Math.max(1, Math.ceil(visibleToUserApplications.length / PAGE_SIZE));
+  const visibleApplications = visibleToUserApplications.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -116,9 +119,11 @@ export const SubmitNominationView: React.FC<SubmitNominationViewProps> = ({
     <div id="submit-nomination-view" className="space-y-5">
       <div className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-xs sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-lg font-bold text-slate-900">Submitted Nominations</h2>
+          <h2 className="text-lg font-bold text-slate-900">{currentUser.role === 'NOMINEE' ? 'My Nominations' : 'Submitted Nominations'}</h2>
           <p className="mt-1 text-xs text-slate-500">
-            View nominations filed from your account and respond to returned applications.
+            {currentUser.role === 'NOMINEE'
+              ? 'View nominations you filed or that were filed for you, and respond to returned applications you filed.'
+              : 'View nominations filed from your account and respond to returned applications.'}
           </p>
         </div>
         <button
@@ -133,8 +138,8 @@ export const SubmitNominationView: React.FC<SubmitNominationViewProps> = ({
       </div>
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
-        <NominationQueueCards applications={visibleApplications} onOpen={application => setTrackingAppId(application.id)} actionLabel={application => ['Returned for Revision', 'Incomplete'].includes(application.status) ? 'Review changes' : 'View nomination'} />
-        {visibleApplications.length === 0 && <p className="p-8 text-center text-sm text-slate-500 sm:hidden">No nominations filed from this account.</p>}
+        <NominationQueueCards applications={visibleApplications} onOpen={application => setTrackingAppId(application.id)} actionLabel={application => application.nominator_id === currentUser.id && ['Returned for Revision', 'Incomplete'].includes(application.status) ? 'Review changes' : 'View nomination'} />
+        {visibleApplications.length === 0 && <p className="p-8 text-center text-sm text-slate-500 sm:hidden">{currentUser.role === 'NOMINEE' ? 'No nominations yet.' : 'No nominations filed from this account.'}</p>}
         <div className="hidden overflow-x-auto sm:block">
           <table className="w-full min-w-[680px] text-left">
             <thead className="border-b border-slate-200 bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
@@ -148,9 +153,9 @@ export const SubmitNominationView: React.FC<SubmitNominationViewProps> = ({
             </thead>
             <tbody className="divide-y divide-slate-100">
               {visibleApplications.map(application => {
-                const canResubmit = application.status === 'Returned for Revision'
+                const canResubmit = application.nominator_id === currentUser.id && (application.status === 'Returned for Revision'
                   || application.status === 'Incomplete'
-                  || (application.status === 'Not Approved' && application.endorsement?.decision === 'Rejected');
+                  || (application.status === 'Not Approved' && application.endorsement?.decision === 'Rejected'));
                 return (
                   <tr key={application.id} className="align-top hover:bg-slate-50/70">
                     <td className="px-4 py-4 font-mono text-xs font-bold text-blue-700"><button type="button" onClick={() => setTrackingAppId(application.id)} className="break-words text-left hover:underline focus-visible:outline-2 focus-visible:outline-blue-600" aria-label={"View nomination " + application.application_number}>{application.application_number}</button></td>
@@ -180,7 +185,7 @@ export const SubmitNominationView: React.FC<SubmitNominationViewProps> = ({
                 <tr>
                   <td colSpan={5} className="px-6 py-14 text-center">
                     <FileText size={32} className="mx-auto text-slate-300" />
-                    <p className="mt-2 text-sm font-semibold text-slate-600">No nominations filed from this account</p>
+                    <p className="mt-2 text-sm font-semibold text-slate-600">{currentUser.role === 'NOMINEE' ? 'No nominations yet' : 'No nominations filed from this account'}</p>
                     <p className="mt-1 text-xs text-slate-400">Select New Nomination to create your first entry.</p>
                   </td>
                 </tr>
@@ -191,9 +196,9 @@ export const SubmitNominationView: React.FC<SubmitNominationViewProps> = ({
 
         <div className="flex items-center justify-between border-t border-slate-200 px-4 py-3">
           <p className="text-xs text-slate-500">
-            {filedApplications.length === 0
+            {visibleToUserApplications.length === 0
               ? '0 records'
-              : `Showing ${(page - 1) * PAGE_SIZE + 1}-${Math.min(page * PAGE_SIZE, filedApplications.length)} of ${filedApplications.length}`}
+              : `Showing ${(page - 1) * PAGE_SIZE + 1}-${Math.min(page * PAGE_SIZE, visibleToUserApplications.length)} of ${visibleToUserApplications.length}`}
           </p>
           <div className="flex items-center gap-2">
             <button
@@ -250,7 +255,7 @@ export const SubmitNominationView: React.FC<SubmitNominationViewProps> = ({
         <NomineeTrackingModal
           application={trackingApp}
           onClose={() => setTrackingAppId(null)}
-          onCorrect={() => { setTrackingAppId(null); openResubmission(trackingApp); }}
+          onCorrect={trackingApp.nominator_id === currentUser.id ? () => { setTrackingAppId(null); openResubmission(trackingApp); } : undefined}
         />
       )}
 

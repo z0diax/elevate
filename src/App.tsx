@@ -52,7 +52,7 @@ const ROLE_TABS: Record<UserProfile['role'], ReadonlySet<string>> = {
   ]),
   HEAD_OF_OFFICE: new Set(['endorsements', 'my-applications', 'new-nomination', 'awards-catalog']),
   EVALUATOR: new Set(['evaluator-queue', 'awards-catalog']),
-  NOMINEE: new Set(['my-applications', 'new-nomination', 'awards-catalog']),
+  NOMINEE: new Set(['my-applications', 'awards-catalog']),
 };
 
 function getPublicAuthRoute(): 'login' | 'signup' {
@@ -86,6 +86,9 @@ function getRestoredTab(user: UserProfile): string {
   }
 
   const savedTab = window.localStorage.getItem(activeViewStorageKey(user.id));
+  if (user.role === 'NOMINEE' && savedTab === 'new-nomination') {
+    return 'my-applications';
+  }
   return savedTab && ROLE_TABS[user.role].has(savedTab)
     ? savedTab
     : defaultTabForRole(user);
@@ -336,8 +339,8 @@ export default function App() {
 
   const handleOpenNominationForm = useCallback(() => {
     setOpenNominationFormRequested(true);
-    setCurrentTab('new-nomination');
-  }, []);
+    setCurrentTab(currentUser?.role === 'NOMINEE' ? 'my-applications' : 'new-nomination');
+  }, [currentUser?.role]);
 
   const pendingEndorsementCount = applications.filter(application => {
     const isSameOffice = !currentUser?.office_id || application.office_id === currentUser.office_id;
@@ -496,7 +499,7 @@ export default function App() {
             />
           )}
 
-          {currentTab === 'my-applications' && (
+          {currentTab === 'my-applications' && currentUser.role !== 'NOMINEE' && (
             <NomineeDashboard
               applications={applications}
               awards={awards}
@@ -507,7 +510,7 @@ export default function App() {
             />
           )}
 
-          {currentTab === 'new-nomination' && (
+          {(currentTab === 'new-nomination' || (currentTab === 'my-applications' && currentUser.role === 'NOMINEE')) && (
             <SubmitNominationView
               applications={applications}
               awards={awards}

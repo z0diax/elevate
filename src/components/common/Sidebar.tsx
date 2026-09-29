@@ -98,7 +98,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'new-nomination',
       label: 'Submit Nomination',
       icon: FilePlus,
-      roles: ['ADMINISTRATOR', 'SECRETARIAT', 'NOMINEE'],
+      roles: ['ADMINISTRATOR', 'SECRETARIAT'],
       section: 'Applications'
     },
     {

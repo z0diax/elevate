@@ -4,6 +4,11 @@
 
 DirectoryIndex index.php index.html
 
+# SQL files can contain seeded credentials or nomination data.
+<FilesMatch "(?i)\.sql$">
+  Require all denied
+</FilesMatch>
+
 <IfModule mod_rewrite.c>
   RewriteEngine On
 

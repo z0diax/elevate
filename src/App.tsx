@@ -3,6 +3,7 @@ import { Application, ApplicationHistory, Award, CertificateTemplateSettings, In
 import { DEFAULT_CERTIFICATE_TEMPLATE_SETTINGS } from './lib/certificateTemplate';
 import { pdfGenerator } from './lib/pdfGenerator';
 import { praiseService } from './lib/supabase';
+import { isAssignedEvaluator } from './lib/evaluatorAssignments';
 import { Header } from './components/common/Header';
 import { Sidebar } from './components/common/Sidebar';
 import { SubmitNominationView } from './components/nomination/SubmitNominationView';
@@ -352,7 +353,7 @@ export default function App() {
   ).length;
 
   const pendingEvaluationCount = applications.filter(application => {
-    const isAssigned = currentUser ? application.assigned_evaluators?.includes(currentUser.id) : false;
+    const isAssigned = currentUser ? isAssignedEvaluator(application, currentUser.id) : false;
     return Boolean(isAssigned)
       && application.processing_stage === 'Evaluation'
       && (application.status === 'For Evaluation' || application.status === 'Under Evaluation');

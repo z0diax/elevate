@@ -8,6 +8,7 @@ require_once __DIR__ . '/config/cors.php';
 require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/config/session_auth.php';
 require_once __DIR__ . '/config/document_storage.php';
+require_once __DIR__ . '/config/evaluator_reassignment.php';
 
 $database = new Database();
 $db = $database->getConnection();
@@ -63,6 +64,10 @@ function getFullApplication($db, string $appId): ?array {
     // A legacy nomination has no rows. Its JSON panel remains readable until migrated.
     if ($app['evaluator_assignments']) {
         $app['assigned_evaluators'] = array_values(array_column(array_filter($app['evaluator_assignments'], static fn($assignment) => $assignment['status'] !== 'Reassigned'), 'evaluator_id'));
+    } elseif ($app['assigned_evaluators']) {
+        // Only legacy nominations with JSON assignments lack assignment records.
+        // Omit the field so clients can distinguish them from an explicit empty set.
+        unset($app['evaluator_assignments']);
     }
 
     $docStmt = $db->prepare("SELECT * FROM application_documents WHERE application_id = :id ORDER BY uploaded_at ASC");
@@ -285,7 +290,11 @@ if ($method === 'POST') {
 
         $stmtCount = $db->query("SELECT COUNT(*) FROM applications");
         $totalCount = (int)$stmtCount->fetchColumn() + 1;
-        $appNumber = "PRAISE-{$year}-" . str_pad((string)$totalCount, 5, '0', STR_PAD_LEFT);
+        $numberExists = $db->prepare('SELECT 1 FROM applications WHERE application_number = :number LIMIT 1');
+        do {
+            $appNumber = "PRAISE-{$year}-" . str_pad((string)$totalCount++, 5, '0', STR_PAD_LEFT);
+            $numberExists->execute([':number' => $appNumber]);
+        } while ($numberExists->fetchColumn() !== false);
 
         $stmtAward = $db->prepare("SELECT name FROM awards WHERE id = :id");
         $stmtAward->execute([':id' => $data['award_id']]);
@@ -374,6 +383,7 @@ if ($method === 'PUT') {
         'inspect_document' => ['document_id', 'status', 'remarks'],
         'mark_verified' => ['remarks'],
         'assign_evaluators' => ['remarks'],
+        'reassign_evaluator' => ['old_evaluator_id', 'new_evaluator_id'],
         'return_for_revision' => ['remarks'],
         'deliberation' => ['decision', 'remarks', 'award_now'],
     ];
@@ -381,11 +391,28 @@ if ($method === 'PUT') {
     requireFields($data, array_merge(['id', 'application_id', 'action'], $actionFields[$action]));
     if (isset($data['remarks'])) requireText($data['remarks'], 'remarks', 65535);
     if (isset($data['document_id'])) requireId($data['document_id'], 'document ID');
+    if (isset($data['old_evaluator_id'])) requireId($data['old_evaluator_id'], 'old evaluator ID');
+    if (isset($data['new_evaluator_id'])) requireId($data['new_evaluator_id'], 'replacement evaluator ID');
     if (isset($data['award_now'])) $data['award_now'] = requireBool($data['award_now'], 'award_now');
+
+    if ($action === 'reassign_evaluator' && $actor['role'] !== 'ADMINISTRATOR') {
+        sendResponse(403, [], 'Only an Administrator can reassign evaluators.');
+    }
 
     $current = getFullApplication($db, $appId);
     if (!$current) {
         sendResponse(404, [], 'Application not found.');
+    }
+
+    if ($action === 'reassign_evaluator') {
+        try {
+            reassign_application_evaluator($db, $actor, $appId, $data['old_evaluator_id'], $data['new_evaluator_id']);
+        } catch (EvaluatorReassignmentError $error) {
+            sendResponse($error->httpStatus, [], $error->getMessage());
+        } catch (Throwable $error) {
+            sendInternalError($error, 'applications.php:reassign_evaluator', 'Failed to reassign evaluator.');
+        }
+        sendResponse(200, getFullApplication($db, $appId), 'Evaluator reassigned successfully.');
     }
 
     if ($action === 'finalize_submission') {
@@ -620,7 +647,7 @@ if ($method === 'PUT') {
                 INSERT INTO endorsements (id, application_id, endorsed_by, endorser_title, decision, remarks)
                 VALUES (:id, :application_id, :endorsed_by, :endorser_title, :decision, :remarks)
             ")->execute([
-                ':id' => 'end-' . time() . '-' . rand(10, 99),
+                ':id' => 'end-' . bin2hex(random_bytes(16)),
                 ':application_id' => $appId,
                 ':endorsed_by' => $endorserName,
                 ':endorser_title' => $endorserTitle,
@@ -902,7 +929,7 @@ if ($method === 'PUT') {
             sendResponse(403, [], 'You can only return nominations from your assigned office.');
         }
         if ($actor['role'] === 'EVALUATOR'
-            && !in_array($actor['id'], $current['assigned_evaluators'] ?? [], true)) {
+            && !canViewApplication($current, $actor)) {
             sendResponse(403, [], 'This nomination is not assigned to your evaluator account.');
         }
         $activeReturnStatuses = [

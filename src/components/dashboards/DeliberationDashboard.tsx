@@ -6,6 +6,7 @@ import { NominationActionModal } from '../nomination/NominationActionModal';
 import { NominationDetails, NominationDocuments, NominationHistory } from '../nomination/NominationReadOnlySections';
 import { NominationQueueCards } from '../nomination/NominationQueueCards';
 import { praiseService } from '../../lib/supabase';
+import { getAssignedEvaluatorIds, getEvaluatorProgress } from '../../lib/evaluatorAssignments';
 import { showToast } from '../../lib/toast';
 import { pdfGenerator } from '../../lib/pdfGenerator';
 import { Download, Sparkles } from 'lucide-react';
@@ -63,18 +64,18 @@ export const DeliberationDashboard: React.FC<DeliberationDashboardProps> = ({
   const selectedApp = deliberationApps.find(application => application.id === selectedAppId) || deliberationApps[0];
   const selectedAward = awards.find(award => award.id === selectedApp?.award_id);
   const isDecisionRecorded = Boolean(selectedApp?.deliberation_decision);
-  const assignedIds = [...new Set(selectedApp?.assigned_evaluators || [])];
+  const assignedIds = selectedApp ? getAssignedEvaluatorIds(selectedApp) : [];
   const submittedById = new Map(
     (selectedApp?.evaluations || [])
       .filter(evaluation => evaluation.is_submitted && assignedIds.includes(evaluation.evaluator_id))
       .sort((left, right) => (left.submitted_at || '').localeCompare(right.submitted_at || ''))
       .map(evaluation => [evaluation.evaluator_id, evaluation] as const)
   );
-  const submittedCount = assignedIds.filter(id => submittedById.has(id)).length;
+  const submittedCount = selectedApp ? getEvaluatorProgress(selectedApp).completedCount : 0;
   const pendingCount = assignedIds.length - submittedCount;
   const evaluationsComplete = assignedIds.length > 0 && pendingCount === 0;
-  const provisionalAverage = submittedCount > 0
-    ? assignedIds.reduce((sum, id) => sum + (submittedById.get(id)?.weighted_percentage || 0), 0) / submittedCount
+  const provisionalAverage = submittedById.size > 0
+    ? assignedIds.reduce((sum, id) => sum + (submittedById.get(id)?.weighted_percentage || 0), 0) / submittedById.size
     : null;
   const hasQualifyingScore = (application: Application) => {
     const award = awards.find(item => item.id === application.award_id);

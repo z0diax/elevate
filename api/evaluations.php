@@ -125,12 +125,27 @@ if ($method === 'POST') {
     $db->beginTransaction();
     try {
         // Serialize submissions for this nomination so the completion check sees every committed score.
-        $lockStmt = $db->prepare('SELECT status, processing_stage FROM applications WHERE id = :id FOR UPDATE');
+        $lockStmt = $db->prepare('SELECT status, processing_stage, assigned_evaluators FROM applications WHERE id = :id FOR UPDATE');
         $lockStmt->execute([':id' => $appId]);
         $lockedApplication = $lockStmt->fetch();
         if ($lockedApplication['processing_stage'] !== 'Evaluation' || !in_array($lockedApplication['status'], ['For Evaluation', 'Under Evaluation'], true)) {
             $db->rollBack();
             sendResponse(409, [], 'This nomination is not currently open for evaluator assessment.');
+        }
+        // Re-read assignments after the application lock: an Administrator may
+        // have replaced an evaluator while this submission was waiting.
+        $lockedAssignmentsStmt = $db->prepare('SELECT evaluator_id, status FROM application_evaluator_assignments WHERE application_id = :id FOR UPDATE');
+        $lockedAssignmentsStmt->execute([':id' => $appId]);
+        $assignments = $lockedAssignmentsStmt->fetchAll();
+        if ($assignments) {
+            $assignedEvaluators = array_column(array_filter($assignments, static fn($assignment) => $assignment['status'] !== 'Reassigned'), 'evaluator_id');
+        } else {
+            $legacyIds = json_decode((string)($lockedApplication['assigned_evaluators'] ?? '[]'), true);
+            $assignedEvaluators = is_array($legacyIds) ? array_values(array_unique(array_filter($legacyIds, 'is_string'))) : [];
+        }
+        if (!$assignedEvaluators || !in_array($evaluatorId, $assignedEvaluators, true)) {
+            $db->rollBack();
+            sendResponse(409, [], 'Your evaluator assignment changed. Refresh the nomination and try again.');
         }
         if ($assignments) {
             $own = $db->prepare("SELECT status FROM application_evaluator_assignments WHERE application_id = :app_id AND evaluator_id = :evaluator_id FOR UPDATE");

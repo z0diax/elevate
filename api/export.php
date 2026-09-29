@@ -1,20 +1,26 @@
 <?php
 /**
- * Export MySQL Database or JSON Backup for Tacloban PRAISE
+ * Export routine administrative data without authentication secrets.
  */
 ini_set('display_errors', '0');
 ini_set('log_errors', '1');
 require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/config/cors.php';
 require_once __DIR__ . '/config/session_auth.php';
+require_once __DIR__ . '/config/export_profiles.php';
 
 $database = new Database();
 $db = $database->getConnection();
 if (!$db) sendResponse(503, [], 'Database connection failed.');
 require_auth($db, ['ADMINISTRATOR']);
 
-$format = $_GET['format'] ?? 'sql';
+$format = $_GET['format'] ?? 'json';
 if (!in_array($format, ['sql', 'json'], true)) sendResponse(400, [], 'Invalid export format.');
+if ($format === 'sql') {
+    // database.sql seeds an administrator with a known password and its hash.
+    // A credential-preserving backup needs a separate, controlled process.
+    sendResponse(403, [], 'SQL bootstrap export is unavailable through the browser.');
+}
 
 if ($format === 'json') {
     header('Content-Type: application/json');
@@ -29,7 +35,7 @@ if ($format === 'json') {
     try {
     $backup = [
         "offices" => $db->query("SELECT * FROM offices")->fetchAll(PDO::FETCH_ASSOC),
-        "profiles" => $db->query("SELECT * FROM profiles")->fetchAll(PDO::FETCH_ASSOC),
+        "profiles" => export_safe_profiles($db),
         "awards" => $db->query("SELECT * FROM awards")->fetchAll(PDO::FETCH_ASSOC),
         "award_evaluation_routes" => $db->query("SELECT * FROM award_evaluation_routes")->fetchAll(PDO::FETCH_ASSOC),
         "award_route_evaluators" => $db->query("SELECT * FROM award_route_evaluators")->fetchAll(PDO::FETCH_ASSOC),
@@ -54,18 +60,4 @@ if ($format === 'json') {
         echo json_encode(["error" => "Failed to export database backup."]);
     }
     exit();
-} else {
-    // Deliver SQL dump file
-    $sqlPath = __DIR__ . '/../database.sql';
-    if (is_readable($sqlPath)) {
-        header('Content-Type: application/sql');
-        header('Content-Disposition: attachment; filename="tacloban_praise_db.sql"');
-        readfile($sqlPath);
-        exit();
-    } else {
-        error_log('[export.php:sql] Deployment SQL file is unavailable.');
-        http_response_code(500);
-        header('Content-Type: text/plain; charset=UTF-8');
-        echo 'Failed to export database backup.';
-    }
 }

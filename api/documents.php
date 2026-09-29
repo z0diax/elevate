@@ -82,7 +82,10 @@ function validate_document_upload(array $file): array {
         $handle = fopen($path, 'rb');
         $signature = $handle ? fread($handle, 5) : false;
         if ($handle) fclose($handle);
-        if ($signature !== '%PDF-') sendResponse(400, [], 'Invalid PDF document.');
+        $tail = file_get_contents($path, false, null, max(0, $size - 1024));
+        if ($signature !== '%PDF-' || !is_string($tail) || !str_contains($tail, '%%EOF')) {
+            sendResponse(400, [], 'Invalid PDF document.');
+        }
     } elseif (in_array($extension, ['jpg', 'jpeg', 'png'], true)) {
         $image = @getimagesize($path);
         if ($image === false || $image[2] !== ($extension === 'png' ? IMAGETYPE_PNG : IMAGETYPE_JPEG)) {

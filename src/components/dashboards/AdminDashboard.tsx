@@ -20,6 +20,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { praiseService } from '../../lib/supabase';
+import { getEvaluatorProgress } from '../../lib/evaluatorAssignments';
 import { showToast } from '../../lib/toast';
 import { pdfGenerator } from '../../lib/pdfGenerator';
 import { AuditTrailModal } from '../common/AuditTrailModal';
@@ -47,7 +48,7 @@ interface AdminDashboardProps {
   users: UserProfile[];
   currentUser: UserProfile;
   initialSubTab: 'overview' | 'awards' | 'offices' | 'users';
-  onRefreshData: () => void;
+  onRefreshData: () => void | Promise<void>;
   onNavigateToNomination: () => void;
   onSelectAdminSection: (section: 'overview' | 'awards' | 'offices' | 'users') => void;
 }
@@ -86,6 +87,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [routingActive, setRoutingActive] = useState(true);
   const [routingError, setRoutingError] = useState('');
   const [availableEvaluators, setAvailableEvaluators] = useState<Array<Pick<UserProfile, 'id' | 'full_name' | 'office_name'>>>([]);
+  const [reassigningAssignmentId, setReassigningAssignmentId] = useState<string | null>(null);
+  const [replacementEvaluatorId, setReplacementEvaluatorId] = useState('');
+  const [reassignmentCandidates, setReassignmentCandidates] = useState<Array<Pick<UserProfile, 'id' | 'full_name' | 'office_name'>>>([]);
+  const [isLoadingReassignmentCandidates, setIsLoadingReassignmentCandidates] = useState(false);
+  const [isConfirmingReassignment, setIsConfirmingReassignment] = useState(false);
+  const [isReassigning, setIsReassigning] = useState(false);
+  const [reassignmentError, setReassignmentError] = useState('');
   const [duplicatingAwardName, setDuplicatingAwardName] = useState<string | null>(null);
   const [activeAwardModalTab, setActiveAwardModalTab] = useState<AwardModalTab>('details');
 
@@ -178,6 +186,55 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setIsSaving(false);
     }
   };
+
+  const openReassignment = async (assignmentId: string) => {
+    setReassigningAssignmentId(assignmentId);
+    setReplacementEvaluatorId('');
+    setIsConfirmingReassignment(false);
+    setReassignmentError('');
+    setReassignmentCandidates([]);
+    setIsLoadingReassignmentCandidates(true);
+    try {
+      setReassignmentCandidates(await praiseService.getAvailableEvaluators());
+    } catch (error) {
+      setReassignmentError(error instanceof Error ? error.message : 'Could not load available evaluators.');
+    } finally {
+      setIsLoadingReassignmentCandidates(false);
+    }
+  };
+
+  const confirmReassignment = async () => {
+    const assignment = trackingApp?.evaluator_assignments?.find(item => item.id === reassigningAssignmentId);
+    if (!trackingApp || !assignment || !replacementEvaluatorId) return;
+    setIsReassigning(true);
+    setReassignmentError('');
+    try {
+      const updated = await praiseService.reassignEvaluator(trackingApp.id, assignment.evaluator_id, replacementEvaluatorId);
+      setTrackingApp(updated);
+      setReassigningAssignmentId(null);
+      setReplacementEvaluatorId('');
+      setIsConfirmingReassignment(false);
+      try {
+        await onRefreshData();
+        showToast(`Evaluator reassigned for ${updated.application_number}.`);
+      } catch (refreshError) {
+        console.warn('Evaluator was reassigned, but dashboard data could not be refreshed.', refreshError);
+        showToast(`Evaluator reassigned for ${updated.application_number}. Refresh the dashboard to see the latest list.`, 'info');
+      }
+    } catch (error) {
+      setReassignmentError(error instanceof Error ? error.message : 'Could not reassign evaluator.');
+      setIsConfirmingReassignment(false);
+    } finally {
+      setIsReassigning(false);
+    }
+  };
+
+  const selectedReassignment = trackingApp?.evaluator_assignments?.find(assignment => assignment.id === reassigningAssignmentId);
+  const usedEvaluatorIds = new Set(trackingApp?.evaluator_assignments?.map(assignment => assignment.evaluator_id) ?? []);
+  const replacementOptions = reassignmentCandidates.filter(evaluator => !usedEvaluatorIds.has(evaluator.id));
+  const selectedReplacement = replacementOptions.find(evaluator => evaluator.id === replacementEvaluatorId);
+  const canReassignNomination = trackingApp?.processing_stage === 'Evaluation'
+    && ['For Evaluation', 'Under Evaluation'].includes(trackingApp.status);
 
   // Statistics Calculations
   const totalApps = applications.length;
@@ -841,7 +898,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <StatusBadge status={app.status} size="sm" />
                           {app.evaluator_assignments && app.evaluator_assignments.length > 0 && (
                             <div className="mt-1 text-[11px] text-slate-500" title={app.evaluator_assignments.map(assignment => `${assignment.evaluator_name || assignment.evaluator_id}: ${assignment.status}`).join('\n')}>
-                              {app.evaluator_assignments.filter(assignment => assignment.status === 'Completed').length} of {app.evaluator_assignments.filter(assignment => assignment.status !== 'Reassigned').length} evaluations completed
+                              {getEvaluatorProgress(app).completedCount} of {getEvaluatorProgress(app).assignedCount} evaluations completed
                             </div>
                           )}
                         </td>
@@ -863,7 +920,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         <td className="px-4 py-3.5">
                           <div className="flex items-center justify-end gap-1 whitespace-nowrap">
                             <button
-                              onClick={() => { setTrackingTab('status'); setTrackingDocId(null); setTrackingApp(app); }}
+                              onClick={() => { setTrackingTab('status'); setTrackingDocId(null); setReassigningAssignmentId(null); setTrackingApp(app); }}
                               className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded text-[11px] transition-colors cursor-pointer"
                             >
                               Track Stage
@@ -1834,7 +1891,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           tabs={[{ id: 'status', label: 'Status' }, { id: 'documents', label: 'Documents' }, { id: 'details', label: 'Nomination details' }, { id: 'history', label: 'History' }]}
           activeTab={trackingTab}
           onTabChange={setTrackingTab}
-          onClose={() => setTrackingApp(null)}
+          onClose={() => { setTrackingApp(null); setReassigningAssignmentId(null); }}
         >
           {trackingTab === 'status' && <section className="space-y-4">
             <h3 className="text-base font-bold text-slate-950">Current status</h3>
@@ -1842,8 +1899,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <p className="break-words text-sm leading-6 text-slate-700">{trackingApp.required_action || 'No pending action recorded.'}</p>
             {!!trackingApp.evaluator_assignments?.length && <div className="rounded-lg border border-slate-200 p-3 text-sm">
               <h4 className="font-semibold text-slate-900">Evaluation Progress</h4>
-              <ul className="mt-2 space-y-1">{trackingApp.evaluator_assignments.map(assignment => <li key={assignment.id} className="flex justify-between gap-3 text-slate-600"><span>{assignment.evaluator_name || assignment.evaluator_id}</span><span>{assignment.status}</span></li>)}</ul>
-              <p className="mt-2 font-semibold text-slate-800">{trackingApp.evaluator_assignments.filter(assignment => assignment.status === 'Completed').length} of {trackingApp.evaluator_assignments.filter(assignment => assignment.status !== 'Reassigned').length} evaluations completed</p>
+              <ul className="mt-2 space-y-2">{trackingApp.evaluator_assignments.map(assignment => <li key={assignment.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2 text-slate-600">
+                <span>{assignment.evaluator_name || assignment.evaluator_id} <span className="ml-2 text-xs text-slate-500">{assignment.status}</span></span>
+                {canReassignNomination && ['Pending', 'In Progress'].includes(assignment.status) && <button type="button" onClick={() => void openReassignment(assignment.id)} disabled={isReassigning} className="rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-60">Reassign evaluator</button>}
+              </li>)}</ul>
+              <p className="mt-2 font-semibold text-slate-800">{getEvaluatorProgress(trackingApp).completedCount} of {getEvaluatorProgress(trackingApp).assignedCount} evaluations completed</p>
+              {canReassignNomination && selectedReassignment && ['Pending', 'In Progress'].includes(selectedReassignment.status) && <div className="mt-4 space-y-3 rounded-lg border border-blue-200 bg-blue-50/50 p-4">
+                <h5 className="font-semibold text-slate-900">Replace {selectedReassignment.evaluator_name || selectedReassignment.evaluator_id}</h5>
+                <label htmlFor="replacement-evaluator" className="block text-xs font-semibold text-slate-700">Replacement evaluator</label>
+                <select id="replacement-evaluator" value={replacementEvaluatorId} onChange={event => { setReplacementEvaluatorId(event.target.value); setIsConfirmingReassignment(false); setReassignmentError(''); }} disabled={isLoadingReassignmentCandidates || isReassigning} className="min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 disabled:opacity-60">
+                  <option value="">{isLoadingReassignmentCandidates ? 'Loading evaluators...' : 'Choose an active evaluator'}</option>
+                  {replacementOptions.map(evaluator => <option key={evaluator.id} value={evaluator.id}>{evaluator.full_name}{evaluator.office_name ? ` — ${evaluator.office_name}` : ''}</option>)}
+                </select>
+                {!isLoadingReassignmentCandidates && replacementOptions.length === 0 && <p className="text-xs text-slate-600">No eligible replacement evaluators are available.</p>}
+                <p className="text-xs text-slate-600">Previously assigned evaluators are unavailable so their assignment history stays intact.</p>
+                {reassignmentError && <p role="alert" className="text-sm text-red-700">{reassignmentError}</p>}
+                {isConfirmingReassignment && selectedReplacement && <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-slate-800">Replace {selectedReassignment.evaluator_name || selectedReassignment.evaluator_id} with {selectedReplacement.full_name} for nomination {trackingApp.application_number}? The previous assignment will remain in the history.</p>}
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button type="button" onClick={() => { setReassigningAssignmentId(null); setReassignmentError(''); }} disabled={isReassigning} className="min-h-10 rounded-lg px-3 text-xs font-semibold text-slate-600 hover:bg-white disabled:opacity-60">Cancel</button>
+                  {isConfirmingReassignment ? <button type="button" onClick={() => void confirmReassignment()} disabled={isReassigning || !selectedReplacement} className="min-h-10 rounded-lg bg-blue-600 px-4 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60">{isReassigning ? 'Reassigning...' : 'Confirm reassignment'}</button>
+                    : <button type="button" onClick={() => setIsConfirmingReassignment(true)} disabled={!selectedReplacement || isLoadingReassignmentCandidates} className="min-h-10 rounded-lg bg-blue-600 px-4 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60">Review reassignment</button>}
+                </div>
+              </div>}
             </div>}
           </section>}
           {trackingTab === 'documents' && <NominationDocuments application={trackingApp} onOpen={setTrackingDocId} />}

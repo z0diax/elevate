@@ -6,6 +6,7 @@ import { NominationDetails, NominationDocuments, NominationHistory } from '../no
 import { NominationQueueCards } from '../nomination/NominationQueueCards';
 import { DocumentViewerModal } from '../common/DocumentViewerModal';
 import { praiseService } from '../../lib/supabase';
+import { getEvaluatorProgress } from '../../lib/evaluatorAssignments';
 import { showToast } from '../../lib/toast';
 
 interface SecretariatDashboardProps {
@@ -227,7 +228,7 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
                         <td className="px-5 py-4 text-xs text-slate-600">{application.processing_stage}</td>
                         <td className="px-5 py-4"><StatusBadge status={application.status} size="sm" />
                           {!!application.evaluator_assignments?.length && <div className="mt-1 text-[11px] text-slate-500" title={application.evaluator_assignments.map(assignment => `${assignment.evaluator_name || assignment.evaluator_id}: ${assignment.status}`).join('\n')}>
-                            {application.evaluator_assignments.filter(assignment => assignment.status === 'Completed').length} of {application.evaluator_assignments.filter(assignment => assignment.status !== 'Reassigned').length} evaluations completed
+                            {getEvaluatorProgress(application).completedCount} of {getEvaluatorProgress(application).assignedCount} evaluations completed
                           </div>}
                         </td>
                         <td className="px-5 py-4 text-right">

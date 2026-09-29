@@ -6,6 +6,7 @@ import { NominationDetails, NominationDocuments } from '../nomination/Nomination
 import { NominationQueueCards } from '../nomination/NominationQueueCards';
 import { DocumentViewerModal } from '../common/DocumentViewerModal';
 import { praiseService } from '../../lib/supabase';
+import { getEvaluatorAssignmentStatus, getEvaluatorProgress, isAssignedEvaluator } from '../../lib/evaluatorAssignments';
 import { showToast } from '../../lib/toast';
 import { CheckCircle2, Scale } from 'lucide-react';
 import confetti from 'canvas-confetti';
@@ -28,9 +29,9 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
   currentUser,
   onRefreshData,
 }) => {
-  const assignedApplications = useMemo(() => applications.filter(application => {
-    return application.assigned_evaluators?.includes(currentUser.id);
-  }), [applications, currentUser.id]);
+  const assignedApplications = useMemo(() => applications.filter(application =>
+    isAssignedEvaluator(application, currentUser.id)
+  ), [applications, currentUser.id]);
 
   const [selectedAppId, setSelectedAppId] = useState<string>('');
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
@@ -42,10 +43,12 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const openAssessment = async (application: Application) => {
+    if (!isAssignedEvaluator(application, currentUser.id)) return;
     setErrorMsg('');
     setActiveTab('scorecard');
     setSelectedAppId(application.id);
-    const alreadySubmitted = application.evaluations?.some(evaluation => evaluation.evaluator_id === currentUser.id && evaluation.is_submitted);
+    const alreadySubmitted = getEvaluatorAssignmentStatus(application, currentUser.id) === 'Completed'
+      || application.evaluations?.some(evaluation => evaluation.evaluator_id === currentUser.id && evaluation.is_submitted);
     if (application.processing_stage === 'Evaluation' && !alreadySubmitted) {
       try {
         await praiseService.startEvaluation(application.id);
@@ -66,8 +69,11 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
   const selectedAward = awards.find(award => award.id === selectedApp?.award_id) || null;
   const selectedDoc = selectedApp?.documents?.find(document => document.id === selectedDocId) || null;
   const existingEvaluation = selectedApp?.evaluations?.find(evaluation => evaluation.evaluator_id === currentUser.id);
+  const assignmentStatus = selectedApp ? getEvaluatorAssignmentStatus(selectedApp, currentUser.id) : undefined;
   const canEvaluate = selectedApp?.processing_stage === 'Evaluation'
-    && ['For Evaluation', 'Under Evaluation'].includes(selectedApp.status);
+    && ['For Evaluation', 'Under Evaluation'].includes(selectedApp.status)
+    && assignmentStatus !== 'Completed'
+    && !existingEvaluation?.is_submitted;
 
   useEffect(() => {
     if (!selectedAward) {
@@ -87,7 +93,7 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
       });
       setCriterionScores(nextScores);
       setGeneralRemarks(existingEvaluation.general_remarks || '');
-      setIsLocked(Boolean(existingEvaluation.is_submitted));
+      setIsLocked(Boolean(existingEvaluation.is_submitted || assignmentStatus === 'Completed'));
       return;
     }
 
@@ -100,8 +106,8 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
     });
     setCriterionScores(nextScores);
     setGeneralRemarks('');
-    setIsLocked(false);
-  }, [existingEvaluation, selectedAward, selectedApp?.id]);
+    setIsLocked(assignmentStatus === 'Completed');
+  }, [existingEvaluation, selectedAward, selectedApp?.id, assignmentStatus]);
 
   function calculateWeightedScore() {
     if (!selectedAward?.criteria?.length) {
@@ -266,7 +272,8 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
                     </thead>
                     <tbody className="divide-y divide-slate-100">
               {assignedApplications.map(application => {
-                const hasMyEval = application.evaluations?.some(evaluation => evaluation.evaluator_id === currentUser.id && evaluation.is_submitted);
+                const hasMyEval = getEvaluatorAssignmentStatus(application, currentUser.id) === 'Completed'
+                  || application.evaluations?.some(evaluation => evaluation.evaluator_id === currentUser.id && evaluation.is_submitted);
 
                 return (
                   <tr
@@ -326,7 +333,7 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
                 <section className="rounded-xl bg-slate-50 p-4">
                   <h3 className="text-base font-bold text-slate-950">{isLocked ? 'Score submitted' : canEvaluate ? 'Your task: Score the criteria' : 'Assessment status'}</h3>
                   <p className="mt-1 text-sm leading-6 text-slate-600">
-                    {selectedApp.assigned_evaluators?.filter(id => selectedApp.evaluations?.some(evaluation => evaluation.evaluator_id === id && evaluation.is_submitted)).length || 0} of {selectedApp.assigned_evaluators?.length || 0} assigned evaluators submitted.
+                    {getEvaluatorProgress(selectedApp).completedCount} of {getEvaluatorProgress(selectedApp).assignedCount} assigned evaluators submitted.
                     {existingEvaluation?.submitted_at ? ' Your score was submitted on ' + new Date(existingEvaluation.submitted_at).toLocaleDateString('en-PH') + '.' : ''}
                   </p>
                 </section>

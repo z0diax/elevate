@@ -1,6 +1,7 @@
 import {
   Application,
   ApplicationDocument,
+  ApplicationEvaluatorAssignment,
   ApplicationHistory,
   ApplicationStatus,
   Award,
@@ -18,6 +19,7 @@ import {
   normalizeCertificateTemplateSettings,
 } from './certificateTemplate';
 import { getAppBasePath, getDefaultXamppApiUrl, resolveProjectUrl } from './mysqlService';
+import { isAssignedEvaluator } from './evaluatorAssignments';
 
 export const SUPABASE_URL = '';
 export const SUPABASE_ANON_KEY = '';
@@ -326,7 +328,18 @@ function normalizeApplication(application: any): Application {
     documents: Array.isArray(application.documents) ? application.documents.map(normalizeDocument) : [],
     evaluations: Array.isArray(application.evaluations) ? application.evaluations.map(normalizeEvaluation) : [],
     assigned_evaluators: Array.isArray(application.assigned_evaluators) ? application.assigned_evaluators.map(String) : [],
-    evaluator_assignments: Array.isArray(application.evaluator_assignments) ? application.evaluator_assignments : [],
+    evaluator_assignments: Array.isArray(application.evaluator_assignments)
+      ? application.evaluator_assignments.map((assignment: ApplicationEvaluatorAssignment) => ({
+          ...assignment,
+          id: String(assignment.id),
+          application_id: String(assignment.application_id),
+          evaluator_id: String(assignment.evaluator_id),
+          route_id: assignment.route_id == null ? null : String(assignment.route_id),
+          sequence_no: Number(assignment.sequence_no),
+          assigned_at: String(assignment.assigned_at),
+          completed_at: assignment.completed_at == null ? null : String(assignment.completed_at),
+        }))
+      : undefined,
     endorsement: application.endorsement
       ? {
           id: String(application.endorsement.id),
@@ -464,7 +477,7 @@ async function loadAuditLogs(user?: UserProfile | null, applications?: Applicati
   if (activeUser?.role === 'NOMINEE' || activeUser?.role === 'HEAD_OF_OFFICE' || activeUser?.role === 'EVALUATOR') {
     const relatedApplications = (applications || cachedApplications).filter(application =>
       application.nominee_id === activeUser.id ||
-      (activeUser.role === 'EVALUATOR' && application.assigned_evaluators?.includes(activeUser.id)) ||
+      (activeUser.role === 'EVALUATOR' && isAssignedEvaluator(application, activeUser.id)) ||
       application.nominator_id === activeUser.id ||
       (activeUser.role === 'HEAD_OF_OFFICE'
         && Boolean(activeUser.office_id)
@@ -894,6 +907,20 @@ export const praiseService = {
     }));
     await loadApplications();
     await loadAuditLogs();
+    return application;
+  },
+
+  async reassignEvaluator(appId: string, oldEvaluatorId: string, newEvaluatorId: string): Promise<Application> {
+    const application = normalizeApplication(await apiRequest<any>(`applications.php?action=reassign_evaluator&id=${encodeURIComponent(appId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ old_evaluator_id: oldEvaluatorId, new_evaluator_id: newEvaluatorId }),
+    }));
+    try {
+      await loadApplications();
+      await loadAuditLogs();
+    } catch (error) {
+      console.warn('Evaluator was reassigned, but application lists could not be refreshed.', error);
+    }
     return application;
   },
 

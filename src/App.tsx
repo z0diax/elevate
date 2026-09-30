@@ -18,6 +18,7 @@ import { CertificateTemplateView } from './components/reports/CertificateTemplat
 import { AuditLogsView } from './components/audit/AuditLogsView';
 import { AwardsCatalogView } from './components/awards/AwardsCatalogView';
 import { LoginScreen } from './components/auth/LoginScreen';
+import { ChangePasswordScreen } from './components/auth/ChangePasswordScreen';
 import { NomineeSignupScreen } from './components/auth/NomineeSignupScreen';
 import { ToastHost } from './components/common/ToastHost';
 import { showToast } from './lib/toast';
@@ -258,7 +259,6 @@ export default function App() {
       await bootstrapSession(false);
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : 'Unable to sign in.');
-      throw error;
     } finally {
       setIsLoading(false);
     }
@@ -303,6 +303,12 @@ export default function App() {
       setIsLoading(false);
     }
   }, [currentUser]);
+
+  const handleChangePassword = useCallback(async (currentPassword: string, newPassword: string) => {
+    await praiseService.changePassword(currentPassword, newPassword);
+    await bootstrapSession(false);
+    showToast('Password changed successfully.');
+  }, [bootstrapSession]);
 
   const handleMarkNotificationRead = useCallback(async (notificationId: string) => {
     await praiseService.markNotificationRead(notificationId);
@@ -389,6 +395,10 @@ export default function App() {
         onNavigateToSignup={() => navigatePublicAuthRoute('signup')}
       />
     );
+  }
+
+  if (currentUser.must_change_password) {
+    return <ChangePasswordScreen onChangePassword={handleChangePassword} onLogout={handleLogout} />;
   }
 
   return (

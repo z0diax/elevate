@@ -13,6 +13,7 @@ export interface UserProfile {
   barangay?: string;
   created_at?: string;
   is_active?: boolean;
+  must_change_password?: boolean;
 }
 
 export interface Office {
@@ -186,7 +187,6 @@ export interface Application {
 
   documents?: ApplicationDocument[];
   evaluations?: Evaluation[];
-  assigned_evaluators?: string[];
   evaluator_assignments?: ApplicationEvaluatorAssignment[];
   endorsement?: EndorsementRecord;
 }
@@ -226,10 +226,20 @@ export interface Evaluation {
   total_score?: number;
   general_remarks: string;
   is_submitted: boolean;
+  version_number: number;
+  revision_count: number;
   submitted_at?: string;
   reopened_at?: string;
   reopened_by?: string;
   scores: EvaluationCriterionScore[];
+}
+
+export interface EvaluationRevision {
+  revision_number: number;
+  reason: string;
+  created_at: string;
+  previous_snapshot: { version: number; total_raw_score: number | string; weighted_percentage: number | string; general_remarks: string; scores: Array<{ criterion_id: string; criterion_name: string; score: number | string; remarks: string }> };
+  new_snapshot: { version: number; total_raw_score: number | string; weighted_percentage: number | string; general_remarks: string; scores: Array<{ criterion_id: string; criterion_name: string; score: number | string; remarks: string }> };
 }
 
 export interface ApplicationHistory {

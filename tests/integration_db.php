@@ -49,14 +49,14 @@ if ($mode === 'setup') {
     try {
         $office = $db->prepare('INSERT INTO offices (id, name, code, head_name, head_title) VALUES (?, ?, ?, ?, ?)');
         foreach (['one', 'two'] as $suffix) $office->execute([$id('office-' . $suffix), 'Automated Test Office ' . $suffix, 'TEST' . $run . $suffix, 'Test Head', 'Head']);
-        $users = ['admin' => 'ADMINISTRATOR', 'secretary' => 'SECRETARIAT', 'head' => 'HEAD_OF_OFFICE', 'other-head' => 'HEAD_OF_OFFICE', 'filer' => 'NOMINEE', 'other-filer' => 'NOMINEE', 'A' => 'EVALUATOR', 'B' => 'EVALUATOR', 'C' => 'EVALUATOR', 'D' => 'EVALUATOR', 'E' => 'EVALUATOR', 'F' => 'EVALUATOR', 'inactive' => 'EVALUATOR'];
-        $insert = $db->prepare('INSERT INTO profiles (id, email, full_name, role, office_id, office_name, password_hash, is_active, must_change_password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)');
+        $users = ['admin' => 'ADMINISTRATOR', 'secretary' => 'SECRETARIAT', 'head' => 'HEAD_OF_OFFICE', 'other-head' => 'HEAD_OF_OFFICE', 'filer' => 'NOMINEE', 'other-filer' => 'NOMINEE', 'A' => 'EVALUATOR', 'B' => 'EVALUATOR', 'C' => 'EVALUATOR', 'D' => 'EVALUATOR', 'E' => 'EVALUATOR', 'F' => 'EVALUATOR', 'inactive' => 'EVALUATOR', 'password-change' => 'EVALUATOR'];
+        $insert = $db->prepare('INSERT INTO profiles (id, email, full_name, role, office_id, office_name, password_hash, is_active, must_change_password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
         foreach ($users as $name => $role) {
             $other = $name === 'other-head';
             $insert->execute([$id($name), $name . '-' . $run . '@example.invalid', 'Automated Test ' . $name, $role,
                 in_array($role, ['HEAD_OF_OFFICE', 'NOMINEE'], true) ? $id('office-' . ($other ? 'two' : 'one')) : null,
                 in_array($role, ['HEAD_OF_OFFICE', 'NOMINEE'], true) ? 'Automated Test Office ' . ($other ? 'two' : 'one') : null,
-                $hash, $name === 'inactive' ? 0 : 1]);
+                $hash, $name === 'inactive' ? 0 : 1, $name === 'password-change' ? 1 : 0]);
         }
         $award = $db->prepare('INSERT INTO awards (id, name, code, award_year, min_qualifying_score) VALUES (?, ?, ?, 2026, 85.00)');
         foreach (['one', 'two'] as $name) {

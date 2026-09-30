@@ -80,12 +80,23 @@ export const DeliberationDashboard: React.FC<DeliberationDashboardProps> = ({
   const hasQualifyingScore = (application: Application) => {
     const award = awards.find(item => item.id === application.award_id);
     return award !== undefined
-      && application.processing_stage !== 'Evaluation'
       && application.final_weighted_score !== undefined
       && application.final_weighted_score !== null
       && application.final_weighted_score >= award.min_qualifying_score;
   };
   const selectedQualifies = selectedApp ? hasQualifyingScore(selectedApp) : false;
+
+  async function handleStartDeliberation() {
+    if (!selectedApp || !evaluationsComplete) return;
+    setIsBusy(true);
+    try {
+      await praiseService.beginDeliberation(selectedApp.id);
+      showToast('Deliberation started. Evaluator scores are now locked.');
+      await onRefreshData();
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Failed to start deliberation.');
+    } finally { setIsBusy(false); }
+  }
 
   async function handleApprove() {
     if (!selectedApp || !hasQualifyingScore(selectedApp)) {
@@ -256,7 +267,7 @@ export const DeliberationDashboard: React.FC<DeliberationDashboardProps> = ({
                         </td>
                         <td className="px-3.5 py-3 text-slate-600">{application.office_name}</td>
                         <td className="px-3.5 py-3 text-center font-bold font-mono text-sm">
-                          {application.processing_stage !== 'Evaluation' && application.final_weighted_score !== undefined && application.final_weighted_score !== null
+                          {application.final_weighted_score !== undefined && application.final_weighted_score !== null
                             ? <span className={qualifies ? 'text-green-700' : 'text-red-700'}>{application.final_weighted_score}%</span>
                             : <span className="text-slate-400">N/A</span>}
                           {award && <p className="text-[10px] font-normal text-slate-500">Minimum {award.min_qualifying_score}%</p>}
@@ -326,7 +337,9 @@ export const DeliberationDashboard: React.FC<DeliberationDashboardProps> = ({
           activeTab={activeTab}
           onTabChange={setActiveTab}
           onClose={() => setIsDetailsModalOpen(false)}
-          footer={selectedApp.processing_stage === 'Deliberation' && evaluationsComplete && !isDecisionRecorded ? (
+          footer={selectedApp.processing_stage === 'Evaluation' && selectedApp.status === 'Evaluation Completed' && evaluationsComplete ? (
+            <button type="button" onClick={() => void handleStartDeliberation()} disabled={isBusy} className="min-h-11 rounded-lg bg-blue-600 px-5 text-sm font-semibold text-white disabled:opacity-50">{isBusy ? 'Starting...' : 'Start Deliberation'}</button>
+          ) : selectedApp.processing_stage === 'Deliberation' && evaluationsComplete && !isDecisionRecorded ? (
             <>
               <button type="button" onClick={() => void handleDisapprove()} disabled={isBusy} className="min-h-11 rounded-lg border border-red-200 px-4 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50">Not approved</button>
               <button type="button" onClick={() => void handleApprove()} disabled={isBusy || !selectedQualifies} className="min-h-11 w-full rounded-lg bg-blue-600 px-5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 sm:w-auto">Approve nomination</button>
@@ -358,7 +371,7 @@ export const DeliberationDashboard: React.FC<DeliberationDashboardProps> = ({
                 <p className="font-bold">Decision recorded: {selectedApp.deliberation_decision}</p>
                 {selectedApp.deliberation_remarks && <p className="mt-2 break-words whitespace-pre-wrap leading-6">{selectedApp.deliberation_remarks}</p>}
               </div>}
-              {selectedApp.processing_stage === 'Evaluation' && <p className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">The committee decision becomes available when all assigned evaluators submit their scores.</p>}
+              {selectedApp.processing_stage === 'Evaluation' && <p className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">{evaluationsComplete ? 'All assessments are submitted. Start Deliberation when the committee is ready to lock evaluator scores and record its decision.' : 'The committee decision becomes available when all assigned evaluators submit their scores and Deliberation starts.'}</p>}
               {selectedApp.status === 'Awarded' && (
                 <button type="button" onClick={() => pdfGenerator.generateAwardCertificate(selectedApp, selectedAward)} className="min-h-11 rounded-lg border border-blue-200 px-4 text-sm font-semibold text-blue-700 hover:bg-blue-50">Generate award certificate</button>
               )}
@@ -378,6 +391,7 @@ export const DeliberationDashboard: React.FC<DeliberationDashboardProps> = ({
                         <span className={'text-sm font-semibold ' + (evaluation ? 'text-green-700' : 'text-slate-500')}>{evaluation ? evaluation.weighted_percentage.toFixed(2) + '%' : 'Pending'}</span>
                       </div>
                       {evaluation?.general_remarks && <p className="mt-2 break-words whitespace-pre-wrap text-sm leading-6 text-slate-600">{evaluation.general_remarks}</p>}
+                      {evaluation && evaluation.revision_count > 0 && <p className="mt-1 text-xs text-slate-500">Revised {evaluation.revision_count} time{evaluation.revision_count === 1 ? '' : 's'} · Latest submission {evaluation.submitted_at ? new Date(evaluation.submitted_at).toLocaleString('en-PH') : 'on file'}. Reasons are listed in History.</p>}
                       {evaluation?.scores?.length ? <details className="mt-2 text-sm text-slate-600"><summary className="cursor-pointer font-semibold text-blue-700">View score breakdown</summary><ul className="mt-2 space-y-1">{evaluation.scores.map(score => <li key={score.id} className="flex justify-between gap-3"><span className="break-words">{score.criterion_name}</span><span className="shrink-0">{score.weighted_score?.toFixed(2) ?? '?'} / {score.weight_percentage}</span></li>)}</ul></details> : null}
                     </div>
                   );

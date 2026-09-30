@@ -5,9 +5,7 @@ export function getActiveEvaluatorAssignments(application: Application): Applica
 }
 
 export function getAssignedEvaluatorIds(application: Application): string[] {
-  const ids = Array.isArray(application.evaluator_assignments)
-    ? getActiveEvaluatorAssignments(application).map(assignment => assignment.evaluator_id)
-    : application.assigned_evaluators ?? [];
+  const ids = getActiveEvaluatorAssignments(application).map(assignment => assignment.evaluator_id);
   return [...new Set(ids)];
 }
 
@@ -24,13 +22,9 @@ export function getEvaluatorAssignmentStatus(
 
 export function getEvaluatorProgress(application: Application): { assignedCount: number; completedCount: number } {
   const assignedIds = getAssignedEvaluatorIds(application);
-  const completedIds = Array.isArray(application.evaluator_assignments)
-    ? getActiveEvaluatorAssignments(application)
-      .filter(assignment => assignment.status === 'Completed')
-      .map(assignment => assignment.evaluator_id)
-    : (application.evaluations ?? [])
-      .filter(evaluation => evaluation.is_submitted)
-      .map(evaluation => evaluation.evaluator_id);
+  const completedIds = getActiveEvaluatorAssignments(application)
+    .filter(assignment => assignment.status === 'Completed')
+    .map(assignment => assignment.evaluator_id);
   return {
     assignedCount: assignedIds.length,
     completedCount: new Set(completedIds.filter(id => assignedIds.includes(id))).size,

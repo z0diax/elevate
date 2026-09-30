@@ -1,19 +1,41 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/runtime.php';
+
+function praise_session_cookie_path(): string {
+    $path = dirname(dirname((string)($_SERVER['SCRIPT_NAME'] ?? '/api/auth.php')));
+    return rtrim(str_replace('\\', '/', $path), '/') . '/';
+}
 
 function praise_start_session(): void {
     if (session_status() === PHP_SESSION_ACTIVE) {
         return;
     }
 
-    $isSecure = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
+    $production = app_environment() === 'production';
+    $isSecure = app_is_https($_SERVER);
+    if ($production && !$isSecure) throw new RuntimeException('HTTPS is required for production sessions.');
+    $idle = (int)(getenv('SESSION_IDLE_SECONDS') ?: 28800);
+    if ($idle < 900 || $idle > 86400) throw new RuntimeException('Invalid session inactivity timeout.');
+    ini_set('session.use_strict_mode', '1');
+    ini_set('session.use_only_cookies', '1');
+    ini_set('session.use_trans_sid', '0');
+    ini_set('session.gc_maxlifetime', (string)$idle);
+    session_name('PRAISESESSID');
     session_set_cookie_params([
         'httponly' => true,
         'samesite' => 'Lax',
-        'secure' => $isSecure,
+        'secure' => $production || $isSecure,
+        'path' => praise_session_cookie_path(),
+        'lifetime' => 0,
     ]);
 
     session_start();
+    if (isset($_SESSION['last_activity']) && time() - (int)$_SESSION['last_activity'] > $idle) {
+        $_SESSION = [];
+        session_regenerate_id(true);
+    }
+    if (isset($_SESSION['praise_user_id'])) $_SESSION['last_activity'] = time();
 }
 
 function format_profile_record(array $user): array {
@@ -75,6 +97,7 @@ function set_auth_session(string $userId): void {
     session_regenerate_id(true);
     $_SESSION['praise_user_id'] = $userId;
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+    $_SESSION['last_activity'] = time();
 }
 
 function clear_auth_session(): void {
@@ -83,19 +106,30 @@ function clear_auth_session(): void {
 
     if (ini_get('session.use_cookies')) {
         $params = session_get_cookie_params();
-        setcookie(session_name(), '', time() - 42000, $params['path'], $params['domain'], (bool)$params['secure'], (bool)$params['httponly']);
+        setcookie(session_name(), '', [
+            'expires' => time() - 42000,
+            'path' => $params['path'],
+            'domain' => $params['domain'],
+            'secure' => (bool)$params['secure'],
+            'httponly' => (bool)$params['httponly'],
+            'samesite' => $params['samesite'] ?? 'Lax',
+        ]);
     }
 
     session_destroy();
 }
 
-function require_auth($db, array $roles = []): array {
+function require_auth($db, array $roles = [], bool $allowPasswordChange = false): array {
     $user = get_session_user($db);
     if (!$user) {
         sendResponse(401, [], 'Authentication required.');
     }
 
     require_csrf();
+
+    if (!$allowPasswordChange && !empty($user['must_change_password'])) {
+        sendResponse(403, [], 'Password change required.');
+    }
 
     if (!empty($roles) && !in_array($user['role'], $roles, true)) {
         sendResponse(403, [], 'You are not authorized to perform this action.');
@@ -106,7 +140,7 @@ function require_auth($db, array $roles = []): array {
 
 function require_application_access(PDO $db, array $actor, string $applicationId): array {
     $applicationId = requireId($applicationId, 'application ID');
-    $stmt = $db->prepare('SELECT id, nominator_id, nominee_id, office_id, status, processing_stage, assigned_evaluators FROM applications WHERE id = :id LIMIT 1');
+    $stmt = $db->prepare('SELECT id, nominator_id, nominee_id, office_id, status, processing_stage FROM applications WHERE id = :id LIMIT 1');
     $stmt->execute([':id' => $applicationId]);
     $application = $stmt->fetch();
     if (!$application) sendResponse(404, [], 'Application not found.');
@@ -116,17 +150,9 @@ function require_application_access(PDO $db, array $actor, string $applicationId
     if ($application['status'] === 'Draft') return $application;
     if ($role === 'ADMINISTRATOR') return $application;
     if ($role === 'EVALUATOR') {
-        $rows = $db->prepare('SELECT evaluator_id, status FROM application_evaluator_assignments WHERE application_id = :id');
-        $rows->execute([':id' => $applicationId]);
-        $assignments = $rows->fetchAll();
-        if ($assignments) {
-            foreach ($assignments as $assignment) {
-                if ($assignment['evaluator_id'] === $actor['id'] && $assignment['status'] !== 'Reassigned') return $application;
-            }
-        } else {
-            $legacy = json_decode((string)($application['assigned_evaluators'] ?? '[]'), true);
-            if (is_array($legacy) && in_array($actor['id'], $legacy, true)) return $application;
-        }
+        $assignment = $db->prepare("SELECT 1 FROM application_evaluator_assignments WHERE application_id = :id AND evaluator_id = :evaluator_id AND status <> 'Reassigned' LIMIT 1");
+        $assignment->execute([':id' => $applicationId, ':evaluator_id' => $actor['id']]);
+        if ($assignment->fetchColumn() !== false) return $application;
         sendResponse(404, [], 'Application not found.');
     }
     if ($own) return $application;

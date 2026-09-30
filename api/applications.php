@@ -24,8 +24,6 @@ if (!$db) {
     sendResponse(503, [], 'Database connection failed.');
 }
 
-ensureDocumentReviewStatusSchema($db);
-
 $method = $_SERVER['REQUEST_METHOD'];
 
 if ($method === 'GET') {
@@ -68,6 +66,7 @@ if ($method === 'PUT') {
         'reassign_evaluator' => ['old_evaluator_id', 'new_evaluator_id'],
         'return_for_revision' => ['remarks'],
         'deliberation' => ['decision', 'remarks', 'award_now'],
+        'begin_deliberation' => [],
     ];
     if (!isset($actionFields[$action])) sendResponse(400, [], 'Unknown action specified.');
     requireFields($data, array_merge(['id', 'application_id', 'action'], $actionFields[$action]));
@@ -124,6 +123,10 @@ if ($method === 'PUT') {
 
     if ($action === 'deliberation') {
         handle_deliberation($db, $actor, $data, $appId, $current);
+    }
+
+    if ($action === 'begin_deliberation') {
+        handle_begin_deliberation($db, $actor, $appId);
     }
 
     sendResponse(400, [], 'Unknown action specified.');

@@ -151,6 +151,20 @@ async function main() {
     await login('filer');
   });
   for (const name of ['admin', 'secretary', 'head', 'other-head', 'other-filer', 'A', 'B', 'C', 'D', 'E', 'F']) await login(name);
+  await test('required password change permits only self-service update and logout', async () => {
+    const account = await login('password-change');
+    assert.equal(Boolean(account.must_change_password), true);
+    expect(await request('/api/auth.php', { actor: 'password-change' }), 403, 'dashboard blocked');
+    expect(await request('/api/auth.php?action=change_password', { method: 'POST', actor: 'password-change', csrf: 'missing', json: { current_password: password, new_password: `${password}-new` } }), 403, 'CSRF required');
+    expect(await request('/api/auth.php?action=change_password', { method: 'POST', actor: 'password-change', json: { current_password: 'incorrect', new_password: `${password}-new` } }), 403, 'current password required');
+    const updated = expect(await request('/api/auth.php?action=change_password', { method: 'POST', actor: 'password-change', json: { current_password: password, new_password: `${password}-new` } }), 200, 'change password');
+    assert.equal(Boolean(updated.must_change_password), false);
+    sessions.set('password-change', { ...sessions.get('password-change'), csrf: updated.csrf_token });
+    expect(await request('/api/auth.php', { actor: 'password-change' }), 200, 'dashboard access restored');
+    expect(await request('/api/auth.php?action=logout', { method: 'POST', actor: 'password-change' }), 200, 'logout after change');
+    expect(await request('/api/auth.php?action=login', { method: 'POST', actor: 'password-change', json: { email: `password-change-${run}@example.invalid`, password } }), 401, 'old password rejected');
+    expect(await request('/api/auth.php?action=login', { method: 'POST', actor: 'password-change', json: { email: `password-change-${run}@example.invalid`, password: `${password}-new` } }), 200, 'new password accepted');
+  });
   await test('a disabled existing session loses protected access', async () => {
     expect(await request('/api/auth.php', { method: 'PUT', actor: 'admin', json: { id: id('inactive'), is_active: true } }), 200, 'enable test account');
     await login('inactive');
@@ -311,9 +325,54 @@ async function main() {
     expect(await action(first.id, 'reassign_evaluator', 'admin', { old_evaluator_id: id('A'), new_evaluator_id: id('E') }), 409, 'completed reassignment');
     expect(await submit('D', 85), 201, 'replacement evaluation');
     const app = expect(await request(`/api/applications.php?id=${first.id}`, { actor: 'admin' }), 200, 'completion');
-    assert.equal(app.status, 'Evaluation Completed'); assert.equal(app.processing_stage, 'Deliberation');
+    assert.equal(app.status, 'Evaluation Completed'); assert.equal(app.processing_stage, 'Evaluation');
     assert.equal(app.final_weighted_score, 85);
     assert.equal(app.evaluations.length, 3);
+  });
+  await test('controlled revision preserves versions, completion, aggregate and deliberation lock', async () => {
+    const view = async () => expect(await request(`/api/applications.php?id=${first.id}`, { actor: 'B' }), 200, 'B evaluation');
+    const original = await view();
+    const own = original.evaluations.find(x => x.evaluator_id === id('B'));
+    const revise = (actor, score, reason, version = 1, evaluationId = own.id) => request('/api/evaluations.php?action=revise', {
+      actor, method: 'POST', json: { application_id: first.id, evaluation_id: evaluationId, expected_version: version, revision_reason: reason,
+        scores: [{ criterion_id: id('criterion-one'), score, remarks: 'Corrected evidence' }], general_remarks: 'Corrected assessment' },
+    });
+    for (const reason of [undefined, '', '   ']) expect(await revise('B', 92, reason), 400, 'revision reason required');
+    expect(await revise('A', 92, 'Wrong owner'), 409, 'other evaluator ownership');
+    expect(await revise('C', 92, 'Old assignment'), 403, 'reassigned evaluator revision');
+    expect(await revise('admin', 92, 'Admin edit'), 403, 'administrator cannot revise');
+    expect(await revise('secretary', 92, 'Secretariat edit'), 403, 'secretariat cannot revise');
+    const unchanged = await view();
+    assert.equal(unchanged.final_weighted_score, 85);
+    assert.equal(unchanged.evaluations.find(x => x.id === own.id).version_number, 1);
+    assert.equal(unchanged.evaluator_assignments.filter(x => x.status === 'Completed').length, 3);
+    assert.deepEqual(expect(await request(`/api/evaluations.php?action=history&evaluation_id=${own.id}`, { actor: 'B' }), 200, 'empty history'), []);
+    expect(await revise('B', 92, 'Incorrect score entered for one criterion.'), 200, 'version 2');
+    const revised = await view();
+    assert.equal(revised.processing_stage, 'Evaluation');
+    assert.equal(revised.final_weighted_score, 89);
+    assert.equal(revised.evaluations.find(x => x.id === own.id).weighted_percentage, 92);
+    assert.equal(revised.evaluations.find(x => x.id === own.id).version_number, 2);
+    assert.equal(revised.evaluator_assignments.filter(x => x.status === 'Completed').length, 3);
+    expect(await revise('B', 91, 'Stale browser submission'), 409, 'stale version');
+    expect(await revise('B', 76, 'Corrected high score', 2), 200, 'version 3');
+    assert.equal((await view()).final_weighted_score, 83.67);
+    expect(await revise('B', 80, 'Corrected low score', 3), 200, 'version 4');
+    const history = expect(await request(`/api/evaluations.php?action=history&evaluation_id=${own.id}`, { actor: 'B' }), 200, 'revision history');
+    assert.deepEqual(history.map(x => x.revision_number), [2, 3, 4]);
+    assert.deepEqual(history.map(x => Number(x.previous_snapshot.scores[0].score)), [80, 92, 76]);
+    assert.deepEqual(history.map(x => Number(x.new_snapshot.scores[0].score)), [92, 76, 80]);
+    assert.deepEqual(history.map(x => x.reason), ['Incorrect score entered for one criterion.', 'Corrected high score', 'Corrected low score']);
+    expect(await request(`/api/evaluations.php?action=history&evaluation_id=${own.id}`, { actor: 'A' }), 403, 'other evaluator cannot inspect history');
+    expect(await request(`/api/evaluations.php?action=history&evaluation_id=${own.id}`, { actor: 'filer' }), 403, 'nominee cannot inspect history');
+    const applicationHistory = expect(await request(`/api/audit_logs.php?application_id=${first.id}`, { actor: 'secretary' }), 200, 'application history');
+    assert.equal(applicationHistory.filter(x => x.action === 'Evaluation Revised').length, 3);
+    assert.equal(applicationHistory.filter(x => x.action === 'All Evaluations Completed').length, 1);
+    assert.equal((await view()).final_weighted_score, 85);
+    expect(await action(first.id, 'begin_deliberation', 'filer'), 403, 'unauthorized deliberation start');
+    expect(await action(first.id, 'begin_deliberation', 'secretary'), 200, 'start deliberation');
+    expect(await revise('B', 92, 'Too late', 4), 409, 'deliberation lock');
+    assert.equal((await view()).final_weighted_score, 85);
   });
   await test('qualification boundary, final decision, export and deletion', async () => {
     expect(await action(first.id, 'deliberation', 'filer', { decision: 'Approved' }), 403, 'filer decision');
@@ -341,6 +400,7 @@ async function main() {
       expect(await action(app.id, 'verify_document', 'secretary', { document_id: doc.id, status: 'Verified' }), 200, 'threshold verify');
       expect(await action(app.id, 'assign_evaluators', 'secretary'), 200, 'threshold assign');
       for (const actor of ['D', 'E', 'F']) expect(await request('/api/evaluations.php', { actor, method: 'POST', json: { application_id: app.id, scores: [{ criterion_id: id('criterion-one'), score }], general_remarks: 'Synthetic threshold test' } }), 201, 'threshold score');
+      expect(await action(app.id, 'begin_deliberation', 'secretary'), 200, 'threshold deliberation start');
       return app.id;
     }
     const below = await evaluated(84);

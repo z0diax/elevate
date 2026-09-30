@@ -71,6 +71,26 @@ function progress(PDO $db): array {
 }
 
 fixture($db);
+$db->exec('DELETE FROM application_evaluator_assignments');
+try {
+    require_application_access($db, ['id' => 'A', 'role' => 'EVALUATOR'], 'app-1');
+    throw new RuntimeException('Legacy JSON alone granted evaluator access.');
+} catch (RuntimeException $error) {
+    check(str_starts_with($error->getMessage(), '404:'), 'Unexpected legacy-only access result.');
+}
+$checks++;
+
+fixture($db);
+check(require_application_access($db, ['id' => 'A', 'role' => 'EVALUATOR'], 'app-1')['id'] === 'app-1', 'Active assigned evaluator lacks access.');
+try {
+    require_application_access($db, ['id' => 'E', 'role' => 'EVALUATOR'], 'app-1');
+    throw new RuntimeException('Unassigned evaluator gained access.');
+} catch (RuntimeException $error) {
+    check(str_starts_with($error->getMessage(), '404:'), 'Unexpected unassigned access result.');
+}
+$checks++;
+
+fixture($db);
 $oldBefore = $db->query("SELECT assigned_at, route_id, sequence_no FROM application_evaluator_assignments WHERE evaluator_id = 'C'")->fetch(PDO::FETCH_ASSOC);
 reassign_application_evaluator($db, $admin, 'app-1', 'C', 'D');
 check(statuses($db) === ['A' => 'Pending', 'B' => 'Pending', 'C' => 'Reassigned', 'D' => 'Pending'], 'Pending replacement did not preserve history.');

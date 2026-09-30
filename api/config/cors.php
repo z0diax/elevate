@@ -3,9 +3,26 @@
  * CORS and HTTP response utility for XAMPP PHP API
  */
 
-// Keep PHP diagnostics in server logs, never in JSON responses.
+require_once __DIR__ . '/runtime.php';
+
+// Keep production diagnostics in server logs, never in JSON responses.
 ini_set('display_errors', '0');
 ini_set('log_errors', '1');
+try {
+    $appEnvironment = app_environment();
+    if ($appEnvironment === 'production' && app_production_config_errors($_SERVER)) {
+        error_log('[config] Production configuration is incomplete.');
+        http_response_code(503);
+        header('Content-Type: application/json; charset=UTF-8');
+        exit(json_encode(['status' => 'error', 'message' => 'Service configuration is incomplete.', 'data' => []]));
+    }
+    if ($appEnvironment === 'development') ini_set('display_errors', '1');
+} catch (RuntimeException $error) {
+    error_log('[config] ' . $error->getMessage());
+    http_response_code(503);
+    header('Content-Type: application/json; charset=UTF-8');
+    exit(json_encode(['status' => 'error', 'message' => 'Service configuration is incomplete.', 'data' => []]));
+}
 
 function corsAllowedOrigins(): array {
     $configured = getenv('CORS_ALLOWED_ORIGINS');

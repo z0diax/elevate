@@ -313,7 +313,6 @@ CREATE TABLE \`applications\` (
   \`deliberation_remarks\` TEXT DEFAULT NULL,
   \`deliberation_date\` DATE DEFAULT NULL,
   \`award_date\` DATE DEFAULT NULL,
-  \`assigned_evaluators\` JSON DEFAULT NULL,
   \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (\`id\`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -327,15 +326,36 @@ CREATE TABLE \`applications\` (
   \`contact_number\`, \`email\`, \`barangay\`, \`nomination_type\`, \`nominator_id\`, \`nominator_name\`, \`nominator_position\`,
   \`nominating_office\`, \`justification\`, \`accomplishments\`, \`supporting_narrative\`, \`date_of_nomination\`,
   \`status\`, \`processing_stage\`, \`required_action\`, \`remarks\`, \`final_weighted_score\`, \`deliberation_decision\`,
-  \`deliberation_remarks\`, \`deliberation_date\`, \`award_date\`, \`assigned_evaluators\`
+  \`deliberation_remarks\`, \`deliberation_date\`, \`award_date\`
 ) VALUES\n`;
 
     const appRows = data.applications.map(app => {
-      const evalsJson = escapeSql(JSON.stringify(app.assigned_evaluators || []));
-      return `(${escapeSql(app.id)}, ${escapeSql(app.application_number)}, ${escapeSql(app.award_id)}, ${escapeSql(app.award_name)}, ${app.award_year || 2026}, ${escapeSql(app.nominee_id)}, ${escapeSql(app.nominee_name)}, ${escapeSql(app.employee_id)}, ${escapeSql(app.position_title)}, ${escapeSql(app.office_id)}, ${escapeSql(app.office_name)}, ${escapeSql(app.division_section)}, ${escapeSql(app.employment_category)}, ${escapeSql(app.contact_number)}, ${escapeSql(app.email)}, ${escapeSql(app.barangay)}, ${escapeSql(app.nomination_type)}, ${escapeSql(app.nominator_id)}, ${escapeSql(app.nominator_name)}, ${escapeSql(app.nominator_position)}, ${escapeSql(app.nominating_office)}, ${escapeSql(app.justification)}, ${escapeSql(app.accomplishments)}, ${escapeSql(app.supporting_narrative)}, ${escapeSql(app.date_of_nomination)}, ${escapeSql(app.status)}, ${escapeSql(app.processing_stage)}, ${escapeSql(app.required_action)}, ${escapeSql(app.remarks)}, ${app.final_weighted_score || 'NULL'}, ${escapeSql(app.deliberation_decision)}, ${escapeSql(app.deliberation_remarks)}, ${escapeSql(app.deliberation_date)}, ${escapeSql(app.award_date)}, ${evalsJson})`;
+      return `(${escapeSql(app.id)}, ${escapeSql(app.application_number)}, ${escapeSql(app.award_id)}, ${escapeSql(app.award_name)}, ${app.award_year || 2026}, ${escapeSql(app.nominee_id)}, ${escapeSql(app.nominee_name)}, ${escapeSql(app.employee_id)}, ${escapeSql(app.position_title)}, ${escapeSql(app.office_id)}, ${escapeSql(app.office_name)}, ${escapeSql(app.division_section)}, ${escapeSql(app.employment_category)}, ${escapeSql(app.contact_number)}, ${escapeSql(app.email)}, ${escapeSql(app.barangay)}, ${escapeSql(app.nomination_type)}, ${escapeSql(app.nominator_id)}, ${escapeSql(app.nominator_name)}, ${escapeSql(app.nominator_position)}, ${escapeSql(app.nominating_office)}, ${escapeSql(app.justification)}, ${escapeSql(app.accomplishments)}, ${escapeSql(app.supporting_narrative)}, ${escapeSql(app.date_of_nomination)}, ${escapeSql(app.status)}, ${escapeSql(app.processing_stage)}, ${escapeSql(app.required_action)}, ${escapeSql(app.remarks)}, ${app.final_weighted_score || 'NULL'}, ${escapeSql(app.deliberation_decision)}, ${escapeSql(app.deliberation_remarks)}, ${escapeSql(app.deliberation_date)}, ${escapeSql(app.award_date)})`;
     });
 
     sql += appRows.join(',\n') + ';\n\n';
+  }
+
+  sql += `DROP TABLE IF EXISTS \`application_evaluator_assignments\`;
+CREATE TABLE \`application_evaluator_assignments\` (
+  \`id\` VARCHAR(64) NOT NULL PRIMARY KEY,
+  \`application_id\` VARCHAR(64) NOT NULL,
+  \`evaluator_id\` VARCHAR(64) NOT NULL,
+  \`route_id\` VARCHAR(64) DEFAULT NULL,
+  \`sequence_no\` INT NOT NULL DEFAULT 1,
+  \`status\` ENUM('Pending', 'In Progress', 'Completed', 'Reassigned') NOT NULL DEFAULT 'Pending',
+  \`assigned_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  \`completed_at\` DATETIME DEFAULT NULL,
+  UNIQUE KEY \`uq_application_evaluator\` (\`application_id\`, \`evaluator_id\`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+`;
+  const assignmentRows = data.applications.flatMap(app => (app.evaluator_assignments ?? []).map(assignment =>
+    `(${escapeSql(assignment.id)}, ${escapeSql(app.id)}, ${escapeSql(assignment.evaluator_id)}, ${escapeSql(assignment.route_id)}, ${assignment.sequence_no}, ${escapeSql(assignment.status)}, ${escapeSql(assignment.assigned_at)}, ${escapeSql(assignment.completed_at)})`
+  ));
+  if (assignmentRows.length > 0) {
+    sql += `INSERT INTO \`application_evaluator_assignments\` (\`id\`, \`application_id\`, \`evaluator_id\`, \`route_id\`, \`sequence_no\`, \`status\`, \`assigned_at\`, \`completed_at\`) VALUES\n`;
+    sql += assignmentRows.join(',\n') + ';\n\n';
   }
 
   sql += `SET FOREIGN_KEY_CHECKS = 1;\n`;

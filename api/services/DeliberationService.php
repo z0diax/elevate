@@ -1,6 +1,35 @@
 <?php
 declare(strict_types=1);
 
+function handle_begin_deliberation(PDO $db, array $actor, string $appId): void {
+    if (!in_array($actor['role'], ['SECRETARIAT', 'ADMINISTRATOR'], true)) sendResponse(403, [], 'Only Secretariat or an Administrator can start deliberation.');
+    $db->beginTransaction();
+    try {
+        $stmt = $db->prepare('SELECT status, processing_stage, final_weighted_score FROM applications WHERE id = :id FOR UPDATE');
+        $stmt->execute([':id' => $appId]);
+        $current = $stmt->fetch();
+        if (!$current || $current['processing_stage'] !== 'Evaluation' || $current['status'] !== 'Evaluation Completed' || $current['final_weighted_score'] === null) {
+            $db->rollBack();
+            sendResponse(409, [], 'All evaluations must be completed before deliberation starts.');
+        }
+        $assignmentStmt = $db->prepare("SELECT status FROM application_evaluator_assignments WHERE application_id = :id FOR UPDATE");
+        $assignmentStmt->execute([':id' => $appId]);
+        $active = array_values(array_filter($assignmentStmt->fetchAll(PDO::FETCH_COLUMN), static fn($status) => $status !== 'Reassigned'));
+        if (!$active || count(array_filter($active, static fn($status) => $status === 'Completed')) !== count($active)) {
+            $db->rollBack();
+            sendResponse(409, [], 'All assigned evaluators must submit before deliberation starts.');
+        }
+        $db->prepare("UPDATE applications SET processing_stage = 'Deliberation', status = 'For Deliberation', required_action = 'PRAISE Committee deliberation in progress.' WHERE id = :id")
+            ->execute([':id' => $appId]);
+        addHistory($db, $appId, $actor, 'Deliberation Started', 'Evaluation Completed', 'For Deliberation');
+        $db->commit();
+    } catch (Throwable $e) {
+        if ($db->inTransaction()) $db->rollBack();
+        sendInternalError($e, 'applications.php:begin_deliberation', 'Failed to start deliberation.');
+    }
+    sendResponse(200, getFullApplication($db, $appId), 'Deliberation started.');
+}
+
 function handle_deliberation(PDO $db, array $actor, array $data, string $appId, array $current): void {
     if (!in_array($actor['role'], ['SECRETARIAT', 'ADMINISTRATOR'], true)) {
         sendResponse(403, [], 'Only Secretariat or an Administrator can record the committee decision.');
@@ -37,7 +66,7 @@ function handle_deliberation(PDO $db, array $actor, array $data, string $appId, 
         if ($current['status'] !== 'Approved' || $current['deliberation_decision'] !== 'Approved') {
             sendResponse(409, [], 'Only an approved nomination can be conferred an award.');
         }
-    } elseif ($current['deliberation_decision'] !== null || !in_array($current['status'], ['Evaluation Completed', 'For Deliberation'], true)) {
+    } elseif ($current['processing_stage'] !== 'Deliberation' || $current['deliberation_decision'] !== null || $current['status'] !== 'For Deliberation') {
         sendResponse(409, [], 'A committee decision has already been recorded for this nomination.');
     }
 

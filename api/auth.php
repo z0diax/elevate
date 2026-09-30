@@ -127,9 +127,39 @@ if ($method === 'POST') {
     }
 
     if ($action === 'logout') {
-        require_auth($db);
+        require_auth($db, [], true);
         clear_auth_session();
         sendResponse(200, null, 'Logout successful.');
+    }
+
+    if ($action === 'change_password') {
+        $actor = require_auth($db, [], true);
+        requireFields($data, ['current_password', 'new_password']);
+        $currentPassword = requireText($data['current_password'] ?? null, 'current password', 1024, true);
+        $newPassword = requireText($data['new_password'] ?? null, 'new password', 1024, true);
+        if (strlen($newPassword) < 8) sendResponse(400, [], 'New password must be at least 8 characters long.');
+        if (hash_equals($currentPassword, $newPassword)) sendResponse(400, [], 'Choose a different new password.');
+
+        $db->beginTransaction();
+        try {
+            $stmt = $db->prepare('SELECT password_hash FROM profiles WHERE id = :id AND is_active = 1 FOR UPDATE');
+            $stmt->execute([':id' => $actor['id']]);
+            $hash = $stmt->fetchColumn();
+            if (!$hash || !password_verify($currentPassword, $hash)) {
+                $db->rollBack();
+                sendResponse(403, [], 'Current password is incorrect.');
+            }
+            $db->prepare('UPDATE profiles SET password_hash = :hash, must_change_password = 0 WHERE id = :id')
+                ->execute([':hash' => password_hash($newPassword, PASSWORD_DEFAULT), ':id' => $actor['id']]);
+            $db->commit();
+        } catch (Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            sendInternalError($e, 'auth.php:change_password', 'Failed to change password.');
+        }
+        set_auth_session($actor['id']);
+        $profile = get_session_user($db);
+        $profile['csrf_token'] = get_or_create_csrf_token();
+        sendResponse(200, $profile, 'Password changed successfully.');
     }
 
     if ($action === 'register_nominee') {

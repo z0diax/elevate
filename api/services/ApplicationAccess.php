@@ -14,14 +14,10 @@ function canViewApplication(array $application, array $actor): bool {
     }
 
     if ($role === 'EVALUATOR') {
-        if (!empty($application['evaluator_assignments'])) {
-            foreach ($application['evaluator_assignments'] as $assignment) {
-                if ($assignment['evaluator_id'] === $actor['id'] && $assignment['status'] !== 'Reassigned') return true;
-            }
-            return false;
+        foreach ($application['evaluator_assignments'] ?? [] as $assignment) {
+            if ($assignment['evaluator_id'] === $actor['id'] && $assignment['status'] !== 'Reassigned') return true;
         }
-        // Legacy applications without assignment rows retain their JSON assignment list.
-        return in_array($actor['id'], $application['assigned_evaluators'] ?? [], true);
+        return false;
     }
 
     // A filer must retain read-only visibility of their own nomination throughout

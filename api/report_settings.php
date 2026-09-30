@@ -36,53 +36,7 @@ function default_report_settings(): array {
     ];
 }
 
-function ensure_report_settings_table(PDO $db): void {
-    $db->exec("
-        CREATE TABLE IF NOT EXISTS `report_settings` (
-          `id` VARCHAR(64) NOT NULL,
-          `citation_text` TEXT NOT NULL,
-          `conferment_text` TEXT NOT NULL,
-          `left_signatory_name` VARCHAR(255) NOT NULL,
-          `left_signatory_title` VARCHAR(255) NOT NULL,
-          `center_signatory_name` VARCHAR(255) NOT NULL,
-          `center_signatory_title` VARCHAR(255) NOT NULL,
-          `right_signatory_name` VARCHAR(255) NOT NULL,
-          `right_signatory_title` VARCHAR(255) NOT NULL,
-          `form_a1_prepared_label` VARCHAR(255) NOT NULL,
-          `form_a1_prepared_name` VARCHAR(255) NOT NULL,
-          `form_a1_prepared_title` VARCHAR(255) NOT NULL,
-          `form_a1_verified_label` VARCHAR(255) NOT NULL,
-          `form_a1_verified_name` VARCHAR(255) NOT NULL,
-          `form_a1_verified_title` VARCHAR(255) NOT NULL,
-          `form_a1_confirmed_label` VARCHAR(255) NOT NULL,
-          `form_a1_confirmed_name` VARCHAR(255) NOT NULL,
-          `form_a1_confirmed_title` VARCHAR(255) NOT NULL,
-          `background_image_url` VARCHAR(500) DEFAULT NULL,
-          `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-          PRIMARY KEY (`id`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    ");
-
-    $columnCheck = $db->query("SHOW COLUMNS FROM `report_settings` LIKE 'background_image_url'");
-    if ($columnCheck && !$columnCheck->fetch(PDO::FETCH_ASSOC)) {
-        $db->exec("ALTER TABLE `report_settings` ADD COLUMN `background_image_url` VARCHAR(500) DEFAULT NULL AFTER `right_signatory_title`");
-    }
-
-    $formA1Columns = [
-        'form_a1_prepared_label', 'form_a1_prepared_name', 'form_a1_prepared_title',
-        'form_a1_verified_label', 'form_a1_verified_name', 'form_a1_verified_title',
-        'form_a1_confirmed_label', 'form_a1_confirmed_name', 'form_a1_confirmed_title',
-    ];
-    $defaults = default_report_settings();
-    foreach ($formA1Columns as $column) {
-        $columnCheck = $db->query("SHOW COLUMNS FROM `report_settings` LIKE '{$column}'");
-        if ($columnCheck && !$columnCheck->fetch(PDO::FETCH_ASSOC)) {
-            $defaultValue = str_replace("'", "''", $defaults[$column]);
-            $db->exec("ALTER TABLE `report_settings` ADD COLUMN `{$column}` VARCHAR(255) NOT NULL DEFAULT '{$defaultValue}' AFTER `right_signatory_title`");
-        }
-    }
-
+function ensure_default_report_settings(PDO $db): void {
     $stmt = $db->prepare("SELECT COUNT(*) FROM `report_settings` WHERE `id` = 'default'");
     $stmt->execute();
     $exists = (int)$stmt->fetchColumn() > 0;
@@ -169,7 +123,7 @@ function fetch_report_settings(PDO $db): array {
     $settings = $stmt->fetch();
 
     if (!$settings) {
-        ensure_report_settings_table($db);
+        ensure_default_report_settings($db);
         $stmt->execute();
         $settings = $stmt->fetch();
     }
@@ -217,7 +171,7 @@ function delete_certificate_background_file(?string $relativePath): void {
     }
 }
 
-ensure_report_settings_table($db);
+ensure_default_report_settings($db);
 
 $method = $_SERVER['REQUEST_METHOD'];
 

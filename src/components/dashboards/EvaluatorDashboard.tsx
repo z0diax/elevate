@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Application, Award, UserProfile } from '../../types';
+import { Application, Award, EvaluationRevision, UserProfile } from '../../types';
 import { StatusBadge } from '../common/StatusBadge';
 import { NominationActionModal } from '../nomination/NominationActionModal';
 import { NominationDetails, NominationDocuments } from '../nomination/NominationReadOnlySections';
@@ -41,12 +41,22 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
   const [isLocked, setIsLocked] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRevisionMode, setIsRevisionMode] = useState(false);
+  const [revisionReason, setRevisionReason] = useState('');
+  const [revisionHistory, setRevisionHistory] = useState<EvaluationRevision[]>([]);
 
   const openAssessment = async (application: Application) => {
     if (!isAssignedEvaluator(application, currentUser.id)) return;
     setErrorMsg('');
     setActiveTab('scorecard');
     setSelectedAppId(application.id);
+    setIsRevisionMode(false);
+    setRevisionReason('');
+    const ownEvaluation = application.evaluations?.find(evaluation => evaluation.evaluator_id === currentUser.id);
+    if (ownEvaluation?.revision_count) {
+      try { setRevisionHistory(await praiseService.getRevisionHistory(ownEvaluation.id)); }
+      catch { setRevisionHistory([]); }
+    } else setRevisionHistory([]);
     const alreadySubmitted = getEvaluatorAssignmentStatus(application, currentUser.id) === 'Completed'
       || application.evaluations?.some(evaluation => evaluation.evaluator_id === currentUser.id && evaluation.is_submitted);
     if (application.processing_stage === 'Evaluation' && !alreadySubmitted) {
@@ -74,6 +84,23 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
     && ['For Evaluation', 'Under Evaluation'].includes(selectedApp.status)
     && assignmentStatus !== 'Completed'
     && !existingEvaluation?.is_submitted;
+  const canRevise = selectedApp?.processing_stage === 'Evaluation'
+    && ['For Evaluation', 'Under Evaluation', 'Evaluation Completed'].includes(selectedApp.status)
+    && assignmentStatus === 'Completed' && Boolean(existingEvaluation?.is_submitted);
+  const canEdit = !isLocked && (canEvaluate || (isRevisionMode && canRevise));
+
+  function resetSubmittedScores() {
+    if (!existingEvaluation) return;
+    setCriterionScores(Object.fromEntries(existingEvaluation.scores.map(score => [score.criterion_id, {
+      raw_score: score.raw_score ?? score.score,
+      remarks: score.evaluator_remarks || score.remarks || '',
+    }])));
+    setGeneralRemarks(existingEvaluation.general_remarks || '');
+    setRevisionReason('');
+    setIsRevisionMode(false);
+    setIsLocked(true);
+    setErrorMsg('');
+  }
 
   useEffect(() => {
     if (!selectedAward) {
@@ -94,6 +121,7 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
       setCriterionScores(nextScores);
       setGeneralRemarks(existingEvaluation.general_remarks || '');
       setIsLocked(Boolean(existingEvaluation.is_submitted || assignmentStatus === 'Completed'));
+      setIsRevisionMode(false);
       return;
     }
 
@@ -128,7 +156,7 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
   const currentTotalScore = calculateWeightedScore();
 
   function handleScoreChange(criterionId: string, rawScore: number, maxScore: number) {
-    if (isLocked || !canEvaluate) {
+    if (!canEdit) {
       return;
     }
 
@@ -143,7 +171,7 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
   }
 
   function handleRemarksChange(criterionId: string, remarks: string) {
-    if (isLocked || !canEvaluate) {
+    if (!canEdit) {
       return;
     }
 
@@ -157,7 +185,7 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
   }
 
   async function handleSubmitEvaluation() {
-    if (!selectedApp || !selectedAward || !canEvaluate) {
+    if (!selectedApp || !selectedAward || !canEdit) {
       return;
     }
     setActiveTab('scorecard');
@@ -174,38 +202,44 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
       setErrorMsg('Please write a summary assessment before submitting.');
       return;
     }
+    if (isRevisionMode && (!revisionReason.trim() || revisionReason.length > 500)) {
+      setErrorMsg('Enter a reason for revision (up to 500 characters).');
+      return;
+    }
+    if (isRevisionMode && !window.confirm('You have already submitted this evaluation. These scores will become your official evaluation. Your previous submission will remain in revision history.')) return;
 
     setErrorMsg('');
     setIsSubmitting(true);
 
     try {
-      await praiseService.submitEvaluation({
+      const payload = {
         application_id: selectedApp.id,
-        evaluator_id: currentUser.id,
-        evaluator_name: currentUser.full_name,
-        evaluator_position: currentUser.position_title || 'PRAISE Committee Member',
         scores: (selectedAward.criteria || []).map(criterion => {
           const current = criterionScores[criterion.id];
           const raw = Number(current?.raw_score ?? 0);
-          const max = Number(criterion.max_score || 100);
-          const weighted = max > 0 ? Number((((raw / max) * criterion.weight_percentage)).toFixed(2)) : 0;
-
           return {
             criterion_id: criterion.id,
-            criterion_name: criterion.criterion_name,
-            raw_score: raw,
-            max_score: criterion.max_score,
-            weight_percentage: criterion.weight_percentage,
-            weighted_score: weighted,
-            evaluator_remarks: current?.remarks || '',
+            score: raw,
+            remarks: current?.remarks || '',
           };
         }),
         general_remarks: generalRemarks.trim(),
-      });
-      showToast(`Evaluation for ${selectedApp.application_number} submitted successfully.`);
+      };
+      if (isRevisionMode && existingEvaluation) {
+        await praiseService.reviseEvaluation({ ...payload, evaluation_id: existingEvaluation.id, expected_version: existingEvaluation.version_number, revision_reason: revisionReason.trim() });
+      } else {
+        await praiseService.submitEvaluation(payload);
+      }
+      showToast(`Evaluation for ${selectedApp.application_number} ${isRevisionMode ? 'revised' : 'submitted'} successfully.`);
 
       setIsLocked(true);
+      setIsRevisionMode(false);
+      setRevisionReason('');
       await onRefreshData();
+      if (existingEvaluation && isRevisionMode) {
+        try { setRevisionHistory(await praiseService.getRevisionHistory(existingEvaluation.id)); }
+        catch { /* Submission is already committed; history remains available on reopen. */ }
+      }
 
       confetti({
         particleCount: 50,
@@ -311,19 +345,20 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
         {selectedApp && selectedAward && (
           <NominationActionModal
             application={selectedApp}
-            title={canEvaluate ? 'Evaluator assessment' : 'Assigned nomination'}
-            task={canEvaluate && !isLocked
+            title={canEdit ? 'Evaluator assessment' : 'Assigned nomination'}
+            task={canEdit
               ? 'Score this nomination against the configured award criteria.'
               : isLocked ? 'Your score has been submitted and is available to review.' : 'This nomination is available to view.'}
             tabs={[{ id: 'scorecard', label: 'Scorecard' }, { id: 'evidence', label: 'Evidence' }, { id: 'details', label: 'Nomination details' }]}
             activeTab={activeTab}
             onTabChange={setActiveTab}
-            onClose={() => setSelectedAppId('')}
-            footer={canEvaluate && !isLocked ? (
+            onClose={() => { setSelectedAppId(''); setIsRevisionMode(false); }}
+            footer={canEdit ? (
               <>
                 <span className="mr-auto text-sm font-bold text-slate-900">Weighted score: {currentTotalScore.toFixed(2)}%</span>
+                {isRevisionMode && <button type="button" onClick={resetSubmittedScores} disabled={isSubmitting} className="min-h-11 rounded-lg border border-slate-300 px-5 text-sm font-semibold">Cancel</button>}
                 <button type="button" onClick={() => void handleSubmitEvaluation()} disabled={isSubmitting} className="min-h-11 w-full rounded-lg bg-blue-600 px-5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 sm:w-auto">
-                  {isSubmitting ? 'Submitting...' : 'Submit evaluation'}
+                  {isSubmitting ? 'Submitting...' : isRevisionMode ? 'Submit Revised Evaluation' : 'Submit evaluation'}
                 </button>
               </>
             ) : undefined}
@@ -331,12 +366,15 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
             {activeTab === 'scorecard' && (
               <div className="space-y-5">
                 <section className="rounded-xl bg-slate-50 p-4">
-                  <h3 className="text-base font-bold text-slate-950">{isLocked ? 'Score submitted' : canEvaluate ? 'Your task: Score the criteria' : 'Assessment status'}</h3>
+                  <h3 className="text-base font-bold text-slate-950">{isRevisionMode ? 'Revising submitted evaluation' : isLocked ? 'Score submitted' : canEvaluate ? 'Your task: Score the criteria' : 'Assessment status'}</h3>
                   <p className="mt-1 text-sm leading-6 text-slate-600">
                     {getEvaluatorProgress(selectedApp).completedCount} of {getEvaluatorProgress(selectedApp).assignedCount} assigned evaluators submitted.
                     {existingEvaluation?.submitted_at ? ' Your score was submitted on ' + new Date(existingEvaluation.submitted_at).toLocaleDateString('en-PH') + '.' : ''}
                   </p>
                 </section>
+                {isRevisionMode && <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">You are revising a submitted evaluation. Your current submitted scores will remain unchanged until you submit this revision.</p>}
+                {isLocked && canRevise && <button type="button" onClick={() => { setIsRevisionMode(true); setIsLocked(false); setRevisionReason(''); }} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white">Revise Evaluation</button>}
+                {existingEvaluation?.revision_count ? <section className="rounded-lg border border-slate-200 p-3 text-sm text-slate-700"><strong>Revised {existingEvaluation.revision_count} time{existingEvaluation.revision_count === 1 ? '' : 's'}</strong>{revisionHistory.map(item => <p key={item.revision_number} className="mt-2">Version {item.revision_number} · {new Date(item.created_at).toLocaleString('en-PH')} · {item.reason}</p>)}</section> : null}
                 {errorMsg && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{errorMsg}</p>}
                 {(selectedAward.criteria || []).map((criterion, index) => {
                   const current = criterionScores[criterion.id] || { raw_score: 0, remarks: '' };
@@ -354,11 +392,11 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
                       <div className="mt-4 grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
                         <div>
                           <label htmlFor={'score-' + criterion.id} className="block text-sm font-semibold text-slate-800">Score out of {max}</label>
-                          <input id={'score-' + criterion.id} type="number" min={0} max={max} value={current.raw_score} disabled={isLocked || !canEvaluate} onChange={event => handleScoreChange(criterion.id, Number(event.target.value), max)} className="mt-2 min-h-11 w-full rounded-lg border border-slate-300 px-3 text-sm font-semibold focus:outline-2 focus:outline-blue-600 disabled:bg-slate-50" />
+                          <input id={'score-' + criterion.id} type="number" min={0} max={max} value={current.raw_score} disabled={!canEdit} onChange={event => handleScoreChange(criterion.id, Number(event.target.value), max)} className="mt-2 min-h-11 w-full rounded-lg border border-slate-300 px-3 text-sm font-semibold focus:outline-2 focus:outline-blue-600 disabled:bg-slate-50" />
                         </div>
                         <div>
                           <label htmlFor={'remarks-' + criterion.id} className="block text-sm font-semibold text-slate-800">Evidence and remarks</label>
-                          <input id={'remarks-' + criterion.id} type="text" value={current.remarks} disabled={isLocked || !canEvaluate} onChange={event => handleRemarksChange(criterion.id, event.target.value)} className="mt-2 min-h-11 w-full rounded-lg border border-slate-300 px-3 text-sm focus:outline-2 focus:outline-blue-600 disabled:bg-slate-50" />
+                          <input id={'remarks-' + criterion.id} type="text" value={current.remarks} disabled={!canEdit} onChange={event => handleRemarksChange(criterion.id, event.target.value)} className="mt-2 min-h-11 w-full rounded-lg border border-slate-300 px-3 text-sm focus:outline-2 focus:outline-blue-600 disabled:bg-slate-50" />
                         </div>
                       </div>
                       <p className="mt-2 text-sm text-slate-600">Weighted contribution: <strong className="text-slate-900">{weighted.toFixed(2)} / {criterion.weight_percentage}</strong></p>
@@ -379,8 +417,9 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
                 </section>
                 <div>
                   <label htmlFor="general-assessment" className="block text-sm font-semibold text-slate-900">General assessment and recommendation</label>
-                  <textarea id="general-assessment" rows={4} value={generalRemarks} disabled={isLocked || !canEvaluate} onChange={event => setGeneralRemarks(event.target.value)} className="mt-2 min-h-28 w-full rounded-lg border border-slate-300 p-3 text-sm leading-6 focus:outline-2 focus:outline-blue-600 disabled:bg-slate-50" />
+                  <textarea id="general-assessment" rows={4} value={generalRemarks} disabled={!canEdit} onChange={event => setGeneralRemarks(event.target.value)} className="mt-2 min-h-28 w-full rounded-lg border border-slate-300 p-3 text-sm leading-6 focus:outline-2 focus:outline-blue-600 disabled:bg-slate-50" />
                 </div>
+                {isRevisionMode && <div><label htmlFor="revision-reason" className="block text-sm font-semibold text-slate-900">Reason for revision</label><textarea id="revision-reason" rows={3} maxLength={500} value={revisionReason} onChange={event => setRevisionReason(event.target.value)} className="mt-2 w-full rounded-lg border border-slate-300 p-3 text-sm" required /></div>}
               </div>
             )}
             {activeTab === 'evidence' && <NominationDocuments application={selectedApp} onOpen={setSelectedDocId} />}

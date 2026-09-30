@@ -7,6 +7,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/config/cors.php';
 require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/config/session_auth.php';
+require_once __DIR__ . '/services/ApplicationHistory.php';
 
 $database = new Database();
 $db = $database->getConnection();
@@ -17,6 +18,29 @@ if (!$db) {
 
 $method = $_SERVER['REQUEST_METHOD'];
 
+if ($method === 'GET' && ($_GET['action'] ?? '') === 'history') {
+    $actor = require_auth($db, ['EVALUATOR', 'ADMINISTRATOR', 'SECRETARIAT']);
+    $evaluationId = requireId($_GET['evaluation_id'] ?? null, 'evaluation ID');
+    $stmt = $db->prepare('SELECT evaluator_id, application_id FROM evaluations WHERE id = :id');
+    $stmt->execute([':id' => $evaluationId]);
+    $evaluation = $stmt->fetch();
+    if (!$evaluation) sendResponse(404, [], 'Evaluation not found.');
+    if ($actor['role'] === 'EVALUATOR') {
+        $assignment = $db->prepare("SELECT 1 FROM application_evaluator_assignments WHERE application_id = :app_id AND evaluator_id = :evaluator_id AND status <> 'Reassigned'");
+        $assignment->execute([':app_id' => $evaluation['application_id'], ':evaluator_id' => $actor['id']]);
+        if ($evaluation['evaluator_id'] !== $actor['id'] || !$assignment->fetchColumn()) sendResponse(403, [], 'Evaluation history is not available.');
+    }
+    $history = $db->prepare('SELECT revision_number, reason, previous_snapshot, new_snapshot, created_at FROM evaluation_revision_history WHERE evaluation_id = :id ORDER BY revision_number');
+    $history->execute([':id' => $evaluationId]);
+    $rows = $history->fetchAll();
+    foreach ($rows as &$row) {
+        $row['revision_number'] = (int)$row['revision_number'];
+        $row['previous_snapshot'] = json_decode($row['previous_snapshot'], true, 512, JSON_THROW_ON_ERROR);
+        $row['new_snapshot'] = json_decode($row['new_snapshot'], true, 512, JSON_THROW_ON_ERROR);
+    }
+    sendResponse(200, $rows);
+}
+
 if ($method === 'POST' && ($_GET['action'] ?? '') === 'start') {
     $actor = require_auth($db, ['EVALUATOR']);
     $data = getJsonInput();
@@ -24,7 +48,7 @@ if ($method === 'POST' && ($_GET['action'] ?? '') === 'start') {
     $appId = requireId($data['application_id'] ?? null, 'application ID');
     try {
         $db->beginTransaction();
-        $appStmt = $db->prepare('SELECT status, processing_stage, assigned_evaluators FROM applications WHERE id = :id FOR UPDATE');
+        $appStmt = $db->prepare('SELECT status, processing_stage FROM applications WHERE id = :id FOR UPDATE');
         $appStmt->execute([':id' => $appId]);
         $app = $appStmt->fetch();
         if (!$app || $app['processing_stage'] !== 'Evaluation' || !in_array($app['status'], ['For Evaluation', 'Under Evaluation'], true)) {
@@ -35,13 +59,8 @@ if ($method === 'POST' && ($_GET['action'] ?? '') === 'start') {
         $assignment->execute([':app_id' => $appId, ':evaluator_id' => $actor['id']]);
         $status = $assignment->fetchColumn();
         if ($status === false) {
-            $count = $db->prepare('SELECT COUNT(*) FROM application_evaluator_assignments WHERE application_id = :id');
-            $count->execute([':id' => $appId]);
-            $legacyIds = json_decode((string)($app['assigned_evaluators'] ?? '[]'), true) ?: [];
-            if ((int)$count->fetchColumn() > 0 || !in_array($actor['id'], $legacyIds, true)) {
-                $db->rollBack();
-                sendResponse(403, [], 'This nomination is not assigned to your evaluator account.');
-            }
+            $db->rollBack();
+            sendResponse(403, [], 'This nomination is not assigned to your evaluator account.');
         } elseif ($status === 'Reassigned') {
             $db->rollBack();
             sendResponse(403, [], 'This nomination is no longer assigned to you.');
@@ -60,38 +79,33 @@ if ($method === 'POST' && ($_GET['action'] ?? '') === 'start') {
 if ($method === 'POST') {
     $actor = require_auth($db, ['EVALUATOR']);
     $data = getJsonInput();
-
-    requireFields($data, ['application_id', 'scores', 'general_remarks']);
+    $isRevision = ($_GET['action'] ?? '') === 'revise';
+    if (($_GET['action'] ?? '') !== '' && !$isRevision) sendResponse(400, [], 'Unknown evaluation action.');
+    requireFields($data, ['application_id', 'scores', 'general_remarks', ...($isRevision ? ['evaluation_id', 'expected_version', 'revision_reason'] : [])]);
     $appId = requireId($data['application_id'] ?? null, 'application ID');
+    $revisionReason = $isRevision ? trim(requireText($data['revision_reason'] ?? null, 'reason for revision', 500, true)) : null;
+    $expectedVersion = $isRevision ? requireIntRange($data['expected_version'] ?? null, 'expected version', 1, 1000000) : null;
+    $requestedEvaluationId = $isRevision ? requireId($data['evaluation_id'] ?? null, 'evaluation ID') : null;
     $evaluatorId = $actor['id'];
     $evaluatorName = $actor['full_name'];
     $evaluatorOffice = $actor['office_name'] ?? '';
     $scores = $data['scores'] ?? [];
-    $generalRemarks = trim(requireText($data['general_remarks'] ?? '', 'general remarks', 65535));
+    $generalRemarks = trim(requireText($data['general_remarks'] ?? '', 'general remarks', 65535, true));
 
-    $stmtApp = $db->prepare("SELECT award_id, assigned_evaluators, status, processing_stage FROM applications WHERE id = :id");
+    $stmtApp = $db->prepare("SELECT award_id, status, processing_stage FROM applications WHERE id = :id");
     $stmtApp->execute([':id' => $appId]);
     $application = $stmtApp->fetch();
     if (!$application) {
         sendResponse(404, [], 'Application not found.');
     }
-    if ($application['processing_stage'] !== 'Evaluation' || !in_array($application['status'], ['For Evaluation', 'Under Evaluation'], true)) {
-        sendResponse(409, [], 'This nomination is not currently open for evaluator assessment.');
+    if ($application['processing_stage'] !== 'Evaluation' || !in_array($application['status'], ['For Evaluation', 'Under Evaluation', 'Evaluation Completed'], true)) {
+        sendResponse(409, [], 'Evaluation editing is locked because this nomination has moved forward. Refresh the nomination.');
     }
 
-    $assignedEvaluators = !empty($application['assigned_evaluators'])
-        ? (json_decode($application['assigned_evaluators'], true) ?: [])
-        : [];
-
-    $assignedEvaluators = is_array($assignedEvaluators)
-        ? array_values(array_unique(array_filter($assignedEvaluators, 'is_string')))
-        : [];
     $assignmentStmt = $db->prepare("SELECT evaluator_id, status FROM application_evaluator_assignments WHERE application_id = :id");
     $assignmentStmt->execute([':id' => $appId]);
     $assignments = $assignmentStmt->fetchAll();
-    if ($assignments) {
-        $assignedEvaluators = array_column(array_filter($assignments, static fn($assignment) => $assignment['status'] !== 'Reassigned'), 'evaluator_id');
-    }
+    $assignedEvaluators = array_column(array_filter($assignments, static fn($assignment) => $assignment['status'] !== 'Reassigned'), 'evaluator_id');
     if (!$assignedEvaluators) {
         sendResponse(409, [], 'This nomination has no assigned evaluators and cannot complete evaluation.');
     }
@@ -125,49 +139,55 @@ if ($method === 'POST') {
     $db->beginTransaction();
     try {
         // Serialize submissions for this nomination so the completion check sees every committed score.
-        $lockStmt = $db->prepare('SELECT status, processing_stage, assigned_evaluators FROM applications WHERE id = :id FOR UPDATE');
+        $lockStmt = $db->prepare('SELECT status, processing_stage FROM applications WHERE id = :id FOR UPDATE');
         $lockStmt->execute([':id' => $appId]);
         $lockedApplication = $lockStmt->fetch();
-        if ($lockedApplication['processing_stage'] !== 'Evaluation' || !in_array($lockedApplication['status'], ['For Evaluation', 'Under Evaluation'], true)) {
+        if ($lockedApplication['processing_stage'] !== 'Evaluation' || !in_array($lockedApplication['status'], ['For Evaluation', 'Under Evaluation', 'Evaluation Completed'], true)) {
             $db->rollBack();
-            sendResponse(409, [], 'This nomination is not currently open for evaluator assessment.');
+            sendResponse(409, [], 'Evaluation editing is locked because this nomination has moved forward. Refresh the nomination.');
         }
         // Re-read assignments after the application lock: an Administrator may
         // have replaced an evaluator while this submission was waiting.
         $lockedAssignmentsStmt = $db->prepare('SELECT evaluator_id, status FROM application_evaluator_assignments WHERE application_id = :id FOR UPDATE');
         $lockedAssignmentsStmt->execute([':id' => $appId]);
         $assignments = $lockedAssignmentsStmt->fetchAll();
-        if ($assignments) {
-            $assignedEvaluators = array_column(array_filter($assignments, static fn($assignment) => $assignment['status'] !== 'Reassigned'), 'evaluator_id');
-        } else {
-            $legacyIds = json_decode((string)($lockedApplication['assigned_evaluators'] ?? '[]'), true);
-            $assignedEvaluators = is_array($legacyIds) ? array_values(array_unique(array_filter($legacyIds, 'is_string'))) : [];
-        }
+        $assignedEvaluators = array_column(array_filter($assignments, static fn($assignment) => $assignment['status'] !== 'Reassigned'), 'evaluator_id');
         if (!$assignedEvaluators || !in_array($evaluatorId, $assignedEvaluators, true)) {
             $db->rollBack();
             sendResponse(409, [], 'Your evaluator assignment changed. Refresh the nomination and try again.');
         }
-        if ($assignments) {
-            $own = $db->prepare("SELECT status FROM application_evaluator_assignments WHERE application_id = :app_id AND evaluator_id = :evaluator_id FOR UPDATE");
-            $own->execute([':app_id' => $appId, ':evaluator_id' => $evaluatorId]);
-            $ownStatus = $own->fetchColumn();
-            if ($ownStatus === 'Completed' || $ownStatus === 'Reassigned' || $ownStatus === false) {
-                $db->rollBack();
-                sendResponse(409, [], 'Your evaluation has already been submitted or is no longer assigned.');
-            }
+        $own = $db->prepare("SELECT status FROM application_evaluator_assignments WHERE application_id = :app_id AND evaluator_id = :evaluator_id FOR UPDATE");
+        $own->execute([':app_id' => $appId, ':evaluator_id' => $evaluatorId]);
+        $ownStatus = $own->fetchColumn();
+        if (($isRevision && $ownStatus !== 'Completed') || (!$isRevision && in_array($ownStatus, ['Completed', 'Reassigned', false], true))) {
+            $db->rollBack();
+            sendResponse(409, [], 'Your evaluation is not available for this action. Refresh the nomination.');
         }
         $evalId = 'eval-' . bin2hex(random_bytes(16));
+        $previousSnapshot = null;
+        $nextVersion = 1;
+        if ($isRevision) {
+            $existingStmt = $db->prepare('SELECT * FROM evaluations WHERE id = :id AND application_id = :app_id AND evaluator_id = :evaluator_id AND is_submitted = 1 FOR UPDATE');
+            $existingStmt->execute([':id' => $requestedEvaluationId, ':app_id' => $appId, ':evaluator_id' => $evaluatorId]);
+            $existing = $existingStmt->fetch();
+            if (!$existing || (int)$existing['version_number'] !== $expectedVersion) {
+                $db->rollBack();
+                sendResponse(409, [], 'The submitted evaluation changed. Refresh before revising it.');
+            }
+            $evalId = $existing['id'];
+            $previousScoresStmt = $db->prepare('SELECT criterion_id, criterion_name, weight_percentage, max_score, score, weighted_score, remarks FROM evaluation_scores WHERE evaluation_id = :id ORDER BY criterion_id FOR UPDATE');
+            $previousScoresStmt->execute([':id' => $evalId]);
+            $previousSnapshot = json_encode(['version' => (int)$existing['version_number'], 'total_raw_score' => $existing['total_raw_score'], 'weighted_percentage' => $existing['weighted_percentage'], 'general_remarks' => $existing['general_remarks'], 'submitted_at' => $existing['submitted_at'], 'scores' => $previousScoresStmt->fetchAll()], JSON_THROW_ON_ERROR);
+            $nextVersion = (int)$existing['version_number'] + 1;
+        }
 
-        $existingStmt = $db->prepare("SELECT id FROM evaluations WHERE application_id = :application_id AND evaluator_id = :evaluator_id");
-        $existingStmt->execute([
-            ':application_id' => $appId,
-            ':evaluator_id' => $evaluatorId,
-        ]);
-        $existingIds = $existingStmt->fetchAll(PDO::FETCH_COLUMN);
-
-        foreach ($existingIds as $existingId) {
-            $db->prepare("DELETE FROM evaluation_scores WHERE evaluation_id = :evaluation_id")->execute([':evaluation_id' => $existingId]);
-            $db->prepare("DELETE FROM evaluations WHERE id = :evaluation_id")->execute([':evaluation_id' => $existingId]);
+        if (!$isRevision) {
+            $existingStmt = $db->prepare('SELECT id FROM evaluations WHERE application_id = :application_id AND evaluator_id = :evaluator_id');
+            $existingStmt->execute([':application_id' => $appId, ':evaluator_id' => $evaluatorId]);
+            foreach ($existingStmt->fetchAll(PDO::FETCH_COLUMN) as $existingId) {
+                $db->prepare('DELETE FROM evaluation_scores WHERE evaluation_id = :evaluation_id')->execute([':evaluation_id' => $existingId]);
+                $db->prepare('DELETE FROM evaluations WHERE id = :evaluation_id')->execute([':evaluation_id' => $existingId]);
+            }
         }
 
         $rawTotal = 0.0;
@@ -181,7 +201,12 @@ if ($method === 'POST') {
             $weightedTotal += $weighted;
         }
 
-        $stmtEval = $db->prepare("
+        if ($isRevision) {
+            $db->prepare('UPDATE evaluations SET total_raw_score = :raw, weighted_percentage = :weighted, general_remarks = :remarks, version_number = :version, submitted_at = NOW() WHERE id = :id')
+                ->execute([':raw' => round($rawTotal, 2), ':weighted' => round($weightedTotal, 2), ':remarks' => $generalRemarks, ':version' => $nextVersion, ':id' => $evalId]);
+            $db->prepare('DELETE FROM evaluation_scores WHERE evaluation_id = :id')->execute([':id' => $evalId]);
+        } else {
+            $stmtEval = $db->prepare("
             INSERT INTO evaluations (
                 id, application_id, evaluator_id, evaluator_name, evaluator_office,
                 total_raw_score, weighted_percentage, general_remarks, is_submitted, submitted_at
@@ -190,16 +215,17 @@ if ($method === 'POST') {
                 :total_raw_score, :weighted_percentage, :general_remarks, 1, NOW()
             )
         ");
-        $stmtEval->execute([
-            ':id' => $evalId,
-            ':application_id' => $appId,
-            ':evaluator_id' => $evaluatorId,
-            ':evaluator_name' => $evaluatorName,
-            ':evaluator_office' => $evaluatorOffice,
-            ':total_raw_score' => round($rawTotal, 2),
-            ':weighted_percentage' => round($weightedTotal, 2),
-            ':general_remarks' => $generalRemarks,
-        ]);
+            $stmtEval->execute([
+                ':id' => $evalId,
+                ':application_id' => $appId,
+                ':evaluator_id' => $evaluatorId,
+                ':evaluator_name' => $evaluatorName,
+                ':evaluator_office' => $evaluatorOffice,
+                ':total_raw_score' => round($rawTotal, 2),
+                ':weighted_percentage' => round($weightedTotal, 2),
+                ':general_remarks' => $generalRemarks,
+            ]);
+        }
 
         $stmtScore = $db->prepare("
             INSERT INTO evaluation_scores (
@@ -227,11 +253,16 @@ if ($method === 'POST') {
                 ':remarks' => $score['remarks'] ?? ($score['evaluator_remarks'] ?? ''),
             ]);
         }
-
-        if ($assignments) {
-            $db->prepare("UPDATE application_evaluator_assignments SET status = 'Completed', completed_at = NOW() WHERE application_id = :app_id AND evaluator_id = :evaluator_id")
-                ->execute([':app_id' => $appId, ':evaluator_id' => $evaluatorId]);
+        if ($isRevision) {
+            $newSnapshotStmt = $db->prepare('SELECT criterion_id, criterion_name, weight_percentage, max_score, score, weighted_score, remarks FROM evaluation_scores WHERE evaluation_id = :id ORDER BY criterion_id');
+            $newSnapshotStmt->execute([':id' => $evalId]);
+            $newSnapshot = json_encode(['version' => $nextVersion, 'total_raw_score' => round($rawTotal, 2), 'weighted_percentage' => round($weightedTotal, 2), 'general_remarks' => $generalRemarks, 'scores' => $newSnapshotStmt->fetchAll()], JSON_THROW_ON_ERROR);
+            $db->prepare('INSERT INTO evaluation_revision_history (id, application_id, evaluation_id, evaluator_id, revision_number, reason, previous_snapshot, new_snapshot) VALUES (:id, :app_id, :eval_id, :evaluator_id, :version, :reason, :previous, :new)')
+                ->execute([':id' => 'rev-' . bin2hex(random_bytes(16)), ':app_id' => $appId, ':eval_id' => $evalId, ':evaluator_id' => $evaluatorId, ':version' => $nextVersion, ':reason' => $revisionReason, ':previous' => $previousSnapshot, ':new' => $newSnapshot]);
         }
+
+        if (!$isRevision) $db->prepare("UPDATE application_evaluator_assignments SET status = 'Completed', completed_at = NOW() WHERE application_id = :app_id AND evaluator_id = :evaluator_id")
+            ->execute([':app_id' => $appId, ':evaluator_id' => $evaluatorId]);
 
         $avgStmt = $db->prepare("
             SELECT evaluator_id, weighted_percentage
@@ -254,9 +285,9 @@ if ($method === 'POST') {
         $isCompleted = $assignedCount > 0 && $evaluationCount === $assignedCount;
         $averageScore = $evaluationCount > 0 ? round(array_sum($submittedScores) / $evaluationCount, 2) : null;
         $newStatus = $isCompleted ? 'Evaluation Completed' : 'Under Evaluation';
-        $newStage = $isCompleted ? 'Deliberation' : 'Evaluation';
+        $newStage = 'Evaluation';
         $requiredAction = $isCompleted
-            ? 'All assigned evaluators have submitted. Ready for PRAISE Committee deliberation.'
+            ? 'All assigned evaluators have submitted. Ready to start PRAISE Committee deliberation.'
             : "Evaluator assessment in progress. {$evaluationCount} of {$assignedCount} evaluations submitted.";
 
         $db->prepare("
@@ -283,13 +314,13 @@ if ($method === 'POST') {
             ':user_id' => $actor['id'],
             ':user_name' => $evaluatorName,
             ':user_role' => $actor['role'],
-            ':action' => 'Evaluator Submitted Assessment',
+            ':action' => $isRevision ? 'Evaluation Revised' : 'Evaluator Submitted Assessment',
             ':previous_status' => $lockedApplication['status'],
             ':new_status' => $newStatus,
-            ':remarks' => 'Weighted score: ' . round($weightedTotal, 2) . '%. ' . $generalRemarks,
+            ':remarks' => $isRevision ? 'Submitted evaluation version ' . $nextVersion . '. Reason: ' . $revisionReason : 'Weighted score: ' . round($weightedTotal, 2) . '%. ' . $generalRemarks,
         ]);
 
-        if ($isCompleted) {
+        if ($isCompleted && !$isRevision) {
             $db->prepare("
                 INSERT INTO application_history (id, application_id, user_id, user_name, user_role, action, previous_status, new_status, remarks)
                 VALUES (:id, :application_id, NULL, 'System', 'SYSTEM', 'All Evaluations Completed', :previous_status, 'Evaluation Completed', :remarks)
@@ -299,16 +330,16 @@ if ($method === 'POST') {
                 ':previous_status' => $lockedApplication['status'],
                 ':remarks' => "{$evaluationCount} of {$assignedCount} assigned evaluators submitted their assessments. "
                     . 'Final consolidated evaluator score: ' . number_format($averageScore, 2, '.', '') . '%. '
-                    . 'Application automatically advanced to PRAISE Committee deliberation.',
+                    . 'Application is ready for PRAISE Committee deliberation.',
             ]);
         }
 
         $db->commit();
-        sendResponse(201, [
+        sendResponse($isRevision ? 200 : 201, [
             'average_score' => $averageScore,
             'weighted_percentage' => round($weightedTotal, 2),
             'status' => $newStatus,
-        ], 'Evaluation submitted successfully.');
+        ], $isRevision ? 'Revised evaluation submitted successfully.' : 'Evaluation submitted successfully.');
     } catch (Throwable $e) {
         $db->rollBack();
         sendInternalError($e, 'evaluations.php:submit', 'Failed to submit evaluation.');

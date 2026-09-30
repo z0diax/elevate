@@ -286,13 +286,13 @@ function handle_create_application(PDO $db, array $actor, array $data): void {
                 position_title, office_id, office_name, division_section, employment_category, contact_number, email,
                 barangay, nomination_type, nominator_id, nominator_name, nominator_position, nominating_office,
                 justification, accomplishments, supporting_narrative, date_of_nomination, status, processing_stage,
-                required_action, assigned_evaluators
+                required_action
             ) VALUES (
                 :id, :application_number, :award_id, :award_name, :award_year, :nominee_id, :nominee_name, :employee_id,
                 :position_title, :office_id, :office_name, :division_section, :employment_category, :contact_number, :email,
                 :barangay, :nomination_type, :nominator_id, :nominator_name, :nominator_position, :nominating_office,
                 :justification, :accomplishments, :supporting_narrative, :date_of_nomination, :status, :processing_stage,
-                :required_action, '[]'
+                :required_action
             )
         ");
 

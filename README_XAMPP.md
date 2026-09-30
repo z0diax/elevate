@@ -11,9 +11,10 @@ This project runs on XAMPP with:
 
 1. Copy the project to `C:\xampp\htdocs\tacloban-praise`
 2. Start Apache and MySQL from the XAMPP control panel
+   - In the project's Apache `<Directory>` block, set `SetEnv APP_ENV development`, then restart Apache. PHP does not read `.env.example` automatically. Use `production` only with the production HTTPS, database, and storage settings configured.
 3. Run `npm install`
 4. Run `npm run build`
-5. Run `C:\xampp\php\php.exe C:\xampp\htdocs\tacloban-praise\setup_db.php` locally
+5. For a fresh installation only, run `C:\xampp\php\php.exe C:\xampp\htdocs\tacloban-praise\setup_db.php` locally. This imports the canonical `database.sql`.
 6. Open `http://localhost/tacloban-praise/`
 7. Sign in with the bootstrap administrator account:
 
@@ -34,6 +35,30 @@ The built frontend and PHP API use the same origin; no CORS configuration is nee
 For a separately hosted frontend that must call PHP directly across origins, configure the Apache/PHP environment variable `CORS_ALLOWED_ORIGINS` as a comma-separated list of exact HTTP(S) origins, such as `http://localhost:3000,http://127.0.0.1:3000`. No origins are allowed by default. A direct cross-origin client must send credentials with its requests; the existing Vite frontend uses the proxy and needs no cookie-setting change. Restart Apache after changing its environment. Restricting CORS does not provide CSRF protection.
 
 ## Database config
+
+For an existing installation, back up the database and apply any pending SQL files in `database_migrations/` in filename order against `tacloban_praise_db` before opening the site. Include `20260929_remove_runtime_schema_repair.sql` when upgrading from a release that repaired document status or report settings during API requests. For example, use XAMPP's MySQL client from PowerShell:
+
+The controlled evaluator revision feature requires `20260929_evaluation_revisions.sql`. Apply it before deploying the matching PHP and frontend code. Existing submitted evaluations remain version 1; the migration does not rewrite their scores.
+
+```powershell
+Get-Content -Raw database_migrations/20260929_remove_runtime_schema_repair.sql | C:\xampp\mysql\bin\mysql.exe -u root tacloban_praise_db
+```
+
+Supply your configured MySQL credentials when they differ. Do not run `setup_db.php` or reimport `database.sql` on an existing database: the canonical file drops and recreates tables. Normal API requests assume the required migrations are already applied and do not change the database schema.
+
+### Evaluator assignment upgrade
+
+Before deploying code that uses only `application_evaluator_assignments`, apply `20260925_award_evaluation_routing.sql` if it is pending. Back up the database, stop writes from Apache, then run the CLI audit and backfill with the same `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and `DB_PASS` configuration used by the application:
+
+```powershell
+C:\xampp\php\php.exe database_migrations\20260929_backfill_legacy_evaluator_assignments.php --audit
+C:\xampp\php\php.exe database_migrations\20260929_backfill_legacy_evaluator_assignments.php --apply
+C:\xampp\php\php.exe database_migrations\20260929_backfill_legacy_evaluator_assignments.php --verify
+```
+
+The audit reports application IDs/numbers and issue codes, without employee names. Category A has no assignments; B already matches; C is legacy-only and can be backfilled; D has partial relational rows; E has invalid or uncertain legacy data; F disagrees with relational history. `--apply` adds only safe category C rows and can be rerun. It preserves evaluator order, uses submitted evaluations to mark completed assignments, and leaves historical `route_id` null when the original route is unknown. It never changes existing relational rows or evaluation results. Review D, E, and F manually using the database backup and history. `--verify` exits with code 2 while any C, D, E, or F records remain. Resolve every review item and rerun verification before serving the new code; otherwise affected evaluators may lose access because runtime fallback is gone.
+
+The legacy `applications.assigned_evaluators` column remains in the database for this staged upgrade. Do not drop it until all installations have completed audit, backfill, and manual review and a later column-removal migration is supplied. Fresh installations use `database.sql`; they do not need the backfill script.
 
 If your MySQL credentials differ from the XAMPP defaults, edit `api/config/database.php`.
 
@@ -62,6 +87,6 @@ Keep `uploads/.htaccess` and allow Apache directory overrides: it denies direct 
 
 For an existing XAMPP database, run `database_migrations/20260925_award_evaluation_routing.sql` once against `tacloban_praise_db`. The migration adds award routes, route members, and nomination assignment snapshots. A fresh command-line setup already includes these tables.
 
-After upgrading, an Administrator must configure **Evaluation Routing** for each award in Awards Management before Secretariat can forward a verified nomination. Existing nominations with only `assigned_evaluators` JSON continue to use that legacy panel; newly routed nominations use `application_evaluator_assignments` as their assignment source. Editing a route affects future nominations only.
+After upgrading, an Administrator must configure **Evaluation Routing** for each award in Awards Management before Secretariat can forward a verified nomination. Run the legacy assignment audit and backfill above before deploying the relational-only API. Existing nomination assignments remain snapshots; editing an award route affects future nominations only.
 
-Pending evaluator reassignment is not yet available in the interface. If an assigned evaluator becomes inactive after routing, restore their account access while the nomination is evaluated or add an Administrator reassignment action in a future update.
+An Administrator can reassign an eligible pending or in-progress evaluator from the nomination view. Reassignment keeps the old relational row as history.

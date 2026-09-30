@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { Application, ApplicationEvaluatorAssignment, Evaluation } from '../src/types';
+import { Application, ApplicationEvaluatorAssignment } from '../src/types';
 import {
   getAssignedEvaluatorIds,
   getEvaluatorAssignmentStatus,
@@ -23,10 +23,8 @@ function assignment(evaluatorId: string, status: ApplicationEvaluatorAssignment[
 
 function nomination(
   assignments: ApplicationEvaluatorAssignment[] | undefined,
-  legacyIds: string[] = [],
-  evaluations: Evaluation[] = [],
 ): Application {
-  return { evaluator_assignments: assignments, assigned_evaluators: legacyIds, evaluations } as Application;
+  return { evaluator_assignments: assignments } as Application;
 }
 
 test('a single pending evaluator is assigned and others are not', () => {
@@ -47,8 +45,8 @@ test('multiple statuses count three active assignments and one completion', () =
   assert.equal(getEvaluatorAssignmentStatus(app, 'B'), 'In Progress');
 });
 
-test('reassigned evaluators are excluded even when the legacy list still contains them', () => {
-  const app = nomination([assignment('A', 'Reassigned'), assignment('B', 'Pending')], ['A', 'B']);
+test('reassigned evaluators are excluded from active access and progress', () => {
+  const app = nomination([assignment('A', 'Reassigned'), assignment('B', 'Pending')]);
   assert.equal(isAssignedEvaluator(app, 'A'), false);
   assert.equal(isAssignedEvaluator(app, 'B'), true);
   assert.deepEqual(getEvaluatorProgress(app), { assignedCount: 1, completedCount: 0 });
@@ -61,13 +59,18 @@ test('existing nomination assignments remain the snapshot after the award route 
   assert.equal(currentAwardRoute.some(id => isAssignedEvaluator(app, id)), false);
 });
 
-test('legacy fallback applies only when assignment records are unavailable', () => {
-  const legacyEvaluation = { evaluator_id: 'A', is_submitted: true } as Evaluation;
-  const legacy = nomination(undefined, ['A'], [legacyEvaluation]);
-  assert.equal(isAssignedEvaluator(legacy, 'A'), true);
-  assert.deepEqual(getEvaluatorProgress(legacy), { assignedCount: 1, completedCount: 1 });
+test('missing relational assignments do not grant evaluator access', () => {
+  const app = nomination(undefined);
+  assert.equal(isAssignedEvaluator(app, 'A'), false);
+  assert.deepEqual(getEvaluatorProgress(app), { assignedCount: 0, completedCount: 0 });
+});
 
-  const emptyAssignments = nomination([], ['A'], [legacyEvaluation]);
-  assert.equal(isAssignedEvaluator(emptyAssignments, 'A'), false);
-  assert.deepEqual(getEvaluatorProgress(emptyAssignments), { assignedCount: 0, completedCount: 0 });
+test('progress counts only active relational assignments', () => {
+  const app = nomination([
+    assignment('A', 'Completed'), assignment('B', 'Completed'),
+    assignment('C', 'Reassigned'), assignment('D', 'Pending'),
+  ]);
+  assert.deepEqual(getEvaluatorProgress(app), { assignedCount: 3, completedCount: 2 });
+  app.evaluator_assignments![3].status = 'Completed';
+  assert.deepEqual(getEvaluatorProgress(app), { assignedCount: 3, completedCount: 3 });
 });

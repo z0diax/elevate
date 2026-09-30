@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/runtime.php';
 /**
  * City Government of Tacloban - PRAISE Management System
  * Database Connection Helper (PDO MySQL / MariaDB for XAMPP)
@@ -13,8 +14,18 @@ class Database {
     private $port = "3306";
     public $conn;
 
-    public function __construct() {
-        // Read environment variables if available
+    public function __construct(bool $migrationCredentials = false) {
+        // XAMPP defaults are available only in explicit development mode.
+        if (app_environment() === 'production') {
+            foreach (['DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER', 'DB_PASS'] as $name) {
+                if (trim((string)(getenv($name) ?: '')) === '') {
+                    throw new RuntimeException('Production database configuration is incomplete.');
+                }
+            }
+            if (!$migrationCredentials && strtolower(trim((string)getenv('DB_USER'))) === 'root') {
+                throw new RuntimeException('The runtime database account must not be root.');
+            }
+        }
         if (getenv('DB_HOST')) $this->host = getenv('DB_HOST');
         if (getenv('DB_NAME')) $this->db_name = getenv('DB_NAME');
         if (getenv('DB_USER')) $this->username = getenv('DB_USER');

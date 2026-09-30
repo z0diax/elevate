@@ -17,8 +17,10 @@ DROP TABLE IF EXISTS `application_evaluator_assignments`;
 DROP TABLE IF EXISTS `award_route_evaluators`;
 DROP TABLE IF EXISTS `award_evaluation_routes`;
 DROP TABLE IF EXISTS `notifications`;
+DROP TABLE IF EXISTS `login_throttle`;
 DROP TABLE IF EXISTS `application_history`;
 DROP TABLE IF EXISTS `evaluation_scores`;
+DROP TABLE IF EXISTS `evaluation_revision_history`;
 DROP TABLE IF EXISTS `evaluations`;
 DROP TABLE IF EXISTS `endorsements`;
 DROP TABLE IF EXISTS `application_documents`;
@@ -63,6 +65,15 @@ CREATE TABLE `profiles` (
   PRIMARY KEY (`id`),
   KEY `idx_profiles_role` (`role`),
   KEY `idx_profiles_office` (`office_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `login_throttle` (
+  `email_hash` CHAR(64) NOT NULL PRIMARY KEY,
+  `failed_count` INT NOT NULL DEFAULT 0,
+  `window_started_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `blocked_until` DATETIME DEFAULT NULL,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY `idx_login_throttle_updated` (`updated_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `awards` (
@@ -209,6 +220,7 @@ CREATE TABLE `evaluations` (
   `weighted_percentage` DECIMAL(5,2) NOT NULL DEFAULT 0.00,
   `general_remarks` TEXT DEFAULT NULL,
   `is_submitted` TINYINT(1) NOT NULL DEFAULT 0,
+  `version_number` INT NOT NULL DEFAULT 1,
   `submitted_at` DATETIME DEFAULT NULL,
   `reopened_at` DATETIME DEFAULT NULL,
   `reopened_by` VARCHAR(255) DEFAULT NULL,
@@ -237,6 +249,22 @@ CREATE TABLE `evaluation_scores` (
   KEY `idx_evaluation_scores_eval` (`evaluation_id`),
   CONSTRAINT `fk_evaluation_scores_evaluation`
     FOREIGN KEY (`evaluation_id`) REFERENCES `evaluations` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `evaluation_revision_history` (
+  `id` VARCHAR(64) NOT NULL PRIMARY KEY,
+  `application_id` VARCHAR(64) NOT NULL,
+  `evaluation_id` VARCHAR(64) NOT NULL,
+  `evaluator_id` VARCHAR(64) NOT NULL,
+  `revision_number` INT NOT NULL,
+  `reason` VARCHAR(500) NOT NULL,
+  `previous_snapshot` JSON NOT NULL,
+  `new_snapshot` JSON NOT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uq_evaluation_revision` (`evaluation_id`, `revision_number`),
+  KEY `idx_revision_application` (`application_id`),
+  CONSTRAINT `fk_revision_evaluation` FOREIGN KEY (`evaluation_id`) REFERENCES `evaluations` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_revision_application` FOREIGN KEY (`application_id`) REFERENCES `applications` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `application_history` (

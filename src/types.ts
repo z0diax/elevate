@@ -163,6 +163,11 @@ export interface Application {
   nominator_name: string;
   nominator_position: string;
   nominating_office: string;
+  nominating_office_id?: string;
+  nomination_origin?: 'Self-Nominated' | 'Nominated by Others';
+  submission_account_name?: string;
+  submission_account_role?: UserRole;
+  signature_signed_at?: string;
   justification: string;
   accomplishments: string;
   supporting_narrative: string;

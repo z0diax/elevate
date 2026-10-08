@@ -18,7 +18,7 @@ function handle_finalize_submission(PDO $db, array $actor, array $data, string $
 
     $db->beginTransaction();
     try {
-        $lockStmt = $db->prepare('SELECT status, nominator_id, award_id, office_name, nominee_name, application_number FROM applications WHERE id = :id FOR UPDATE');
+        $lockStmt = $db->prepare('SELECT * FROM applications WHERE id = :id FOR UPDATE');
         $lockStmt->execute([':id' => $appId]);
         $locked = $lockStmt->fetch();
         if (!$locked || (string)$locked['nominator_id'] !== (string)$actor['id']) {
@@ -63,9 +63,40 @@ function handle_finalize_submission(PDO $db, array $actor, array $data, string $
             }
         }
 
-        $db->prepare("UPDATE applications SET status = 'For Endorsement', processing_stage = 'Endorsement', required_action = :required_action WHERE id = :id")
+        if (($data['signature_confirmed'] ?? null) !== true) {
+            $db->rollBack();
+            sendResponse(400, [], 'Confirm that you are signing personally as the authenticated nominator.');
+        }
+        try {
+            $strokes = validate_signature_strokes($data['signature_strokes'] ?? null);
+        } catch (InvalidArgumentException $error) {
+            $db->rollBack();
+            sendResponse(400, [], $error->getMessage());
+        }
+        // Keep exactly what was signed, including attachment content digests.
+        $documentSnapshot = [];
+        $snapshotDocs = $db->prepare('SELECT id, requirement_id, document_name, file_url FROM application_documents WHERE application_id = ? ORDER BY id');
+        $snapshotDocs->execute([$appId]);
+        foreach ($snapshotDocs->fetchAll() as $document) {
+            $path = document_storage_path((string)$document['file_url']);
+            $documentSnapshot[] = ['id' => $document['id'], 'requirement_id' => $document['requirement_id'], 'name' => $document['document_name'], 'sha256' => $path && is_file($path) ? hash_file('sha256', $path) : null];
+        }
+        $locked['documents'] = $documentSnapshot;
+        $locked['submission_account_name'] = $actor['full_name'];
+        $locked['submission_account_role'] = $actor['role'];
+        $locked['signing_account'] = ['id' => $actor['id'], 'name' => $actor['full_name'], 'role' => $actor['role']];
+        $strokeJson = json_encode($strokes, JSON_THROW_ON_ERROR);
+        $snapshotJson = json_encode($locked, JSON_THROW_ON_ERROR);
+        $digest = nomination_signature_digest($strokeJson, $snapshotJson);
+        $db->prepare('INSERT INTO nomination_signatures (application_id, account_id, strokes, signed_snapshot, sha256) VALUES (?, ?, ?, ?, ?)')
+            ->execute([$appId, $actor['id'], $strokeJson, $snapshotJson, $digest]);
+        addHistory($db, $appId, $actor, 'Nomination Signed', 'Draft', 'Draft', 'Personal signing confirmation recorded. SHA-256: ' . $digest);
+
+        $db->prepare("UPDATE applications SET status = 'For Endorsement', processing_stage = 'Endorsement', required_action = :required_action, submission_account_name = :account_name, submission_account_role = :account_role WHERE id = :id")
             ->execute([
                 ':required_action' => 'Awaiting endorsement from ' . $locked['office_name'],
+                ':account_name' => $actor['full_name'],
+                ':account_role' => $actor['role'],
                 ':id' => $appId,
             ]);
         addHistory($db, $appId, $actor, 'Nomination Submitted', 'Draft', 'For Endorsement',
@@ -202,11 +233,11 @@ function handle_return_for_revision(PDO $db, array $actor, array $data, string $
         sendInternalError($e, 'applications.php:return_for_revision', 'Failed to return application for revision.');
     }
 
-    sendResponse(200, getFullApplication($db, $appId), 'Application returned for revision.');
+    sendResponse(200, redact_nominator_for_evaluator(getFullApplication($db, $appId), $actor), 'Application returned for revision.');
 }
 
 function validate_application_create_data(PDO $db, array $actor, array $data): array {
-    requireFields($data, ['award_id', 'award_year', 'nominee_id', 'nominee_name', 'employee_id', 'position_title', 'office_id', 'division_section', 'employment_category', 'contact_number', 'email', 'barangay', 'nomination_type', 'justification', 'accomplishments', 'supporting_narrative', 'date_of_nomination', 'submission_id', 'documents']);
+    requireFields($data, ['award_id', 'award_year', 'nominee_id', 'nominee_name', 'employee_id', 'position_title', 'office_id', 'division_section', 'employment_category', 'contact_number', 'email', 'barangay', 'nomination_type', 'justification', 'accomplishments', 'supporting_narrative', 'date_of_nomination', 'submission_id', 'documents', 'nominator_name', 'nominator_position', 'nominating_office_id', 'self_nomination']);
 
     if (empty($data['award_id']) || empty($data['nominee_name']) || empty($data['office_id'])) {
         sendResponse(400, [], 'Missing required fields: award_id, nominee_name, office_id.');
@@ -231,7 +262,22 @@ function validate_application_create_data(PDO $db, array $actor, array $data): a
     $officeName = $officeStmt->fetchColumn();
     if ($officeName === false) sendResponse(400, [], 'Office not found.');
     $data['office_name'] = $officeName;
-    if (!empty($data['nominee_id']) && $actor['role'] !== 'NOMINEE') {
+    $data['nominator_name'] = trim(requireText($data['nominator_name'] ?? '', 'nominator name', 255, true));
+    $data['nominator_position'] = trim(requireText($data['nominator_position'] ?? '', 'nominator position', 255));
+    $data['nominating_office_id'] = requireId($data['nominating_office_id'] ?? null, 'nominator office ID');
+    $officeStmt->execute([':id' => $data['nominating_office_id']]);
+    $data['nominating_office'] = $officeStmt->fetchColumn();
+    if ($data['nominating_office'] === false) sendResponse(400, [], 'Nominator office is inactive or not found.');
+    foreach (['position_title', 'contact_number', 'email', 'justification', 'accomplishments', 'supporting_narrative'] as $required) {
+        requireText($data[$required] ?? '', $required, 65535, true);
+    }
+    $self = requireBool($data['self_nomination'] ?? false, 'self_nomination');
+    if ($self && ($data['nomination_type'] ?? 'Individual') !== 'Individual') sendResponse(400, [], 'Self-nomination requires an individual nominee.');
+    if ($self && !empty($data['nominee_id']) && $data['nominee_id'] !== $actor['id']) sendResponse(400, [], 'Self-nomination must reference your own account.');
+    $data['nominee_id'] = $self ? $actor['id'] : ($data['nominee_id'] ?? null);
+    if (!$self && $data['nominee_id'] === $actor['id']) sendResponse(400, [], 'Confirm self-nomination when nominating yourself.');
+    $data['nomination_origin'] = $self ? 'Self-Nominated' : 'Nominated by Others';
+    if (!empty($data['nominee_id'])) {
         $nomineeStmt = $db->prepare('SELECT full_name FROM profiles WHERE id = :id AND is_active = 1');
         $nomineeStmt->execute([':id' => $data['nominee_id']]);
         $nomineeName = $nomineeStmt->fetchColumn();
@@ -285,12 +331,14 @@ function handle_create_application(PDO $db, array $actor, array $data): void {
                 id, application_number, award_id, award_name, award_year, nominee_id, nominee_name, employee_id,
                 position_title, office_id, office_name, division_section, employment_category, contact_number, email,
                 barangay, nomination_type, nominator_id, nominator_name, nominator_position, nominating_office,
+                nominating_office_id, nomination_origin, submission_account_name, submission_account_role,
                 justification, accomplishments, supporting_narrative, date_of_nomination, status, processing_stage,
                 required_action
             ) VALUES (
                 :id, :application_number, :award_id, :award_name, :award_year, :nominee_id, :nominee_name, :employee_id,
                 :position_title, :office_id, :office_name, :division_section, :employment_category, :contact_number, :email,
                 :barangay, :nomination_type, :nominator_id, :nominator_name, :nominator_position, :nominating_office,
+                :nominating_office_id, :nomination_origin, :submission_account_name, :submission_account_role,
                 :justification, :accomplishments, :supporting_narrative, :date_of_nomination, :status, :processing_stage,
                 :required_action
             )
@@ -303,7 +351,7 @@ function handle_create_application(PDO $db, array $actor, array $data): void {
             ':award_id' => $data['award_id'],
             ':award_name' => $awardName,
             ':award_year' => $year,
-            ':nominee_id' => $actor['role'] === 'NOMINEE' ? $actor['id'] : ($data['nominee_id'] ?? null),
+            ':nominee_id' => $data['nominee_id'],
             ':nominee_name' => $data['nominee_name'],
             ':employee_id' => $data['employee_id'] ?? null,
             ':position_title' => $data['position_title'] ?? 'Staff',
@@ -316,9 +364,13 @@ function handle_create_application(PDO $db, array $actor, array $data): void {
             ':barangay' => $data['barangay'] ?? null,
             ':nomination_type' => $data['nomination_type'] ?? 'Individual',
             ':nominator_id' => $actor['id'],
-            ':nominator_name' => $actor['full_name'],
-            ':nominator_position' => $actor['position_title'] ?? 'Nominator',
-            ':nominating_office' => $actor['office_name'] ?: $officeName,
+            ':nominator_name' => $data['nominator_name'],
+            ':nominator_position' => $data['nominator_position'],
+            ':nominating_office' => $data['nominating_office'],
+            ':nominating_office_id' => $data['nominating_office_id'],
+            ':nomination_origin' => $data['nomination_origin'],
+            ':submission_account_name' => $actor['full_name'],
+            ':submission_account_role' => $actor['role'],
             ':justification' => $data['justification'] ?? '',
             ':accomplishments' => $data['accomplishments'] ?? '',
             ':supporting_narrative' => $data['supporting_narrative'] ?? '',

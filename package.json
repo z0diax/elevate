@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "clean": "node -e \"const fs=require('fs'),path=require('path');const root=path.resolve(process.cwd()),target=path.join(root,'dist');if(path.dirname(target)!==root)throw Error('Invalid build path');fs.rmSync(target,{recursive:true,force:true});\"",
     "lint": "tsc --noEmit",
-    "test:unit": "php tests/api_validation.php && php tests/export_security.php && php tests/schema_management.php && php tests/legacy_assignment_backfill.php && php tests/evaluator_access.php && node --import tsx --test tests/evaluator_assignments.test.ts tests/api_client.test.ts",
+    "test:unit": "php tests/api_validation.php && php tests/nomination_signature.php && php tests/export_security.php && php tests/schema_management.php && php tests/legacy_assignment_backfill.php && php tests/evaluator_access.php && node --import tsx --test tests/evaluator_assignments.test.ts tests/api_client.test.ts",
+    "test:nomination-browser": "node tests/nomination_browser.mjs",
     "test:integration": "node tests/integration.mjs && php tests/evaluator_reassignment.php"
   },
   "dependencies": {

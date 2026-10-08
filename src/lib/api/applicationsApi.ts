@@ -22,6 +22,8 @@ type SubmitNominationPayload = {
   nominator_name: string;
   nominator_position: string;
   nominating_office: string;
+  nominating_office_id: string;
+  self_nomination: boolean;
   justification: string;
   accomplishments: string;
   supporting_narrative: string;
@@ -64,6 +66,9 @@ export function getStageFromStatus(status: ApplicationStatus): ProcessingStage {
 }
 
 export const applicationsApi = {
+  async getNominationSignature(appId: string): Promise<{ strokes: number[][][]; signed_at: string; sha256: string; signed_snapshot: Application }> {
+    return apiRequest(`applications.php?action=signature&id=${encodeURIComponent(appId)}`);
+  },
   async beginDeliberation(appId: string): Promise<Application> {
     const application = normalizeApplication(await apiRequest<any>(`applications.php?action=begin_deliberation&id=${encodeURIComponent(appId)}`, {
       method: 'PUT', body: JSON.stringify({}),
@@ -81,7 +86,7 @@ export const applicationsApi = {
   },
 
   async submitNomination(data: SubmitNominationPayload): Promise<Application> {
-    const { nominator_id: _nominatorId, nominator_name: _nominatorName, nominator_position: _nominatorPosition, nominating_office: _nominatingOffice, office_name: _officeName, ...payload } = data;
+    const { nominator_id: _nominatorId, nominating_office: _nominatingOffice, office_name: _officeName, ...payload } = data;
     const application = normalizeApplication(await apiRequest<any>('applications.php', {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -98,10 +103,10 @@ export const applicationsApi = {
     return application;
   },
 
-  async finalizeNomination(appId: string, expectedRequirementIds: string[]): Promise<Application> {
+  async finalizeNomination(appId: string, expectedRequirementIds: string[], signatureStrokes: number[][][], signatureConfirmed: boolean): Promise<Application> {
     const application = normalizeApplication(await apiRequest<any>(`applications.php?action=finalize_submission&id=${encodeURIComponent(appId)}`, {
       method: 'PUT',
-      body: JSON.stringify({ expected_requirement_ids: expectedRequirementIds }),
+      body: JSON.stringify({ expected_requirement_ids: expectedRequirementIds, signature_strokes: signatureStrokes, signature_confirmed: signatureConfirmed }),
     }));
     try {
       await loadApplications();

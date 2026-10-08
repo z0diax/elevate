@@ -19,7 +19,7 @@ $actor = require_auth($db);
 if ($method === 'GET') {
     if (isset($_GET['application_id'])) {
         $_GET['application_id'] = requireId($_GET['application_id'], 'application ID');
-        require_application_access($db, $actor, $_GET['application_id']);
+        $application = require_application_access($db, $actor, $_GET['application_id']);
         $stmt = $db->prepare("SELECT * FROM application_history WHERE application_id = :id ORDER BY created_at DESC");
         $stmt->execute([':id' => $_GET['application_id']]);
     } else {
@@ -32,6 +32,17 @@ if ($method === 'GET') {
             $stmt = $db->query("SELECT * FROM application_history ORDER BY created_at DESC LIMIT 200");
         }
     }
-    sendResponse(200, $stmt->fetchAll());
+    $logs = $stmt->fetchAll();
+    if ($actor['role'] === 'EVALUATOR') {
+        foreach ($logs as &$log) {
+            if ((string)$log['user_id'] === (string)$application['nominator_id']) {
+                $log['user_id'] = null;
+                $log['user_name'] = 'Nominator';
+                $log['user_role'] = 'SYSTEM';
+            }
+        }
+        unset($log);
+    }
+    sendResponse(200, $logs);
 }
 sendResponse(405, [], 'Method not allowed.');

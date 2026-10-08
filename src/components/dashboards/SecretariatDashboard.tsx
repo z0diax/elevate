@@ -1,3 +1,4 @@
+import { NominationIdentitySummary } from '../nomination/NominationIdentity';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Application, Award, AwardEvaluationRoute, UserProfile } from '../../types';
 import { StatusBadge } from '../common/StatusBadge';
@@ -222,7 +223,7 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
                     {workbenchApplications.map(application => (
                       <tr key={application.id} className="hover:bg-slate-50">
                         <td className="px-5 py-4 font-mono text-xs font-bold text-blue-600">{application.application_number}</td>
-                        <td className="px-5 py-4 font-semibold text-slate-900">{application.nominee_name}</td>
+                        <td className="px-5 py-4 font-semibold text-slate-900">{application.nominee_name}<NominationIdentitySummary application={application} /></td>
                         <td className="px-5 py-4 text-slate-600">{application.office_name}</td>
                         <td className="px-5 py-4 font-medium text-slate-700">{application.award_name}</td>
                         <td className="px-5 py-4 text-xs text-slate-600">{application.processing_stage}</td>

@@ -48,7 +48,8 @@ if ($mode === 'setup') {
     $db->beginTransaction();
     try {
         $office = $db->prepare('INSERT INTO offices (id, name, code, head_name, head_title) VALUES (?, ?, ?, ?, ?)');
-        foreach (['one', 'two'] as $suffix) $office->execute([$id('office-' . $suffix), 'Automated Test Office ' . $suffix, 'TEST' . $run . $suffix, 'Test Head', 'Head']);
+        foreach (['one', 'two', 'inactive'] as $suffix) $office->execute([$id('office-' . $suffix), 'Automated Test Office ' . $suffix, 'TEST' . $run . $suffix, 'Test Head', 'Head']);
+        $db->prepare('UPDATE offices SET is_active = 0 WHERE id = ?')->execute([$id('office-inactive')]);
         $users = ['admin' => 'ADMINISTRATOR', 'secretary' => 'SECRETARIAT', 'head' => 'HEAD_OF_OFFICE', 'other-head' => 'HEAD_OF_OFFICE', 'filer' => 'NOMINEE', 'other-filer' => 'NOMINEE', 'A' => 'EVALUATOR', 'B' => 'EVALUATOR', 'C' => 'EVALUATOR', 'D' => 'EVALUATOR', 'E' => 'EVALUATOR', 'F' => 'EVALUATOR', 'inactive' => 'EVALUATOR', 'password-change' => 'EVALUATOR'];
         $insert = $db->prepare('INSERT INTO profiles (id, email, full_name, role, office_id, office_name, password_hash, is_active, must_change_password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
         foreach ($users as $name => $role) {

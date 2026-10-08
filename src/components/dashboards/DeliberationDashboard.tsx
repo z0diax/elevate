@@ -1,3 +1,4 @@
+import { NominationIdentitySummary } from '../nomination/NominationIdentity';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Application, Award, UserProfile } from '../../types';
 import { StatusBadge } from '../common/StatusBadge';
@@ -262,7 +263,7 @@ export const DeliberationDashboard: React.FC<DeliberationDashboardProps> = ({
                           </span>
                         </td>
                         <td className="px-3.5 py-3">
-                          <p className="font-bold text-slate-900">{application.nominee_name}</p>
+                          <p className="font-bold text-slate-900">{application.nominee_name}</p><NominationIdentitySummary application={application} />
                           <p className="text-[11px] text-slate-500">{application.award_name}</p>
                         </td>
                         <td className="px-3.5 py-3 text-slate-600">{application.office_name}</td>

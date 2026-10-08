@@ -17,6 +17,7 @@ import {
   Download
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { SignaturePad, SignatureStrokes } from './SignaturePad';
 import { pdfGenerator } from '../../lib/pdfGenerator';
 import {
   clearNominationDraft,
@@ -69,8 +70,17 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
   onCancel,
   onSubmissionStateChange,
 }) => {
-  const restoredDraft = React.useMemo(() => readNominationDraft(currentUser.id), [currentUser.id]);
+  offices = offices.filter(office => office.is_active);
+  const restoredDraft = React.useMemo(() => {
+    const draft = readNominationDraft(currentUser.id);
+    const server = draft?.submissionId ? praiseService.getApplications().find(application => application.id === `app-${draft.submissionId}` && application.status === 'Draft') : undefined;
+    if (!draft || !server) return draft;
+    return { ...draft, selectedAwardId: server.award_id, nomineeName: server.nominee_name, employeeId: server.employee_id || '', positionTitle: server.position_title, officeId: server.office_id, divisionSection: server.division_section || '', employmentCategory: server.employment_category, contactNumber: server.contact_number, email: server.email, barangay: server.barangay || '', nominationType: server.nomination_type, nominatorName: server.nominator_name, nominatorPosition: server.nominator_position, nominatingOffice: server.nominating_office, nominatingOfficeId: server.nominating_office_id, selfNomination: server.nomination_origin === 'Self-Nominated', justification: server.justification, accomplishments: server.accomplishments, supportingNarrative: server.supporting_narrative };
+  }, [currentUser.id]);
   const [submissionId] = useState(() => restoredDraft?.submissionId || createSubmissionId());
+  const serverDraft = praiseService.getApplications().find(application => application.id === `app-${submissionId}` && application.status === 'Draft');
+  const legacyDraft = Boolean(serverDraft && !serverDraft.nomination_origin);
+
   const restoredAwardId = restoredDraft && awards.some(award => award.id === restoredDraft.selectedAwardId)
     ? restoredDraft.selectedAwardId
     : awards[0]?.id || '';
@@ -99,9 +109,15 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
   const [nominatorName, setNominatorName] = useState(restoredDraft?.nominatorName || currentUser.full_name);
   const [nominatorPosition, setNominatorPosition] = useState(restoredDraft?.nominatorPosition || currentUser.position_title || 'Nominator');
   const [nominatingOffice, setNominatingOffice] = useState(restoredDraft?.nominatingOffice || currentUser.office_name || 'City Government of Tacloban');
+  const [nominatingOfficeId, setNominatingOfficeId] = useState(restoredDraft?.nominatingOfficeId || currentUser.office_id || '');
+  const [selfNomination, setSelfNomination] = useState(restoredDraft?.selfNomination || false);
+  const [signatureStrokes, setSignatureStrokes] = useState<SignatureStrokes>([]);
+  const [signatureConfirmed, setSignatureConfirmed] = useState(false);
   const [justification, setJustification] = useState(restoredDraft?.justification || '');
   const [accomplishments, setAccomplishments] = useState(restoredDraft?.accomplishments || '');
   const [supportingNarrative, setSupportingNarrative] = useState(restoredDraft?.supportingNarrative || '');
+
+  const originLabel = legacyDraft ? 'Not recorded (historical nomination)' : selfNomination ? 'Self-Nominated' : 'Nominated by Others';
 
   // Uploaded Documents
   const [uploadedDocs, setUploadedDocs] = useState<UploadedRequirement[]>([]);
@@ -112,7 +128,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
   const [isRestoringFiles, setIsRestoringFiles] = useState(true);
   const [uploadProgress, setUploadProgress] = useState('');
   const submissionInProgress = useRef(false);
-  const createdApplicationRef = useRef<Application | null>(null);
+  const createdApplicationRef = useRef<Application | null>(serverDraft || null);
   const uploadedDocumentKeys = useRef(new Set<string>());
 
   const selectedAward = awards.find(a => a.id === selectedAwardId) || awards[0];
@@ -142,6 +158,8 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
       nominatorName,
       nominatorPosition,
       nominatingOffice,
+      nominatingOfficeId,
+      selfNomination,
       justification,
       accomplishments,
       supportingNarrative,
@@ -165,6 +183,8 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
     nomineeName,
     nominationType,
     nominatingOffice,
+    nominatingOfficeId,
+    selfNomination,
     nominatorName,
     nominatorPosition,
     officeId,
@@ -283,6 +303,10 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
 
   // Validation
   const validateStep1 = () => {
+    if (!nominatorName.trim()) return 'Nominator full name is required.';
+    if (!legacyDraft && !offices.some(office => office.id === nominatingOfficeId)) return 'Choose an active nominator office.';
+    if (!offices.some(office => office.id === officeId)) return 'Choose an active nominee office.';
+    if (selfNomination && nominationType !== 'Individual') return 'Self-nomination requires the Individual category.';
     if (!selectedAwardId) return 'Please select an award category.';
     if (!nomineeName.trim()) return 'Nominee full name is required.';
     if (!positionTitle.trim()) return 'Position / Designation is required.';
@@ -334,6 +358,9 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
 
   const handleSubmitNomination = async () => {
     if (submissionInProgress.current) return;
+    const formError = validateStep1() || validateStep2();
+    if (formError) { setErrorMessage(formError); return; }
+    if (!signatureConfirmed || !signatureStrokes.length) { setErrorMessage('Draw your signature and check box for confirmation.'); return; }
     const attachmentError = validateStep3();
     if (attachmentError) {
       setStep(3);
@@ -349,7 +376,8 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
       const createdApplication = createdApplicationRef.current || await praiseService.submitNomination({
         submission_id: submissionId,
         award_id: selectedAwardId,
-        nominee_id: currentUser.role === 'NOMINEE' ? currentUser.id : undefined,
+        nominee_id: selfNomination ? currentUser.id : undefined,
+        self_nomination: selfNomination,
         nominee_name: nomineeName.trim(),
         employee_id: employeeId.trim(),
         position_title: positionTitle.trim(),
@@ -361,7 +389,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
         email: email.trim(),
         barangay: barangay,
         nomination_type: nominationType,
-        nominator_id: currentUser.id,
+        nominating_office_id: nominatingOfficeId,
         nominator_name: nominatorName.trim() || currentUser.full_name,
         nominator_position: nominatorPosition.trim() || 'Nominator',
         nominating_office: nominatingOffice.trim() || selectedOfficeObj?.name || 'City Government of Tacloban',
@@ -391,7 +419,9 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
       setUploadProgress('Verifying all attachments...');
       const finalizedApplication = await praiseService.finalizeNomination(
         createdApplication.id,
-        selectedDocuments.map(document => document.requirement_id || document.requirement_name)
+        selectedDocuments.map(document => document.requirement_id || document.requirement_name),
+        signatureStrokes,
+        signatureConfirmed
       );
       await clearSavedDraft();
       setSubmittedApp(finalizedApplication);
@@ -534,7 +564,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
       <div className="p-6 md:p-8 space-y-6">
         {/* STEP 1: NOMINEE PROFILE & AWARD SELECTION */}
         {step === 1 && (
-          <div className="space-y-6">
+          <fieldset disabled={hasServerDraft || isSubmitting} className="space-y-6">
             <div>
               <label htmlFor="award-category-select" className="block text-xs font-bold text-slate-900 uppercase tracking-wider mb-2">
                 1. Select Award Category *
@@ -609,6 +639,21 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
 
             {/* Nominee Details Form */}
             <div className="pt-4 border-t border-slate-200">
+              <section className="mb-6 space-y-3 border-b border-slate-200 pb-6">
+                <h3 className="text-sm font-bold text-slate-900">Nominator Information</h3>
+                <p className="text-xs text-slate-600">Account used: {currentUser.full_name} ({currentUser.role}). Correct your displayed name as needed; you must sign personally.</p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="text-xs font-semibold">Full Name *<input required value={nominatorName} onChange={event => setNominatorName(event.target.value)} className="mt-1 w-full rounded-md border border-slate-300 bg-slate-50 p-2.5" /></label>
+                  {legacyDraft ? <label className="text-xs font-semibold">Office / Department<input readOnly value={nominatingOffice} className="mt-1 w-full rounded-md border border-slate-300 bg-slate-50 p-2.5" /></label> : <label className="text-xs font-semibold">Office / Department *<select required value={nominatingOfficeId} onChange={event => { setNominatingOfficeId(event.target.value); setNominatingOffice(offices.find(office => office.id === event.target.value)?.name || ''); }} className="mt-1 w-full rounded-md border border-slate-300 bg-slate-50 p-2.5"><option value="">Select office</option>{offices.map(office => <option key={office.id} value={office.id}>{office.name} ({office.code})</option>)}</select></label>}
+                  <label className="text-xs font-semibold">Position / Designation<input value={nominatorPosition} onChange={event => setNominatorPosition(event.target.value)} className="mt-1 w-full rounded-md border border-slate-300 bg-slate-50 p-2.5" /></label>
+                </div>
+                <label className="flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={selfNomination} onChange={event => {
+                  const self = event.target.checked; setSelfNomination(self);
+                  if (self) { setNomineeName(currentUser.full_name); setEmployeeId(currentUser.employee_id || ''); setPositionTitle(currentUser.position_title || ''); setOfficeId(currentUser.office_id || ''); setContactNumber(currentUser.contact_number || ''); setEmail(currentUser.email); setNominationType('Individual'); }
+                  else { setNomineeName(''); setEmployeeId(''); setPositionTitle(''); setOfficeId(''); setContactNumber(''); setEmail(''); }
+                }} />I am nominating myself using my own account</label>
+                <p className="text-xs text-slate-500">{originLabel}{!legacyDraft && !selfNomination && ': the nominee can be an individual without a PRAISE account.'}</p>
+              </section>
               <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
                 <User size={16} className="text-blue-600" />
                 <span>Nominee Information</span>
@@ -623,6 +668,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
                     type="text"
                     required
                     placeholder="e.g. Juan P. Dela Cruz"
+                    disabled={selfNomination}
                     value={nomineeName}
                     onChange={e => setNomineeName(e.target.value)}
                     className="w-full text-xs p-2.5 rounded-md border border-slate-300 bg-slate-50 text-slate-900 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
@@ -665,6 +711,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
                     onChange={e => setOfficeId(e.target.value)}
                     className="w-full text-xs p-2.5 rounded-md border border-slate-300 bg-slate-50 text-slate-900 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
                   >
+                    <option value="">Select office</option>
                     {offices.map(off => (
                       <option key={off.id} value={off.id}>{off.name} ({off.code})</option>
                     ))}
@@ -744,12 +791,12 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
                 </div>
               </div>
             </div>
-          </div>
+          </fieldset>
         )}
 
         {/* STEP 2: JUSTIFICATION & ACCOMPLISHMENTS */}
         {step === 2 && (
-          <div className="space-y-5">
+          <fieldset disabled={hasServerDraft || isSubmitting} className="space-y-5">
             <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
               <FileText size={16} className="text-blue-600" />
               <span>Nomination Justification & Merits</span>
@@ -768,18 +815,6 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
                   <option value="Individual">Individual Category</option>
                   <option value="Group / Team">Group / Team Category</option>
                 </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Nominator Name
-                </label>
-                <input
-                  type="text"
-                  value={nominatorName}
-                  onChange={e => setNominatorName(e.target.value)}
-                  className="w-full text-xs p-2.5 rounded-md border border-slate-300 bg-slate-50 text-slate-900 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
-                />
               </div>
             </div>
 
@@ -824,7 +859,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
                 className="w-full text-xs p-3 rounded-md border border-slate-300 bg-slate-50 text-slate-900 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
               />
             </div>
-          </div>
+          </fieldset>
         )}
 
         {/* STEP 3: DOCUMENTARY REQUIREMENTS */}
@@ -927,6 +962,14 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
               </div>
             </div>
 
+            <div className="rounded-xl border border-slate-200 p-4 text-xs space-y-2">
+              <h3 className="text-sm font-bold">Nominator and electronic signature</h3>
+              <p>{nominatorName} / {nominatorPosition} / {legacyDraft ? nominatingOffice : offices.find(office => office.id === nominatingOfficeId)?.name}</p>
+              <p>Classification: {originLabel}</p>
+              <p>Account used: {currentUser.full_name} ({currentUser.role})</p>
+              <SignaturePad value={signatureStrokes} disabled={isSubmitting} onChange={strokes => { setSignatureStrokes(strokes); setSignatureConfirmed(false); setErrorMessage(''); }} />
+              <label className="flex items-start gap-2 leading-5"><input type="checkbox" checked={signatureConfirmed} disabled={isSubmitting} onChange={event => { setSignatureConfirmed(event.target.checked); setErrorMessage(''); }} />I hereby confirm that the signature provided is my own and has been affixed with my full knowledge and consent.</label>
+            </div>
             <div className="p-4 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-900">
               <p className="font-bold">Affirmation of Truthfulness:</p>
               <p className="mt-1">

@@ -1,3 +1,4 @@
+import { NominationIdentitySummary } from '../nomination/NominationIdentity';
 import React, { useMemo, useState } from 'react';
 import { Application, Award, UserProfile } from '../../types';
 import { FolderOpen, Plus } from 'lucide-react';
@@ -83,7 +84,7 @@ export const NomineeDashboard: React.FC<NomineeDashboardProps> = ({
                   <tbody className="divide-y divide-slate-100">
                     {myApplications.map(application => (
                       <tr key={application.id} className="hover:bg-slate-50">
-                        <td className="px-5 py-4 font-semibold text-slate-900"><button type="button" onClick={() => setTrackingAppId(application.id)} className="break-words text-left text-blue-700 hover:underline focus-visible:outline-2 focus-visible:outline-blue-600" aria-label={'View nomination for ' + application.nominee_name}>{application.nominee_name}</button></td>
+                        <td className="px-5 py-4 font-semibold text-slate-900"><button type="button" onClick={() => setTrackingAppId(application.id)} className="break-words text-left text-blue-700 hover:underline focus-visible:outline-2 focus-visible:outline-blue-600" aria-label={'View nomination for ' + application.nominee_name}>{application.nominee_name}</button><NominationIdentitySummary application={application} /></td>
                         <td className="px-5 py-4 text-slate-600">{application.office_name}</td>
                         <td className="px-5 py-4 font-medium text-slate-700">{application.award_name}</td>
                         <td className="px-5 py-4">

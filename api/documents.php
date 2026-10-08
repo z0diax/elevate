@@ -214,6 +214,20 @@ if ($method === 'POST') {
     $oldFileUrl = null;
     try {
         $db->beginTransaction();
+        // Serialize uploads with signing. A request that began while the form was
+        // a draft must not replace an attachment after finalization commits.
+        $lockedApplication = $db->prepare('SELECT nominator_id, status, award_id FROM applications WHERE id = :id FOR UPDATE');
+        $lockedApplication->execute([':id' => $applicationId]);
+        $application = $lockedApplication->fetch();
+        if (!$application || (string)$application['nominator_id'] !== (string)$actor['id']) {
+            $db->rollBack();
+            sendResponse(403, [], 'Only the original filer can upload or replace nomination documents.');
+        }
+        if (!in_array($application['status'], ['Draft', 'Returned for Revision', 'Incomplete'], true)) {
+            $db->rollBack();
+            sendResponse(409, [], 'Attachments can only be uploaded before submission or during a requested revision.');
+        }
+        $documentStatus = $documentId !== '' && $application['status'] !== 'Draft' ? 'For Verification' : 'Submitted';
         if ($documentId !== '') {
             $oldStmt = $db->prepare('SELECT file_url, requirement_id FROM application_documents WHERE id = :id AND application_id = :application_id FOR UPDATE');
             $oldStmt->execute([':id' => $documentId, ':application_id' => $applicationId]);

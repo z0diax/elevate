@@ -79,12 +79,13 @@ async function login(name) {
   return user;
 }
 async function action(app, name, actor, data = {}) {
+  if (name === 'finalize_submission') data = { signature_strokes: [[[0.1, 0.2], [0.3, 0.6], [0.7, 0.3]]], signature_confirmed: true, ...data };
   return request(`/api/applications.php?action=${name}&id=${encodeURIComponent(app)}`, { method: 'PUT', actor, json: data });
 }
-async function createNomination(actor = 'filer') {
-  const body = { award_id: id('award-one'), office_id: id('office-one'), nominee_name: 'Synthetic Test Nominee',
+async function createNomination(actor = 'filer', overrides = {}) {
+  const body = { nominator_name: 'Jack Doe', nominator_position: 'Staff', nominating_office_id: id('office-two'), self_nomination: false, position_title: 'Staff', contact_number: '09000000000', email: 'synthetic@example.invalid', award_id: id('award-one'), office_id: id('office-one'), nominee_name: 'Synthetic Test Nominee',
     justification: 'Synthetic test nomination', accomplishments: 'Synthetic test accomplishments',
-    supporting_narrative: 'Synthetic test narrative', submission_id: randomUUID() };
+    supporting_narrative: 'Synthetic test narrative', submission_id: randomUUID(), ...overrides };
   return expect(await request('/api/applications.php', { method: 'POST', actor, json: body }), 201, 'create nomination');
 }
 function makeForm(app, filename, bytes, requirement = id('requirement-one'), documentId = '') {
@@ -151,6 +152,22 @@ async function main() {
     await login('filer');
   });
   for (const name of ['admin', 'secretary', 'head', 'other-head', 'other-filer', 'A', 'B', 'C', 'D', 'E', 'F']) await login(name);
+  await test('self-registration still submits a signed nomination under the new account', async () => {
+    let registered, app;
+    try {
+      registered = expect(await request('/api/auth.php?action=register_nominee', { method: 'POST', actor: 'registered', json: { full_name: 'New Registered Nominator', email: `registered-${run}@example.invalid`, password } }), 201, 'registration');
+      sessions.set('registered', { ...sessions.get('registered'), csrf: registered.csrf_token });
+      assert.equal(registered.role, 'NOMINEE');
+      app = await createNomination('registered');
+      assert.equal(app.nominator_id, registered.id); assert.equal(app.nominee_id, null);
+      expect(await request('/api/documents.php', { method: 'POST', actor: 'registered', form: makeForm(app.id, 'registered.pdf', pdf) }), 201, 'registered upload');
+      const signed = expect(await action(app.id, 'finalize_submission', 'registered'), 200, 'registered signed submission');
+      assert.equal(signed.submission_account_name, 'New Registered Nominator');
+    } finally {
+      if (app) expect(await request(`/api/applications.php?id=${app.id}`, { method: 'DELETE', actor: 'admin', json: {} }), 200, 'delete registered nomination');
+      if (registered) expect(await request(`/api/auth.php?id=${registered.id}`, { method: 'DELETE', actor: 'admin', json: {} }), 200, 'delete synthetic registered account');
+    }
+  });
   await test('required password change permits only self-service update and logout', async () => {
     const account = await login('password-change');
     assert.equal(Boolean(account.must_change_password), true);
@@ -206,6 +223,27 @@ async function main() {
     expect(await action(first.id, 'finalize_submission', 'filer', { expected_requirement_ids: [id('requirement-one')] }), 409, 'missing attachment');
     expect(await action(first.id, 'assign_evaluators', 'secretary'), 409, 'draft routing');
   });
+  await test('nominator and nominee identities, self origin and account spoofing', async () => {
+    assert.equal(first.nominee_id, null);
+    assert.equal(first.nomination_origin, 'Nominated by Others');
+    assert.equal(first.nominator_name, 'Jack Doe');
+    assert.equal(first.submission_account_name, 'Automated Test filer');
+    assert.equal(first.submission_account_role, 'NOMINEE');
+    assert.equal(first.nominating_office_id, id('office-two'));
+    assert.equal(first.office_id, id('office-one'));
+    const self = await createNomination('filer', { self_nomination: true });
+    assert.equal(self.nominee_id, id('filer'));
+    assert.equal(self.nomination_origin, 'Self-Nominated');
+    assert.equal(self.nominee_name, 'Automated Test filer');
+    const linked = await createNomination('filer', { nominee_id: id('other-filer') });
+    assert.equal(linked.nominee_id, id('other-filer'));
+    assert.equal(linked.nomination_origin, 'Nominated by Others');
+    const valid = { award_id: id('award-one'), office_id: id('office-one'), nominee_name: 'Test', nominator_name: 'Jack', nominating_office_id: id('office-two') };
+    expect(await request('/api/applications.php', { method: 'POST', actor: 'filer', json: { ...valid, nominator_id: id('other-filer') } }), 400, 'spoof account');
+    expect(await request('/api/applications.php', { method: 'POST', actor: 'filer', json: { ...valid, nominating_office_id: 'missing-office' } }), 400, 'invalid nominator office');
+    expect(await request('/api/applications.php', { method: 'POST', actor: 'filer', json: { ...valid, nominating_office_id: id('office-inactive') } }), 400, 'inactive nominator office');
+    expect(await request('/api/applications.php', { method: 'POST', actor: 'filer', json: { ...valid, office_id: id('office-inactive') } }), 400, 'inactive nominee office');
+  });
   await test('upload validation rejects unsafe or unrelated documents', async () => {
     const variants = [
       ['bad.txt', pdf, 400], ['wrong.pdf', png, 400], ['fake.pdf', Buffer.from('%PDF-'), 400],
@@ -231,9 +269,26 @@ async function main() {
     assert.equal((await request(`/api/documents.php?action=download&id=${docId}&preview=1`, { actor: 'filer' })).headers.get('content-disposition')?.startsWith('inline'), true);
     assert.match(readFileSync(join(root, 'uploads', '.htaccess'), 'utf8'), /Require all denied/);
   });
+  await test('signing rejects missing, blank and unauthorized signatures', async () => {
+    expect(await action(first.id, 'finalize_submission', 'other-filer'), 403, 'unauthorized signing');
+    expect(await action(first.id, 'finalize_submission', 'filer', { signature_strokes: [] }), 400, 'empty signature');
+    expect(await action(first.id, 'finalize_submission', 'filer', { signature_strokes: [[[0.2, 0.2], [0.2, 0.2]]] }), 400, 'no actual stroke');
+    expect(await action(first.id, 'finalize_submission', 'filer', { signature_confirmed: false }), 400, 'confirmation required');
+    expect(await request(`/api/applications.php?action=signature&id=${first.id}`), 401, 'anonymous signature');
+  });
   await test('submission and office endorsement enforce stage and role', async () => {
     const submitted = expect(await action(first.id, 'finalize_submission', 'filer', { expected_requirement_ids: [id('requirement-one')] }), 200, 'submit');
     assert.equal(submitted.status, 'For Endorsement'); assert.equal(submitted.processing_stage, 'Endorsement');
+    const signature = expect(await request(`/api/applications.php?action=signature&id=${first.id}`, { actor: 'filer' }), 200, 'signature read');
+    assert.equal(signature.account_id, id('filer')); assert.ok(signature.signed_at); assert.match(signature.sha256, /^[a-f0-9]{64}$/);
+    assert.equal(signature.signed_snapshot.nominator_name, 'Jack Doe');
+    assert.ok(signature.signed_snapshot.documents[0].sha256);
+    expect(await action(first.id, 'finalize_submission', 'filer', { signature_strokes: [[[0,0],[1,1]]] }), 200, 'idempotent submit');
+    const retained = expect(await request(`/api/applications.php?action=signature&id=${first.id}`, { actor: 'filer' }), 200, 'retained signature');
+    assert.equal(retained.sha256, signature.sha256);
+    expect(await request('/api/documents.php', { method: 'POST', actor: 'filer', form: makeForm(first.id, 'after-signing.pdf', pdf, id('requirement-one'), firstDoc.id) }), 409, 'signed attachment replacement blocked');
+    expect(await request(`/api/applications.php?action=signature&id=${first.id}`, { actor: 'other-filer' }), 403, 'unrelated signature read');
+
     expect(await action(first.id, 'assign_evaluators', 'secretary'), 409, 'unendorsed route');
     expect(await action(first.id, 'endorse', 'other-head', { decision: 'Endorsed' }), 403, 'other office');
     expect(await action(first.id, 'endorse', 'filer', { decision: 'Endorsed' }), 403, 'filer endorse');
@@ -252,10 +307,14 @@ async function main() {
     const incomplete = expect(await action(app.id, 'verify_document', 'secretary', { document_id: doc.id, status: 'Rejected', remarks: 'Synthetic correction required' }), 200, 'reject document');
     assert.equal(incomplete.status, 'Incomplete');
     expect(await action(app.id, 'assign_evaluators', 'secretary'), 409, 'incomplete routing');
+    const originalSignature = expect(await request(`/api/applications.php?action=signature&id=${app.id}`, { actor: 'filer' }), 200, 'signature before revision');
     expect(await action(app.id, 'resubmit', 'filer'), 409, 'unreplaced document');
     expect(await request('/api/documents.php', { method: 'POST', actor: 'filer', form: makeForm(app.id, 'corrected.pdf', pdf, id('requirement-one'), doc.id) }), 201, 'replace rejected document');
     const resubmitted = expect(await action(app.id, 'resubmit', 'filer', { remarks: 'Synthetic correction completed' }), 200, 'resubmit');
     assert.equal(resubmitted.status, 'For Verification');
+    const revisedSignature = expect(await request(`/api/applications.php?action=signature&id=${app.id}`, { actor: 'filer' }), 200, 'signature after revision');
+    assert.equal(revisedSignature.sha256, originalSignature.sha256);
+    assert.equal(revisedSignature.signed_at, originalSignature.signed_at);
     const returned = expect(await action(app.id, 'return_for_revision', 'secretary', { remarks: 'Second synthetic revision' }), 200, 'return');
     assert.equal(returned.status, 'Returned for Revision'); assert.equal(returned.remarks, 'Second synthetic revision');
     expect(await action(app.id, 'return_for_revision', 'filer', { remarks: 'Unauthorized' }), 403, 'filer return');
@@ -332,6 +391,12 @@ async function main() {
   await test('controlled revision preserves versions, completion, aggregate and deliberation lock', async () => {
     const view = async () => expect(await request(`/api/applications.php?id=${first.id}`, { actor: 'B' }), 200, 'B evaluation');
     const original = await view();
+    assert.ok(!('nominator_name' in original));
+    assert.ok(!('submission_account_name' in original));
+    assert.ok(!('signature_signed_at' in original));
+    expect(await request(`/api/applications.php?action=signature&id=${first.id}`, { actor: 'B' }), 403, 'evaluator signature denied');
+    const nominationHistory = expect(await request(`/api/audit_logs.php?application_id=${first.id}`, { actor: 'B' }), 200, 'evaluator history');
+    assert.ok(!nominationHistory.some(log => log.user_name === 'Automated Test filer' || log.user_id === id('filer')));
     const own = original.evaluations.find(x => x.evaluator_id === id('B'));
     const revise = (actor, score, reason, version = 1, evaluationId = own.id) => request('/api/evaluations.php?action=revise', {
       actor, method: 'POST', json: { application_id: first.id, evaluation_id: evaluationId, expected_version: version, revision_reason: reason,

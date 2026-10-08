@@ -1,3 +1,4 @@
+import { NominationIdentitySummary } from '../nomination/NominationIdentity';
 import React, { useEffect, useState } from 'react';
 import { Application, Award, AwardEvaluationRoute, Office, UserProfile, UserRole } from '../../types';
 import { StatusBadge } from '../common/StatusBadge';
@@ -885,7 +886,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           {app.application_number}
                         </td>
                         <td className="px-4 py-3.5 font-semibold text-slate-900">
-                          <div>{app.nominee_name}</div>
+                          <div>{app.nominee_name}</div><NominationIdentitySummary application={app} />
                           <div className="text-[11px] text-slate-400 font-normal">{app.position_title}</div>
                         </td>
                         <td className="px-4 py-3.5 text-slate-600">

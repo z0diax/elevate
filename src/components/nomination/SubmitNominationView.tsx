@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, FileText, Plus, RefreshCw, X } from 'lucide-
 import { Application, Award, Office, UserProfile } from '../../types';
 import { praiseService } from '../../lib/api';
 import { showToast } from '../../lib/toast';
+import { NominationIdentitySummary } from './NominationIdentity';
 import { NominationWizard } from './NominationWizard';
 import { NominationActionModal } from './NominationActionModal';
 import { NomineeTrackingModal } from './NomineeTrackingModal';
@@ -162,6 +163,7 @@ export const SubmitNominationView: React.FC<SubmitNominationViewProps> = ({
                     <td className="px-4 py-4">
                       <p className="text-xs font-bold text-slate-900">{application.nominee_name}</p>
                       <p className="mt-0.5 text-[11px] text-slate-500">{application.office_name}</p>
+                      <NominationIdentitySummary application={application} />
                     </td>
                     <td className="px-4 py-4 text-xs font-medium text-slate-700">{application.award_name}</td>
                     <td className="px-4 py-4 text-xs text-slate-600">{application.processing_stage}</td>

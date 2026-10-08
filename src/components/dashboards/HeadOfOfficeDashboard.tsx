@@ -1,3 +1,4 @@
+import { NominationIdentitySummary } from '../nomination/NominationIdentity';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Application, Award, UserProfile } from '../../types';
 import { StatusBadge } from '../common/StatusBadge';
@@ -236,7 +237,7 @@ export const HeadOfOfficeDashboard: React.FC<HeadOfOfficeDashboardProps> = ({
                       <tr key={application.id} className="hover:bg-slate-50">
                         <td className="px-5 py-4 font-mono text-xs font-bold text-blue-600">{application.application_number}</td>
                         <td className="px-5 py-4">
-                          <p className="font-semibold text-slate-900">{application.nominee_name}</p>
+                          <p className="font-semibold text-slate-900">{application.nominee_name}</p><NominationIdentitySummary application={application} />
                           <p className="text-xs text-slate-500">{application.position_title}</p>
                         </td>
                         <td className="px-5 py-4 font-medium text-slate-700">{application.award_name}</td>

@@ -1,4 +1,5 @@
 import React from 'react';
+import { NominationIdentityDetails } from './NominationIdentity';
 import { Application, ApplicationHistory } from '../../types';
 
 export const NominationDetails: React.FC<{ application: Application }> = ({ application }) => (
@@ -8,6 +9,7 @@ export const NominationDetails: React.FC<{ application: Application }> = ({ appl
       <p className="mt-1 break-words leading-6">{[application.position_title, application.employment_category, application.office_name].filter(Boolean).join(' · ')}</p>
       <p className="mt-1 break-words leading-6">{application.award_name}</p>
     </div>
+    <NominationIdentityDetails application={application} />
     {[
       ['Justification and merits', application.justification],
       ['Accomplishments and public impact', application.accomplishments],

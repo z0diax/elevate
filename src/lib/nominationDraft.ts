@@ -17,6 +17,8 @@ export type NominationDraftData = {
   nominatorName: string;
   nominatorPosition: string;
   nominatingOffice: string;
+  nominatingOfficeId?: string;
+  selfNomination?: boolean;
   justification: string;
   accomplishments: string;
   supportingNarrative: string;

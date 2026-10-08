@@ -1,3 +1,6 @@
+import { showToast } from './toast';
+import { apiRequest } from './api/client';
+import { drawSignature } from '../components/nomination/SignaturePad';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Application, Award, CertificateTemplateSettings, Office } from '../types';
@@ -459,7 +462,34 @@ export const pdfGenerator = {
   },
 
   // 1. Generate Official Application Summary Sheet
-  generateApplicationSummary(app: Application, _award?: Award, _office?: Office): void {
+  async generateApplicationSummary(app: Application, _award?: Award, _office?: Office): Promise<void> {
+    let signatureImage: string | undefined;
+    let signedAt: string | undefined;
+    if (app.signature_signed_at) {
+      let signature: { strokes: number[][][]; signed_at: string; signed_snapshot: Application };
+      try {
+        signature = await apiRequest(`applications.php?action=signature&id=${encodeURIComponent(app.id)}`);
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : 'Unable to retrieve the submitted signature.', 'error');
+        return;
+      }
+      // Use the signed form fields and keep current review/decision information.
+      const signed = signature.signed_snapshot;
+      app = { ...app, nominee_name: signed.nominee_name, nominee_id: signed.nominee_id,
+        employee_id: signed.employee_id, position_title: signed.position_title, office_id: signed.office_id,
+        office_name: signed.office_name, division_section: signed.division_section, employment_category: signed.employment_category,
+        contact_number: signed.contact_number, email: signed.email, barangay: signed.barangay,
+        nomination_type: signed.nomination_type, nomination_origin: signed.nomination_origin,
+        nominator_name: signed.nominator_name, nominator_position: signed.nominator_position,
+        nominating_office: signed.nominating_office, justification: signed.justification,
+        accomplishments: signed.accomplishments, supporting_narrative: signed.supporting_narrative,
+        date_of_nomination: signed.date_of_nomination };
+      signedAt = signature.signed_at;
+      const canvas = document.createElement('canvas');
+      canvas.width = 800; canvas.height = 240;
+      drawSignature(canvas, signature.strokes);
+      signatureImage = canvas.toDataURL('image/png');
+    }
     const doc = new jsPDF({
       orientation: 'portrait',
       unit: 'mm',
@@ -581,7 +611,7 @@ export const pdfGenerator = {
     // Section V: Official Signatures
     // @ts-expect-error autoTable adds lastAutoTable to doc
     let signY = doc.lastAutoTable.finalY + 14;
-    if (signY > 250) {
+    if (signY > (signatureImage ? 210 : 250)) {
       doc.addPage();
       doc.setFillColor(30, 58, 138);
       doc.rect(0, 0, 210, 20, 'F');
@@ -601,6 +631,16 @@ export const pdfGenerator = {
     doc.setTextColor(30, 41, 59);
     doc.text('SECTION V: OFFICIAL SIGNATORIES', 14, signY);
     drawFormA1Signatories(doc, activeCertificateTemplateSettings, app, signY + 9);
+    if (signatureImage) {
+      // Dedicated nominator block avoids substituting a configured official preparer.
+      doc.setFontSize(8);
+      doc.setTextColor(30, 41, 59);
+      doc.text('NOMINATOR ELECTRONIC SIGNATURE', 14, signY + 44);
+      doc.addImage(signatureImage, 'PNG', 14, signY + 46, 48, 14.4);
+      doc.text(`${app.nominator_name} / ${app.nominator_position}`, 68, signY + 51, { maxWidth: 125 });
+      doc.text(`Office: ${app.nominating_office}`, 68, signY + 57, { maxWidth: 125 });
+      doc.text(`Signed: ${signedAt} (server time)`, 68, signY + 63);
+    }
 
     // Save
     doc.save(`${app.application_number}_Summary_Dossier.pdf`);

@@ -6,7 +6,7 @@ function getFullApplication(PDO $db, string $appId): ?array {
         nominee_id, nominee_name, employee_id, position_title, office_id, office_name,
         division_section, employment_category, contact_number, email, barangay,
         nomination_type, nominator_id, nominator_name, nominator_position,
-        nominating_office, justification, accomplishments, supporting_narrative,
+        nominating_office, nominating_office_id, nomination_origin, submission_account_name, submission_account_role, justification, accomplishments, supporting_narrative,
         date_of_nomination, status, processing_stage, required_action, remarks,
         final_weighted_score, deliberation_remarks, deliberation_decision,
         deliberation_date, award_date, created_at, updated_at
@@ -17,6 +17,10 @@ function getFullApplication(PDO $db, string $appId): ?array {
     if (!$app) {
         return null;
     }
+
+    $signatureStmt = $db->prepare('SELECT signed_at FROM nomination_signatures WHERE application_id = ?');
+    $signatureStmt->execute([$appId]);
+    $app['signature_signed_at'] = $signatureStmt->fetchColumn() ?: null;
 
     $app['award_year'] = (int)$app['award_year'];
     $app['final_weighted_score'] = $app['final_weighted_score'] !== null ? (float)$app['final_weighted_score'] : null;
@@ -108,7 +112,7 @@ function listApplications(PDO $db, array $actor): array {
     foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $id) {
         $application = getFullApplication($db, (string)$id);
         if ($application && canViewApplication($application, $actor)) {
-            $results[] = $application;
+            $results[] = redact_nominator_for_evaluator($application, $actor);
         }
     }
 

@@ -10,6 +10,7 @@ require_once __DIR__ . '/config/session_auth.php';
 require_once __DIR__ . '/config/document_storage.php';
 require_once __DIR__ . '/services/EvaluationRoutingService.php';
 require_once __DIR__ . '/services/ApplicationRepository.php';
+require_once __DIR__ . '/services/NominationSignature.php';
 require_once __DIR__ . '/services/ApplicationHistory.php';
 require_once __DIR__ . '/services/ApplicationAccess.php';
 require_once __DIR__ . '/services/EndorsementService.php';
@@ -37,7 +38,19 @@ if ($method === 'GET') {
         if (!canViewApplication($application, $actor)) {
             sendResponse(403, [], 'You are not assigned to this nomination at its current workflow stage.');
         }
-        sendResponse(200, $application);
+        if (($_GET['action'] ?? '') === 'signature') {
+            if ($actor['role'] === 'EVALUATOR') sendResponse(403, [], 'Nominator signatures are not available during scoring.');
+            $stmt = $db->prepare('SELECT account_id, strokes, signed_snapshot, sha256, signed_at FROM nomination_signatures WHERE application_id = ?');
+            $stmt->execute([$application['id']]);
+            $signature = $stmt->fetch();
+            if (!$signature) sendResponse(404, [], 'No electronic signature exists for this nomination.');
+            if (!hash_equals($signature['sha256'], nomination_signature_digest($signature['strokes'], $signature['signed_snapshot']))) sendResponse(409, [], 'Signature integrity check failed.');
+            $signature['strokes'] = json_decode($signature['strokes'], true, 512, JSON_THROW_ON_ERROR);
+            $signature['signed_snapshot'] = json_decode($signature['signed_snapshot'], true, 512, JSON_THROW_ON_ERROR);
+            header('Cache-Control: private, no-store');
+            sendResponse(200, $signature);
+        }
+        sendResponse(200, redact_nominator_for_evaluator($application, $actor));
     }
 
     sendResponse(200, listApplications($db, $actor));
@@ -56,7 +69,7 @@ if ($method === 'PUT') {
     $appId = $_GET['id'] ?? ($data['id'] ?? ($data['application_id'] ?? ''));
     $appId = requireId($appId, 'application ID');
     $actionFields = [
-        'finalize_submission' => ['expected_requirement_ids'],
+        'finalize_submission' => ['expected_requirement_ids', 'signature_strokes', 'signature_confirmed'],
         'resubmit' => ['remarks'],
         'endorse' => ['decision', 'remarks'],
         'verify_document' => ['document_id', 'status', 'remarks'],

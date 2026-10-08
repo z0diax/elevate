@@ -220,6 +220,11 @@ async function main() {
     assert.equal(first.status, 'Draft'); assert.equal(first.processing_stage, 'Submitted'); assert.equal(first.nominator_id, id('filer'));
     assert.equal(first.award_id, id('award-one'));
     expect(await request(`/api/applications.php?id=${first.id}`, { actor: 'other-filer' }), 403, 'other filer draft');
+    const draftForm = expect(await request(`/api/applications.php?action=form&id=${first.id}`, { actor: 'filer' }), 200, 'filer draft form');
+    assert.equal(draftForm.application.status, 'Draft');
+    for (const actor of ['admin', 'head', 'secretary', 'A', 'other-filer']) {
+      expect(await request(`/api/applications.php?action=form&id=${first.id}`, { actor }), 403, `${actor} cannot view another account draft form`);
+    }
     expect(await action(first.id, 'finalize_submission', 'filer', { expected_requirement_ids: [id('requirement-one')] }), 409, 'missing attachment');
     expect(await action(first.id, 'assign_evaluators', 'secretary'), 409, 'draft routing');
   });
@@ -333,6 +338,27 @@ async function main() {
     assert.equal((await request(`/api/documents.php?action=download&id=${firstDoc.id}`, { actor: 'A' })).status, 200);
     expect(await request(`/api/documents.php?action=download&id=${firstDoc.id}`, { actor: 'D' }), 404, 'unassigned evaluator document');
   });
+  await test('global form fetch preserves role access, fresh data, documents and history redaction', async () => {
+    const path = `/api/applications.php?action=form&id=${first.id}`;
+    expect(await request(path), 401, 'anonymous form denied');
+    for (const actor of ['admin', 'secretary', 'head', 'filer', 'A']) {
+      const response = await request(path, { actor });
+      const form = expect(response, 200, `${actor} form`);
+      assert.equal(form.application.id, first.id);
+      assert.equal(form.application.status, 'For Evaluation');
+      assert.equal(form.application.documents[0].id, firstDoc.id);
+      assert.ok(form.history.some(log => log.action === 'Nomination Submitted'));
+      assert.match(response.headers.get('cache-control'), /no-store/);
+      if (actor === 'A') {
+        assert.ok(!('nominator_name' in form.application));
+        assert.ok(!('signature_signed_at' in form.application));
+        assert.ok(!form.history.some(log => log.user_id === id('filer')));
+      } else assert.equal(form.application.nominator_name, 'Jack Doe');
+    }
+    for (const actor of ['D', 'other-filer', 'other-head']) {
+      expect(await request(path, { actor }), 403, `${actor} form denied`);
+    }
+  });
   await test('route edits affect future nominations only', async () => {
     const path = `/api/award_routes.php?award_id=${id('award-one')}`;
     expect(await request(path, { method: 'PUT', actor: 'admin', json: { required_evaluators: 3, evaluator_ids: ['D', 'E', 'F'].map(id), is_active: true } }), 200, 'edit route');
@@ -355,6 +381,7 @@ async function main() {
       Object.fromEntries([['A', 'Pending'], ['B', 'In Progress'], ['C', 'Reassigned'], ['D', 'Pending']].map(([name, status]) => [id(name), status])));
     assert.equal(changed.evaluator_assignments.filter(x => x.status !== 'Reassigned').length, 3);
     expect(await request(`/api/applications.php?id=${first.id}`, { actor: 'C' }), 403, 'old evaluator view');
+    expect(await request(`/api/applications.php?action=form&id=${first.id}`, { actor: 'C' }), 403, 'reassigned evaluator form denied');
     expect(await request(`/api/applications.php?id=${first.id}`, { actor: 'D' }), 200, 'new evaluator view');
     assert.equal((await request(`/api/documents.php?action=download&id=${firstDoc.id}`, { actor: 'D' })).status, 200);
     expect(await request(`/api/documents.php?action=download&id=${firstDoc.id}`, { actor: 'C' }), 404, 'old evaluator document');

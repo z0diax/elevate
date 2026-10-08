@@ -1,3 +1,4 @@
+import { NominationReferenceButton } from '../nomination/NominationFormViewerModal';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Application, Award, EvaluationRevision, UserProfile } from '../../types';
 import { StatusBadge } from '../common/StatusBadge';
@@ -284,7 +285,7 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
           </h3>
 
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
-            {assignedApplications.length > 0 && <NominationQueueCards applications={assignedApplications} onOpen={application => void openAssessment(application)} actionLabel={application => application.processing_stage === 'Evaluation' ? 'Open assessment' : 'View assessment'} />}
+            {assignedApplications.length > 0 && <NominationQueueCards userRole={currentUser.role} applications={assignedApplications} onOpen={application => void openAssessment(application)} actionLabel={application => application.processing_stage === 'Evaluation' ? 'Open assessment' : 'View assessment'} />}
             {assignedApplications.length === 0 ? (
               <div className="p-12 text-center text-slate-400">
                 <Scale size={32} className="mx-auto mb-2 opacity-30 text-slate-400" />
@@ -314,7 +315,7 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
                     key={application.id}
                     className="hover:bg-slate-50"
                   >
-                    <td className="px-5 py-4 font-mono text-xs font-bold text-blue-600">{application.application_number}</td>
+                    <td className="px-5 py-4 font-mono text-xs font-bold text-blue-600"><NominationReferenceButton applicationId={application.id} referenceNumber={application.application_number} userRole={currentUser.role} /></td>
                     <td className="px-5 py-4 font-semibold text-slate-900">{application.nominee_name}</td>
                     <td className="px-5 py-4 text-slate-600">{application.office_name}</td>
                     <td className="px-5 py-4 font-medium text-slate-700">{application.award_name}</td>

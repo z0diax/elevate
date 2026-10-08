@@ -1,12 +1,11 @@
+import { NominationReferenceButton } from './NominationFormViewerModal';
 import React, { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, FileText, Plus, RefreshCw, X } from 'lucide-react';
 import { Application, Award, Office, UserProfile } from '../../types';
 import { praiseService } from '../../lib/api';
 import { showToast } from '../../lib/toast';
-import { NominationIdentitySummary } from './NominationIdentity';
 import { NominationWizard } from './NominationWizard';
 import { NominationActionModal } from './NominationActionModal';
-import { NomineeTrackingModal } from './NomineeTrackingModal';
 import { NominationQueueCards } from './NominationQueueCards';
 
 interface SubmitNominationViewProps {
@@ -31,10 +30,10 @@ export const SubmitNominationView: React.FC<SubmitNominationViewProps> = ({
   onOpenFormRequestHandled,
 }) => {
   const [page, setPage] = useState(1);
+  const canCorrect = (application: Application) => application.nominator_id === currentUser.id && (['Returned for Revision', 'Incomplete'].includes(application.status) || (application.status === 'Not Approved' && application.endorsement?.decision === 'Rejected'));
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [isWizardSubmitting, setIsWizardSubmitting] = useState(false);
   const [resubmitApp, setResubmitApp] = useState<Application | null>(null);
-  const [trackingAppId, setTrackingAppId] = useState<string | null>(null);
   const [replacementFiles, setReplacementFiles] = useState<Record<string, File>>({});
   const [resubmissionNote, setResubmissionNote] = useState('');
   const [resubmitError, setResubmitError] = useState('');
@@ -48,7 +47,6 @@ export const SubmitNominationView: React.FC<SubmitNominationViewProps> = ({
     .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime()),
   [applications, currentUser.id, currentUser.role]);
 
-  const trackingApp = visibleToUserApplications.find(application => application.id === trackingAppId) || null;
   const totalPages = Math.max(1, Math.ceil(visibleToUserApplications.length / PAGE_SIZE));
   const visibleApplications = visibleToUserApplications.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
@@ -139,7 +137,7 @@ export const SubmitNominationView: React.FC<SubmitNominationViewProps> = ({
       </div>
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
-        <NominationQueueCards applications={visibleApplications} onOpen={application => setTrackingAppId(application.id)} actionLabel={application => application.nominator_id === currentUser.id && ['Returned for Revision', 'Incomplete'].includes(application.status) ? 'Review changes' : 'View nomination'} />
+        <NominationQueueCards userRole={currentUser.role} applications={visibleApplications} onOpen={openResubmission} actionLabel={application => canCorrect(application) ? 'Correct & Resubmit' : null} />
         {visibleApplications.length === 0 && <p className="p-8 text-center text-sm text-slate-500 sm:hidden">{currentUser.role === 'NOMINEE' ? 'No nominations yet.' : 'No nominations filed from this account.'}</p>}
         <div className="hidden overflow-x-auto sm:block">
           <table className="w-full min-w-[680px] text-left">
@@ -154,16 +152,13 @@ export const SubmitNominationView: React.FC<SubmitNominationViewProps> = ({
             </thead>
             <tbody className="divide-y divide-slate-100">
               {visibleApplications.map(application => {
-                const canResubmit = application.nominator_id === currentUser.id && (application.status === 'Returned for Revision'
-                  || application.status === 'Incomplete'
-                  || (application.status === 'Not Approved' && application.endorsement?.decision === 'Rejected'));
+                const canResubmit = canCorrect(application);
                 return (
                   <tr key={application.id} className="align-top hover:bg-slate-50/70">
-                    <td className="px-4 py-4 font-mono text-xs font-bold text-blue-700"><button type="button" onClick={() => setTrackingAppId(application.id)} className="break-words text-left hover:underline focus-visible:outline-2 focus-visible:outline-blue-600" aria-label={"View nomination " + application.application_number}>{application.application_number}</button></td>
+                    <td className="px-4 py-4 font-mono text-xs font-bold text-blue-700"><NominationReferenceButton applicationId={application.id} referenceNumber={application.application_number} userRole={currentUser.role} /></td>
                     <td className="px-4 py-4">
-                      <p className="text-xs font-bold text-slate-900">{application.nominee_name}</p>
+                      <p className="break-words text-xs font-bold text-slate-900">{application.nominee_name}</p>
                       <p className="mt-0.5 text-[11px] text-slate-500">{application.office_name}</p>
-                      <NominationIdentitySummary application={application} />
                     </td>
                     <td className="px-4 py-4 text-xs font-medium text-slate-700">{application.award_name}</td>
                     <td className="px-4 py-4 text-xs text-slate-600">{application.processing_stage}</td>
@@ -253,13 +248,6 @@ export const SubmitNominationView: React.FC<SubmitNominationViewProps> = ({
         </div>
       )}
 
-      {trackingApp && (
-        <NomineeTrackingModal
-          application={trackingApp}
-          onClose={() => setTrackingAppId(null)}
-          onCorrect={trackingApp.nominator_id === currentUser.id ? () => { setTrackingAppId(null); openResubmission(trackingApp); } : undefined}
-        />
-      )}
 
       {resubmitApp && (
         <NominationActionModal

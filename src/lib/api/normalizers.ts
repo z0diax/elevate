@@ -92,7 +92,7 @@ export function normalizeDocument(document: any): ApplicationDocument {
     verification_remarks: document.verification_remarks || undefined,
     verified_by: document.verified_by || undefined,
     verified_at: document.verified_at || undefined,
-    uploaded_at: document.uploaded_at || new Date().toISOString(),
+    uploaded_at: document.uploaded_at || '',
   };
 }
 
@@ -141,16 +141,16 @@ export function normalizeAward(award: any): Award {
 export function normalizeApplication(application: any): Application {
   const normalized: Application = {
     id: String(application.id),
-    application_number: String(application.application_number),
+    application_number: String(application.application_number || ''),
     award_id: String(application.award_id),
     award_name: application.award_name || undefined,
-    award_year: Number(application.award_year || new Date().getFullYear()),
+    award_year: Number(application.award_year || 0),
     nominee_id: application.nominee_id || undefined,
-    nominee_name: String(application.nominee_name),
+    nominee_name: String(application.nominee_name || ''),
     employee_id: application.employee_id || undefined,
-    position_title: String(application.position_title),
+    position_title: String(application.position_title || ''),
     office_id: String(application.office_id),
-    office_name: String(application.office_name),
+    office_name: String(application.office_name || ''),
     division_section: application.division_section || undefined,
     employment_category: application.employment_category,
     contact_number: String(application.contact_number || ''),
@@ -181,8 +181,8 @@ export function normalizeApplication(application: any): Application {
     deliberation_decision: application.deliberation_decision || undefined,
     deliberation_date: application.deliberation_date || undefined,
     award_date: application.award_date || undefined,
-    created_at: application.created_at || new Date().toISOString(),
-    updated_at: application.updated_at || new Date().toISOString(),
+    created_at: application.created_at || '',
+    updated_at: application.updated_at || '',
     documents: Array.isArray(application.documents) ? application.documents.map(normalizeDocument) : [],
     evaluations: Array.isArray(application.evaluations) ? application.evaluations.map(normalizeEvaluation) : [],
     evaluator_assignments: Array.isArray(application.evaluator_assignments)
@@ -219,13 +219,13 @@ export function normalizeAuditLog(log: any): ApplicationHistory {
     id: String(log.id),
     application_id: String(log.application_id),
     user_id: String(log.user_id || ''),
-    user_name: String(log.user_name || 'System'),
+    user_name: String(log.user_name || ''),
     user_role: log.user_role as UserRole,
     action: String(log.action || ''),
     previous_status: log.previous_status || undefined,
     new_status: log.new_status as ApplicationStatus,
     remarks: log.remarks || undefined,
-    created_at: String(log.created_at || new Date().toISOString()),
+    created_at: String(log.created_at || ''),
   };
 }
 

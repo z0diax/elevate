@@ -1,8 +1,7 @@
-import { NominationIdentitySummary } from '../nomination/NominationIdentity';
-import React, { useMemo, useState } from 'react';
+import { NominationReferenceButton } from '../nomination/NominationFormViewerModal';
+import React, { useMemo } from 'react';
 import { Application, Award, UserProfile } from '../../types';
 import { FolderOpen, Plus } from 'lucide-react';
-import { NomineeTrackingModal } from '../nomination/NomineeTrackingModal';
 import { NominationQueueCards } from '../nomination/NominationQueueCards';
 
 interface NomineeDashboardProps {
@@ -22,12 +21,11 @@ export const NomineeDashboard: React.FC<NomineeDashboardProps> = ({
   onNavigateToNomination,
   onNavigateToCorrections,
 }) => {
-  const [trackingAppId, setTrackingAppId] = useState<string | null>(null);
+  const canCorrect = (application: Application) => application.nominator_id === currentUser.id && (['Returned for Revision', 'Incomplete'].includes(application.status) || (application.status === 'Not Approved' && application.endorsement?.decision === 'Rejected'));
   const myApplications = useMemo(() => applications.filter(application =>
     application.status !== 'Draft' && (application.nominee_id === currentUser.id ||
     application.nominator_id === currentUser.id)
   ), [applications, currentUser.id]);
-  const trackingApp = myApplications.find(application => application.id === trackingAppId);
 
   return (
     <div id="nominee-dashboard-container" className="space-y-6">
@@ -58,7 +56,7 @@ export const NomineeDashboard: React.FC<NomineeDashboardProps> = ({
           </h3>
 
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
-            <NominationQueueCards applications={myApplications} onOpen={application => setTrackingAppId(application.id)} actionLabel={() => 'View nomination'} />
+            <NominationQueueCards userRole={currentUser.role} applications={myApplications} onOpen={onNavigateToCorrections} actionLabel={application => canCorrect(application) ? 'Review required changes' : null} />
             {myApplications.length === 0 ? (
               <div className="p-10 text-center text-slate-400">
                 <FolderOpen size={32} className="mx-auto mb-2 opacity-30 text-slate-400" />
@@ -84,13 +82,14 @@ export const NomineeDashboard: React.FC<NomineeDashboardProps> = ({
                   <tbody className="divide-y divide-slate-100">
                     {myApplications.map(application => (
                       <tr key={application.id} className="hover:bg-slate-50">
-                        <td className="px-5 py-4 font-semibold text-slate-900"><button type="button" onClick={() => setTrackingAppId(application.id)} className="break-words text-left text-blue-700 hover:underline focus-visible:outline-2 focus-visible:outline-blue-600" aria-label={'View nomination for ' + application.nominee_name}>{application.nominee_name}</button><NominationIdentitySummary application={application} /></td>
+                        <td className="px-5 py-4 font-semibold text-slate-900"><p className="break-words">{application.nominee_name}</p><div className="mt-0.5"><NominationReferenceButton applicationId={application.id} referenceNumber={application.application_number} userRole={currentUser.role} /></div></td>
                         <td className="px-5 py-4 text-slate-600">{application.office_name}</td>
                         <td className="px-5 py-4 font-medium text-slate-700">{application.award_name}</td>
                         <td className="px-5 py-4">
                           <span className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
                             Processing
                           </span>
+                          {canCorrect(application) && <button type="button" onClick={onNavigateToCorrections} className="mt-2 block rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-100 focus-visible:outline-2 focus-visible:outline-blue-600">Review required changes</button>}
                         </td>
                       </tr>
                     ))}
@@ -100,11 +99,7 @@ export const NomineeDashboard: React.FC<NomineeDashboardProps> = ({
             )}
           </div>
       </div>
-      {trackingApp && <NomineeTrackingModal
-        application={trackingApp}
-        onClose={() => setTrackingAppId(null)}
-        onCorrect={() => { setTrackingAppId(null); onNavigateToCorrections(); }}
-      />}
+
     </div>
   );
 };

@@ -1,6 +1,6 @@
-import { Application, ApplicationStatus, ProcessingStage } from '../../types';
+import { Application, ApplicationHistory, ApplicationStatus, ProcessingStage } from '../../types';
 import { apiRequest } from './client';
-import { normalizeApplication } from './normalizers';
+import { normalizeApplication, normalizeAuditLog } from './normalizers';
 import { loadApplications, loadAuditLogs, loadNotifications, state } from './state';
 
 type SubmitNominationPayload = {
@@ -66,6 +66,10 @@ export function getStageFromStatus(status: ApplicationStatus): ProcessingStage {
 }
 
 export const applicationsApi = {
+  async getNominationForm(appId: string): Promise<{ application: Application; history: ApplicationHistory[] }> {
+    const result = await apiRequest<{ application: unknown; history: unknown[] }>(`applications.php?action=form&id=${encodeURIComponent(appId)}`);
+    return { application: normalizeApplication(result.application), history: result.history.map(normalizeAuditLog) };
+  },
   async getNominationSignature(appId: string): Promise<{ strokes: number[][][]; signed_at: string; sha256: string; signed_snapshot: Application }> {
     return apiRequest(`applications.php?action=signature&id=${encodeURIComponent(appId)}`);
   },

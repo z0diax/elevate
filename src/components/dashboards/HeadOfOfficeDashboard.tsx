@@ -1,4 +1,4 @@
-import { NominationIdentitySummary } from '../nomination/NominationIdentity';
+import { NominationReferenceButton } from '../nomination/NominationFormViewerModal';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Application, Award, UserProfile } from '../../types';
 import { StatusBadge } from '../common/StatusBadge';
@@ -210,7 +210,7 @@ export const HeadOfOfficeDashboard: React.FC<HeadOfOfficeDashboardProps> = ({
           </h3>
 
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
-            {officeApplications.length > 0 && <NominationQueueCards applications={officeApplications} onOpen={application => { setActiveTab('review'); setSelectedAppId(application.id); }} actionLabel={application => application.processing_stage === 'Endorsement' && ['For Endorsement', 'Submitted'].includes(application.status) ? 'Review nomination' : 'View nomination'} />}
+            {officeApplications.length > 0 && <NominationQueueCards userRole={currentUser.role} applications={officeApplications} onOpen={application => { setActiveTab('review'); setSelectedAppId(application.id); }} actionLabel={application => application.processing_stage === 'Endorsement' && ['For Endorsement', 'Submitted'].includes(application.status) ? 'Review nomination' : 'View nomination'} />}
             {officeApplications.length === 0 ? (
               <div className="p-10 text-center text-slate-400">
                 <FileText size={32} className="mx-auto mb-2 opacity-30 text-slate-400" />
@@ -235,9 +235,9 @@ export const HeadOfOfficeDashboard: React.FC<HeadOfOfficeDashboardProps> = ({
                   <tbody className="divide-y divide-slate-100">
                     {officeApplications.map(application => (
                       <tr key={application.id} className="hover:bg-slate-50">
-                        <td className="px-5 py-4 font-mono text-xs font-bold text-blue-600">{application.application_number}</td>
+                        <td className="px-5 py-4 font-mono text-xs font-bold text-blue-600"><NominationReferenceButton applicationId={application.id} referenceNumber={application.application_number} userRole={currentUser.role} /></td>
                         <td className="px-5 py-4">
-                          <p className="font-semibold text-slate-900">{application.nominee_name}</p><NominationIdentitySummary application={application} />
+                          <p className="font-semibold text-slate-900">{application.nominee_name}</p>
                           <p className="text-xs text-slate-500">{application.position_title}</p>
                         </td>
                         <td className="px-5 py-4 font-medium text-slate-700">{application.award_name}</td>

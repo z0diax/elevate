@@ -1,4 +1,4 @@
-import { NominationIdentitySummary } from '../nomination/NominationIdentity';
+import { NominationReferenceButton } from '../nomination/NominationFormViewerModal';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Application, Award, AwardEvaluationRoute, UserProfile } from '../../types';
 import { StatusBadge } from '../common/StatusBadge';
@@ -197,7 +197,7 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
           </div>
 
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
-            {workbenchApplications.length > 0 && <NominationQueueCards applications={workbenchApplications} onOpen={application => { setActiveTab('documents'); setSelectedAppId(application.id); }} actionLabel={application => application.processing_stage === 'Document Verification' && WORKBENCH_STATUSES.has(application.status) ? 'Open review' : 'View nomination'} />}
+            {workbenchApplications.length > 0 && <NominationQueueCards userRole={currentUser.role} applications={workbenchApplications} onOpen={application => { setActiveTab('documents'); setSelectedAppId(application.id); }} actionLabel={application => application.processing_stage === 'Document Verification' && WORKBENCH_STATUSES.has(application.status) ? 'Open review' : 'View nomination'} />}
             {workbenchApplications.length === 0 ? (
               <div className="p-12 text-center text-slate-400">
                 <p>No nominations have reached Secretariat processing yet.</p>
@@ -222,8 +222,8 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
                   <tbody className="divide-y divide-slate-100">
                     {workbenchApplications.map(application => (
                       <tr key={application.id} className="hover:bg-slate-50">
-                        <td className="px-5 py-4 font-mono text-xs font-bold text-blue-600">{application.application_number}</td>
-                        <td className="px-5 py-4 font-semibold text-slate-900">{application.nominee_name}<NominationIdentitySummary application={application} /></td>
+                        <td className="px-5 py-4 font-mono text-xs font-bold text-blue-600"><NominationReferenceButton applicationId={application.id} referenceNumber={application.application_number} userRole={currentUser.role} /></td>
+                        <td className="px-5 py-4 font-semibold text-slate-900">{application.nominee_name}</td>
                         <td className="px-5 py-4 text-slate-600">{application.office_name}</td>
                         <td className="px-5 py-4 font-medium text-slate-700">{application.award_name}</td>
                         <td className="px-5 py-4 text-xs text-slate-600">{application.processing_stage}</td>

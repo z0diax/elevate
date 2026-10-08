@@ -161,7 +161,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
             <div className="text-xs text-slate-500 space-y-1">
               <div className="flex items-center gap-1.5">
                 <Calendar size={12} />
-                <span>Uploaded: {new Date(document.uploaded_at || Date.now()).toLocaleDateString('en-PH')}</span>
+                <span>Uploaded: {document.uploaded_at && !Number.isNaN(new Date(document.uploaded_at).getTime()) ? new Date(document.uploaded_at).toLocaleDateString('en-PH') : 'Not recorded'}</span>
               </div>
               {document.verified_by && (
                 <div className="flex items-center gap-1.5">

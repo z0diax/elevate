@@ -1,4 +1,4 @@
-import { NominationIdentitySummary } from '../nomination/NominationIdentity';
+import { NominationReferenceButton } from '../nomination/NominationFormViewerModal';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Application, Award, UserProfile } from '../../types';
 import { StatusBadge } from '../common/StatusBadge';
@@ -225,7 +225,7 @@ export const DeliberationDashboard: React.FC<DeliberationDashboardProps> = ({
           </h3>
 
           <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-            <NominationQueueCards applications={deliberationApps} onOpen={application => { setSelectedAppId(application.id); setActiveTab('decision'); setIsDetailsModalOpen(true); }} actionLabel={application => application.processing_stage === 'Deliberation' ? 'Open committee review' : 'View results'} />
+            <NominationQueueCards userRole={currentUser.role} applications={deliberationApps} onOpen={application => { setSelectedAppId(application.id); setActiveTab('decision'); setIsDetailsModalOpen(true); }} actionLabel={application => application.processing_stage === 'Deliberation' ? 'Open committee review' : 'View results'} />
             {deliberationApps.length === 0 && <p className="p-8 text-center text-sm text-slate-500 sm:hidden">No nominations are ready for evaluation monitoring.</p>}
             <div className="hidden overflow-x-auto sm:block">
               <table className="w-full min-w-[640px] text-left text-xs">
@@ -248,12 +248,7 @@ export const DeliberationDashboard: React.FC<DeliberationDashboardProps> = ({
                     return (
                       <tr
                         key={application.id}
-                        onClick={() => {
-                          setSelectedAppId(application.id);
-                          setActiveTab('decision');
-                          setIsDetailsModalOpen(true);
-                        }}
-                        className={`cursor-pointer transition-colors ${isSelected ? 'bg-blue-50/70 font-medium' : 'hover:bg-slate-50'}`}
+                        className={`transition-colors ${isSelected ? 'bg-blue-50/70 font-medium' : 'hover:bg-slate-50'}`}
                       >
                         <td className="px-3.5 py-3">
                           <span className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs ${
@@ -263,7 +258,8 @@ export const DeliberationDashboard: React.FC<DeliberationDashboardProps> = ({
                           </span>
                         </td>
                         <td className="px-3.5 py-3">
-                          <p className="font-bold text-slate-900">{application.nominee_name}</p><NominationIdentitySummary application={application} />
+                          <p className="font-bold text-slate-900">{application.nominee_name}</p>
+                          <div className="mt-0.5"><NominationReferenceButton applicationId={application.id} referenceNumber={application.application_number} userRole={currentUser.role} /></div>
                           <p className="text-[11px] text-slate-500">{application.award_name}</p>
                         </td>
                         <td className="px-3.5 py-3 text-slate-600">{application.office_name}</td>

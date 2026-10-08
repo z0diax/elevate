@@ -3,6 +3,42 @@ import test from 'node:test';
 import { praiseService } from '../src/lib/api';
 import { apiRequest, rememberCsrfToken } from '../src/lib/api/client';
 import { clearCaches, state } from '../src/lib/api/state';
+import { normalizeApplication, normalizeAuditLog, normalizeDocument } from '../src/lib/api/normalizers';
+
+test('legacy nomination records retain missing dates and identity rather than inventing records', () => {
+  const application = normalizeApplication({ id: 'legacy', status: 'Submitted' });
+  assert.equal(application.created_at, '');
+  assert.equal(application.updated_at, '');
+  assert.equal(application.nominee_name, '');
+  assert.equal(application.position_title, '');
+  assert.equal(application.office_name, '');
+  assert.equal(application.award_year, 0);
+  assert.equal(normalizeDocument({ id: 'legacy-doc' }).uploaded_at, '');
+  const history = normalizeAuditLog({ id: 'legacy-history' });
+  assert.equal(history.created_at, '');
+  assert.equal(history.user_name, '');
+});
+
+test('form retrieval loads one authorized record and its history without refreshing global caches', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: string[] = [];
+  globalThis.fetch = async (input, init) => {
+    calls.push(String(input));
+    assert.equal(init?.credentials, 'include');
+    assert.ok(!init?.method || init.method === 'GET');
+    return new Response(JSON.stringify({ status: 'success', data: {
+      application: { id: 'record/42', nominee_name: 'Current record', documents: [] },
+      history: [{ id: 'event', action: 'Nomination Submitted', created_at: '2026-10-08 10:00:00' }],
+    } }), { headers: { 'Content-Type': 'application/json' } });
+  };
+  try {
+    const result = await praiseService.getNominationForm('record/42');
+    assert.equal(result.application.nominee_name, 'Current record');
+    assert.equal(result.history[0].action, 'Nomination Submitted');
+    assert.equal(calls.length, 1);
+    assert.match(calls[0], /applications\.php\?action=form&id=record%2F42$/);
+  } finally { globalThis.fetch = originalFetch; }
+});
 
 test('PHP API client keeps session credentials and CSRF on route writes', async () => {
   const originalFetch = globalThis.fetch;

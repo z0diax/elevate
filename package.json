@@ -11,6 +11,7 @@
     "lint": "tsc --noEmit",
     "test:unit": "php tests/api_validation.php && php tests/nomination_signature.php && php tests/export_security.php && php tests/schema_management.php && php tests/legacy_assignment_backfill.php && php tests/evaluator_access.php && node --import tsx --test tests/evaluator_assignments.test.ts tests/api_client.test.ts",
     "test:nomination-browser": "node tests/nomination_browser.mjs",
+    "test:nomination-viewer-browser": "node tests/nomination_viewer_browser.mjs",
     "test:integration": "node tests/integration.mjs && php tests/evaluator_reassignment.php"
   },
   "dependencies": {

@@ -10,6 +10,8 @@ Set `APP_ENV=development` in the PHP process for local XAMPP tests. Signature un
 
 After building, run `npm run test:nomination-browser` for the real headless Chromium signature and Form A1 check. It uses an installed Chrome/Edge (`CHROME_PATH` can override detection), synthetic browser fixtures, and no database. Screenshots and the generated PDF are saved in a printed temporary directory. No extra test-library dependencies are installed.
 
+Run `npm run test:nomination-viewer-browser` after building to verify the shared read-only viewer from each role dashboard, deliberation, and submission lists on desktop and mobile. This uses the same installed Chromium approach and checks fresh retrieval, long narratives, legacy fields, loading/error/retry states, keyboard focus and Escape, and document previews without mutation controls. The API integration suite also checks the form endpoint's role restrictions, draft privacy, reassigned evaluators, history redaction, and document records in a dedicated test database.
+
 To check the nomination migration against historical data, create a separate empty dedicated test database, set both `TEST_DB_NAME` and `DB_NAME` to its name, and run `php tests/nomination_identity_migration.php`. It refuses a database with existing tables, creates only synthetic legacy data, and removes its two test tables afterward.
 
 Integration checks need PHP with `pdo_mysql` and MySQL/MariaDB. They create synthetic accounts and nominations through the real API. Configure a **dedicated empty** database with a name ending in `_test` (or `_test_<suffix>`). The scripts refuse the normal `tacloban_praise_db` database, refuse a test database containing records, and never create or drop the normal database.

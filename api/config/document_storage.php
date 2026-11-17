@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/database_storage.php';
 
 // Configure PRIVATE_UPLOAD_DIR in production. The fallback is a sibling of the
 // XAMPP htdocs directory for the standard htdocs/<project> installation.
@@ -38,6 +39,7 @@ function legacy_document_dir(): string {
 
 function document_storage_path(string $reference): ?string {
     if (!preg_match('~^(private|uploads)/([A-Za-z0-9_-]+\.(?:pdf|docx|jpe?g|png))$~iD', $reference, $matches)) return null;
+    if (database_file_storage()) return database_materialize_file($reference);
     $base = $matches[1] === 'private' ? prepare_private_document_dir() : legacy_document_dir();
     if ($base === null) return null;
     $realBase = realpath($base);

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { AlertCircle, LockKeyhole, LogIn, Mail, ShieldCheck } from 'lucide-react';
+import { AlertCircle, LogIn, Mail, ShieldCheck } from 'lucide-react';
 import { APP_LOGO_URL, APP_NAME } from '../../lib/branding';
+import { AuthPasswordField } from './AuthPasswordField';
 
 interface LoginScreenProps {
   errorMessage?: string;
@@ -95,20 +96,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                 </div>
               </label>
 
-              <label className="block space-y-1.5">
-                <span className="text-xs font-semibold text-slate-700">Password</span>
-                <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 focus-within:border-blue-500 focus-within:bg-white">
-                  <LockKeyhole size={16} className="text-slate-400" />
-                  <input
-                    type="password"
-                    autoComplete="current-password"
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    className="w-full bg-transparent text-sm outline-none"
-                    placeholder="Enter password"
-                  />
-                </div>
-              </label>
+              <AuthPasswordField
+                label="Password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="Enter password"
+              />
 
               {(localError || errorMessage) && (
                 <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex items-start gap-2">

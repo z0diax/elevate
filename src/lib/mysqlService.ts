@@ -53,11 +53,7 @@ export function getAppBasePath(): string {
       .replace(/\/assets\/.*$/, '')
       .replace(/\/src\/.*$/, '');
 
-    if (baseFromScript === '/') {
-      return '';
-    }
-
-    if (baseFromScript) {
+    if (baseFromScript !== scriptPath) {
       return trimTrailingSlash(baseFromScript);
     }
   }

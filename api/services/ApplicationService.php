@@ -409,15 +409,18 @@ function handle_delete_application(PDO $db, string $appId): void {
 
     // Resolve database references before deleting records; never use client paths.
     $localUploadPaths = [];
+    $storedReferences = [];
     $fileStmt = $db->prepare('SELECT file_url FROM application_documents WHERE application_id = :id');
     $fileStmt->execute([':id' => $appId]);
     foreach ($fileStmt->fetchAll(PDO::FETCH_COLUMN) as $reference) {
+        if (database_file_storage()) { $storedReferences[] = (string)$reference; continue; }
         $path = document_storage_path((string)$reference);
         if ($path !== null) $localUploadPaths[] = $path;
     }
 
     $db->beginTransaction();
     try {
+        foreach ($storedReferences as $reference) database_delete_file($db, $reference);
         $db->prepare('DELETE FROM notifications WHERE application_id = :application_id')
             ->execute([':application_id' => $appId]);
 

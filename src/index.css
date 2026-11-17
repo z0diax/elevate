@@ -79,3 +79,31 @@ textarea {
     drop-shadow(0 1px 0 #fff)
     drop-shadow(0 -1px 0 #fff);
 }
+
+.app-loader-screen {
+  background-image: radial-gradient(ellipse at center, rgba(30, 64, 175, 0.18), transparent 65%);
+}
+
+.app-loader-orbit {
+  animation: app-loader-orbit 1.8s linear infinite;
+}
+
+.app-loader-progress {
+  animation: app-loader-progress 1.6s ease-in-out infinite;
+}
+
+@keyframes app-loader-orbit {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes app-loader-progress {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-loader-orbit,
+  .app-loader-progress {
+    animation: none;
+  }
+}

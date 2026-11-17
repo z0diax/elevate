@@ -23,6 +23,10 @@ function praise_start_session(): void {
     ini_set('session.use_trans_sid', '0');
     ini_set('session.gc_maxlifetime', (string)$idle);
     session_name('PRAISESESSID');
+    if (getenv('SESSION_STORAGE') === 'database') {
+        require_once __DIR__ . '/database_session.php';
+        session_set_save_handler(new PraiseDatabaseSession(), true);
+    }
     session_set_cookie_params([
         'httponly' => true,
         'samesite' => 'Lax',

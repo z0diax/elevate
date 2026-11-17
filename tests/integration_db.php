@@ -6,12 +6,20 @@ require_test_database();
 require_once __DIR__ . '/../api/config/database.php';
 
 $mode = $argv[1] ?? '';
-if (!in_array($mode, ['setup', 'cleanup', 'verify-empty'], true)) throw new RuntimeException('Use setup, cleanup, or verify-empty.');
+if (!in_array($mode, ['setup', 'cleanup', 'verify-empty', 'verify-cloud-file'], true)) throw new RuntimeException('Invalid fixture operation.');
 $run = (string)(getenv('TEST_RUN_ID') ?: '');
 if ($mode !== 'verify-empty' && !preg_match('/^[a-f0-9]{16}$/D', $run)) throw new RuntimeException('TEST_RUN_ID must be a random 16-character hex value.');
 $db = (new Database())->getConnection();
 if (!$db) throw new RuntimeException('The explicitly configured test database does not exist or cannot be reached. Create an empty *_test database first.');
 $tables = $db->query('SHOW TABLES')->fetchAll(PDO::FETCH_COLUMN);
+
+if ($mode === 'verify-cloud-file') {
+    require_once __DIR__ . '/../api/config/database_storage.php';
+    $path = database_materialize_file((string)getenv('TEST_FILE_REFERENCE'), $db);
+    if ($path === null || hash_file('sha256', $path) !== getenv('TEST_FILE_SHA256')) throw new RuntimeException('Stored file bytes differ.');
+    echo "Stored file bytes verified.\n";
+    exit;
+}
 
 if ($mode === 'verify-empty') {
     foreach ($tables as $table) {
@@ -40,6 +48,9 @@ if ($mode === 'setup') {
             if ($statement === '' || preg_match('/^(CREATE DATABASE|USE |INSERT INTO|DROP TABLE)/i', $statement)) continue;
             $db->exec($statement);
         }
+    }
+    if (getenv('TEST_CLOUD_STORAGE') === '1') {
+        $db->exec((string)file_get_contents(__DIR__ . '/../database_migrations/20261117_cloud_storage.sql'));
     }
     $id = static fn(string $name): string => 'test-' . $run . '-' . $name;
     $password = (string)(getenv('TEST_PASSWORD') ?: '');
@@ -88,6 +99,12 @@ try {
         $db->prepare('DELETE FROM applications WHERE id = ?')->execute([$app]);
     }
     foreach (['awards', 'profiles', 'offices'] as $table) $db->prepare("DELETE FROM {$table} WHERE id LIKE ?")->execute([$like]);
+    if (getenv('TEST_CLOUD_STORAGE') === '1') {
+        // Setup refuses any preexisting records; these tables contain only this run.
+        $db->exec('DELETE FROM praise_files');
+        $db->exec('DELETE FROM praise_sessions');
+        $db->exec('DELETE FROM report_settings');
+    }
     $db->commit();
     echo "Test database fixtures removed.\n";
 } catch (Throwable $error) {

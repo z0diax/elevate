@@ -22,6 +22,7 @@ import { LoginScreen } from './components/auth/LoginScreen';
 import { ChangePasswordScreen } from './components/auth/ChangePasswordScreen';
 import { NomineeSignupScreen } from './components/auth/NomineeSignupScreen';
 import { ToastHost } from './components/common/ToastHost';
+import { AppLoader } from './components/common/AppLoader';
 import { showToast } from './lib/toast';
 
 const DESKTOP_BREAKPOINT = 1024;
@@ -125,6 +126,7 @@ export default function App() {
   });
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [isInitializing, setIsInitializing] = useState(true);
   const [loginError, setLoginError] = useState('');
   const [publicAuthRoute, setPublicAuthRoute] = useState<'login' | 'signup'>(getPublicAuthRoute);
 
@@ -224,6 +226,7 @@ export default function App() {
       } finally {
         if (!cancelled) {
           setIsLoading(false);
+          setIsInitializing(false);
         }
       }
     };
@@ -376,30 +379,43 @@ export default function App() {
     && (application.nominee_id === currentUser.id || application.nominator_id === currentUser.id)
   ).length;
 
+  if (isInitializing) {
+    return <AppLoader />;
+  }
+
   if (!currentUser) {
     if (publicAuthRoute === 'signup') {
       return (
-        <NomineeSignupScreen
-          errorMessage={loginError}
-          isSubmitting={isLoading}
-          onSignup={handleNomineeSignup}
-          onNavigateToLogin={() => navigatePublicAuthRoute('login')}
-        />
+        <>
+          <NomineeSignupScreen
+            errorMessage={loginError}
+            isSubmitting={isLoading}
+            onSignup={handleNomineeSignup}
+            onNavigateToLogin={() => navigatePublicAuthRoute('login')}
+          />
+          {isLoading && <AppLoader overlay message="Creating your account..." />}
+        </>
       );
     }
 
     return (
-      <LoginScreen
-        errorMessage={loginError}
-        isSubmitting={isLoading}
-        onLogin={handleLogin}
-        onNavigateToSignup={() => navigatePublicAuthRoute('signup')}
-      />
+      <>
+        <LoginScreen
+          errorMessage={loginError}
+          isSubmitting={isLoading}
+          onLogin={handleLogin}
+          onNavigateToSignup={() => navigatePublicAuthRoute('signup')}
+        />
+        {isLoading && <AppLoader overlay message="Signing you in..." />}
+      </>
     );
   }
 
   if (currentUser.must_change_password) {
-    return <ChangePasswordScreen onChangePassword={handleChangePassword} onLogout={handleLogout} />;
+    return <>
+      <ChangePasswordScreen onChangePassword={handleChangePassword} onLogout={handleLogout} />
+      {isLoading && <AppLoader overlay message="Updating your session..." />}
+    </>;
   }
 
   return (
@@ -567,13 +583,7 @@ export default function App() {
         </main>
       </div>
 
-      {isLoading && (
-        <div className="fixed inset-0 z-[70] bg-slate-950/35 backdrop-blur-[1px] pointer-events-none flex items-center justify-center">
-          <div className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white shadow-2xl">
-            Syncing application data...
-          </div>
-        </div>
-      )}
+      {isLoading && <AppLoader overlay message="Updating your session..." />}
     </div>
   );
 }

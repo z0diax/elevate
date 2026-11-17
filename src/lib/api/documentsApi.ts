@@ -1,25 +1,19 @@
 import { ApplicationDocument } from '../../types';
-import { apiRequest } from './client';
+import { uploadFile } from './fileUpload';
 import { normalizeDocument } from './normalizers';
 import { loadApplications, loadAuditLogs, loadNotifications, state } from './state';
 
 export const documentsApi = {
   async uploadApplicationDocument(applicationId: string, file: File, documentName: string, requirementId?: string, documentId?: string, refreshAfterUpload = true): Promise<ApplicationDocument> {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('application_id', applicationId);
-    formData.append('document_name', documentName);
+    const fields: Record<string, string> = { application_id: applicationId, document_name: documentName };
     if (requirementId) {
-      formData.append('requirement_id', requirementId);
+      fields.requirement_id = requirementId;
     }
     if (documentId) {
-      formData.append('document_id', documentId);
+      fields.document_id = documentId;
     }
 
-    const document = normalizeDocument(await apiRequest<any>('documents.php', {
-      method: 'POST',
-      body: formData,
-    }));
+    const document = normalizeDocument(await uploadFile<any>('documents.php', 'file', file, fields));
 
     if (refreshAfterUpload) {
       try {

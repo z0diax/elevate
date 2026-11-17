@@ -1,5 +1,7 @@
 # Running tests
 
+Run `npm run test:deployment` for URL resolution checks for Vercel root deployments and XAMPP subdirectories. Set `TEST_CLOUD_STORAGE=1` when running `node tests/integration.mjs` against a separate empty test database to check durable sessions/files, chunked uploads, and the full workflow, including a server restart and a file larger than Vercel's request limit.
+
 Unit checks need PHP on `PATH` and the installed npm dependencies:
 
 ```powershell

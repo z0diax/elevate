@@ -1,5 +1,6 @@
 import { CertificateTemplateSettings } from '../../types';
 import { apiRequest } from './client';
+import { uploadFile } from './fileUpload';
 import { normalizeCertificateBackgroundUrl, normalizeStoredCertificateTemplateSettings, toProjectRelativePath } from './normalizers';
 import { state } from './state';
 
@@ -25,13 +26,7 @@ export const reportSettingsApi = {
   },
 
   async uploadCertificateTemplateBackground(file: File): Promise<string> {
-    const formData = new FormData();
-    formData.append('background_image', file);
-
-    const payload = await apiRequest<any>('report_settings.php', {
-      method: 'POST',
-      body: formData,
-    });
+    const payload = await uploadFile<any>('report_settings.php', 'background_image', file);
 
     return normalizeCertificateBackgroundUrl(payload?.background_image_url);
   },

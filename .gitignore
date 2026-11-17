@@ -3,6 +3,7 @@ node_modules/
 build/
 dist/
 coverage/
+.vercel/
 tmp/
 output/
 __pycache__/

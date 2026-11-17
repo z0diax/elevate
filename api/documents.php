@@ -49,7 +49,7 @@ function has_docx_structure(string $path): bool {
         && str_contains($contentTypes, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml');
 }
 
-function validate_document_upload(array $file): array {
+function validate_document_upload(array $file, bool $staged = false): array {
     $error = $file['error'] ?? UPLOAD_ERR_NO_FILE;
     if ($error !== UPLOAD_ERR_OK) {
         if (in_array($error, [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true)) {
@@ -58,7 +58,7 @@ function validate_document_upload(array $file): array {
         sendResponse(400, [], $error === UPLOAD_ERR_NO_FILE ? 'Please select a file.' : 'The upload failed or was incomplete.');
     }
     $path = $file['tmp_name'] ?? null;
-    if (!is_string($path) || !is_uploaded_file($path)) sendResponse(400, [], 'Invalid uploaded file.');
+    if (!is_string($path) || (!$staged && !is_uploaded_file($path))) sendResponse(400, [], 'Invalid uploaded file.');
     $size = filesize($path);
     if ($size === false || $size <= 0) sendResponse(400, [], 'The selected attachment is empty or invalid.');
     if ($size > MAX_DOCUMENT_SIZE) sendResponse(413, [], 'File is too large. Maximum file size is 10 MB.');
@@ -96,6 +96,11 @@ function validate_document_upload(array $file): array {
 }
 
 function delete_replaced_upload(string $reference): void {
+    if (database_file_storage()) {
+        try { database_delete_file(storage_database(), $reference); }
+        catch (Throwable $error) { error_log('[documents.php] Unable to remove replaced database upload.'); }
+        return;
+    }
     $path = document_storage_path($reference);
     if ($path !== null && !unlink($path)) error_log('[documents.php] Unable to remove replaced upload.');
 }
@@ -141,12 +146,18 @@ if ($method === 'GET' && ($_GET['action'] ?? '') === 'download') {
     header('X-Content-Type-Options: nosniff');
     header('Cache-Control: private, no-store');
     header('Pragma: no-cache');
-    readfile($path);
+    stream_stored_file($path);
     exit();
 }
 
 if ($method === 'POST') {
     $actor = require_auth($db);
+    $staged = null;
+    if (database_file_storage() && str_starts_with($_SERVER['CONTENT_TYPE'] ?? '', 'application/json')) {
+        $staged = load_staged_upload($db, $actor, 'documents');
+        $_POST = $staged['fields'];
+        $_FILES = ['file' => $staged['file']];
+    }
 
     if (!isset($_FILES['file'])) {
         // The UI only uploads files. Oversized multipart bodies can also arrive empty.
@@ -160,7 +171,7 @@ if ($method === 'POST') {
     requireFields($_POST, ['application_id', 'document_id', 'requirement_id', 'document_name']);
     requireFields($_FILES, ['file']);
     if (!is_array($file) || is_array($file['name'] ?? null)) sendResponse(400, [], 'Upload one file at a time.');
-    [$extension, $detectedMime, $fileSize] = validate_document_upload($file);
+    [$extension, $detectedMime, $fileSize] = validate_document_upload($file, $staged !== null);
     $applicationId = $_POST['application_id'] ?? '';
     $documentId = $_POST['document_id'] ?? '';
     $requirementId = $_POST['requirement_id'] ?? null;
@@ -200,7 +211,7 @@ if ($method === 'POST') {
             $documentId = $existingDocument['id'];
         }
     }
-    $uploadDir = prepare_private_document_dir();
+    $uploadDir = database_file_storage() ? sys_get_temp_dir() . DIRECTORY_SEPARATOR : prepare_private_document_dir();
     if ($uploadDir === null) {
         error_log('[documents.php:upload] Private storage is unavailable or within the web root.');
         sendResponse(500, [], 'Upload storage is unavailable.');
@@ -242,8 +253,13 @@ if ($method === 'POST') {
             }
             $oldFileUrl = (string)$oldDocument['file_url'];
         }
-        if (!move_uploaded_file($file['tmp_name'], $targetPath)) throw new RuntimeException('Unable to move uploaded file.');
-        $fileMoved = true;
+        if (database_file_storage()) {
+            database_store_file($db, $fileUrl, $file['tmp_name']);
+            if ($staged !== null) consume_staged_upload($db, $staged['reference'], (string)$actor['id']);
+        } else {
+            if (!move_uploaded_file($file['tmp_name'], $targetPath)) throw new RuntimeException('Unable to move uploaded file.');
+            $fileMoved = true;
+        }
         if ($documentId !== '') {
             $stmt = $db->prepare("
                 UPDATE application_documents

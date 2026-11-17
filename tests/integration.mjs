@@ -4,7 +4,7 @@ import { createServer } from 'node:net';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, rmdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
 const root = resolve(import.meta.dirname, '..');
 const database = process.env.TEST_DB_NAME?.trim();
@@ -17,6 +17,8 @@ const id = name => `test-${run}-${name}`;
 const password = randomBytes(24).toString('base64url');
 const storage = mkdtempSync(join(tmpdir(), `praise-${run}-`));
 const env = { ...process.env, DB_NAME: database, TEST_DB_NAME: database, TEST_RUN_ID: run, TEST_PASSWORD: password, PRIVATE_UPLOAD_DIR: storage };
+const cloudStorage = process.env.TEST_CLOUD_STORAGE === '1';
+if (cloudStorage) Object.assign(env, { FILE_STORAGE: 'database', SESSION_STORAGE: 'database' });
 let server;
 let setupComplete = false;
 let serverErrors = '';
@@ -152,6 +154,48 @@ async function main() {
     await login('filer');
   });
   for (const name of ['admin', 'secretary', 'head', 'other-head', 'other-filer', 'A', 'B', 'C', 'D', 'E', 'F']) await login(name);
+  if (cloudStorage) await test('chunked uploads preserve large files, enforce ownership and survive a server restart', async () => {
+    const app = await createNomination();
+    const bytes = Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(6 * 1024 * 1024, 65), Buffer.from('\n%%EOF\n')]);
+    const started = expect(await request('/api/uploads.php?action=start', { actor: 'filer', method: 'POST', json: {
+      target: 'documents', file_name: 'large.pdf', file_size: bytes.length,
+      fields: { application_id: app.id, document_name: 'Large attachment', requirement_id: id('requirement-one') },
+    } }), 201, 'start chunked upload');
+    expect(await request('/api/documents.php', { actor: 'filer', method: 'POST', json: { upload_id: started.upload_id } }), 409, 'incomplete upload');
+    expect(await request('/api/documents.php', { actor: 'other-filer', method: 'POST', json: { upload_id: started.upload_id } }), 404, 'other account upload');
+    for (let index = started.chunk_count - 1; index >= 0; index--) {
+      const part = new FormData();
+      part.append('upload_id', started.upload_id); part.append('part_no', String(index));
+      part.append('chunk', new Blob([bytes.subarray(index * started.chunk_size, (index + 1) * started.chunk_size)]), 'chunk');
+      expect(await request('/api/uploads.php?action=part', { actor: 'other-filer', method: 'POST', form: part }), 404, 'other account chunk');
+      expect(await request('/api/uploads.php?action=part', { actor: 'filer', method: 'POST', form: part }), 200, 'upload chunk');
+      expect(await request('/api/uploads.php?action=part', { actor: 'filer', method: 'POST', form: part }), 200, 'retry same chunk');
+    }
+    const uploaded = expect(await request('/api/documents.php', { actor: 'filer', method: 'POST', json: { upload_id: started.upload_id } }), 201, 'complete staged upload');
+    expect(await request('/api/documents.php', { actor: 'filer', method: 'POST', json: { upload_id: started.upload_id } }), 404, 'consumed upload');
+    const stopped = new Promise(ok => server.once('exit', ok)); server.kill(); await stopped;
+    server = spawn('php', ['-S', `127.0.0.1:${port}`, '-t', root], { cwd: root, env, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+    server.stderr.on('data', chunk => { serverErrors = (serverErrors + chunk.toString()).slice(-8000); });
+    await ready(base);
+    assert.equal(expect(await request('/api/auth.php?action=current', { actor: 'filer' }), 200, 'session after restart').id, id('filer'));
+    const downloaded = await request(`/api/documents.php?action=download&id=${uploaded.id}`, { actor: 'filer' });
+    assert.equal(downloaded.status, 200); assert.deepEqual(downloaded.raw, bytes);
+    expect(await request(`/api/documents.php?action=download&id=${uploaded.id}`, { actor: 'other-filer' }), 404, 'private download');
+    expect(await request(`/api/applications.php?id=${app.id}`, { actor: 'admin', method: 'DELETE', json: {} }), 200, 'delete large fixture');
+  });
+  if (cloudStorage) await test('certificate images use durable storage and restricted upload permissions', async () => {
+    const payload = { target: 'certificate', file_name: 'background.png', file_size: png.length, fields: {} };
+    expect(await request('/api/uploads.php?action=start', { actor: 'filer', method: 'POST', json: payload }), 403, 'nominee certificate upload');
+    const upload = expect(await request('/api/uploads.php?action=start', { actor: 'secretary', method: 'POST', json: payload }), 201, 'start certificate');
+    const form = new FormData();
+    form.append('upload_id', upload.upload_id); form.append('part_no', '0'); form.append('chunk', new Blob([png]), 'chunk');
+    expect(await request('/api/uploads.php?action=part', { actor: 'secretary', method: 'POST', form }), 200, 'certificate chunk');
+    const image = expect(await request('/api/report_settings.php', { actor: 'secretary', method: 'POST', json: { upload_id: upload.upload_id } }), 201, 'store certificate');
+    env.TEST_FILE_REFERENCE = image.background_image_url;
+    env.TEST_FILE_SHA256 = createHash('sha256').update(png).digest('hex');
+    assert.equal(php('tests/integration_db.php', 'verify-cloud-file'), 'Stored file bytes verified.');
+    delete env.TEST_FILE_REFERENCE; delete env.TEST_FILE_SHA256;
+  });
   await test('multiple offices persist, govern head access, and can be removed', async () => {
     let user, app;
     try {

@@ -8,6 +8,9 @@ require_once __DIR__ . '/runtime.php';
 // Keep production diagnostics in server logs, never in JSON responses.
 ini_set('display_errors', '0');
 ini_set('log_errors', '1');
+// API responses contain user-specific records and must never be cached by a CDN.
+header('Cache-Control: private, no-store');
+header('CDN-Cache-Control: no-store');
 try {
     $appEnvironment = app_environment();
     if ($appEnvironment === 'production' && app_production_config_errors($_SERVER)) {

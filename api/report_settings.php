@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/config/cors.php';
 require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/config/session_auth.php';
+require_once __DIR__ . '/config/database_storage.php';
 
 $database = new Database();
 $db = $database->getConnection();
@@ -45,6 +46,7 @@ function ensure_default_report_settings(PDO $db): void {
         return;
     }
 
+    $defaults = default_report_settings();
     $insert = $db->prepare("
         INSERT INTO `report_settings` (
             `id`,
@@ -152,6 +154,10 @@ function get_certificate_background_upload_dir(): string {
 }
 
 function delete_certificate_background_file(?string $relativePath): void {
+    if (database_file_storage()) {
+        if (is_string($relativePath)) database_delete_file(storage_database(), $relativePath);
+        return;
+    }
     if (!$relativePath) {
         return;
     }
@@ -181,7 +187,13 @@ if ($method === 'GET') {
 }
 
 if ($method === 'POST') {
-    require_auth($db, ['ADMINISTRATOR', 'SECRETARIAT']);
+    $actor = require_auth($db, ['ADMINISTRATOR', 'SECRETARIAT']);
+    $staged = null;
+    if (database_file_storage() && str_starts_with($_SERVER['CONTENT_TYPE'] ?? '', 'application/json')) {
+        $staged = load_staged_upload($db, $actor, 'certificate');
+        $_POST = [];
+        $_FILES = ['background_image' => $staged['file']];
+    }
 
     if (!isset($_FILES['background_image'])) {
         sendResponse(400, [], 'background_image file is required.');
@@ -198,7 +210,7 @@ if ($method === 'POST') {
         sendResponse(400, [], 'Certificate background image must not exceed 8 MB.');
     }
 
-    if (!is_string($file['tmp_name'] ?? null) || !is_uploaded_file($file['tmp_name'])) sendResponse(400, [], 'Invalid certificate background upload.');
+    if (!is_string($file['tmp_name'] ?? null) || ($staged === null && !is_uploaded_file($file['tmp_name']))) sendResponse(400, [], 'Invalid certificate background upload.');
     $mimeType = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
     if (getimagesize($file['tmp_name']) === false) sendResponse(400, [], 'Invalid certificate background image.');
     $allowedMimeTypes = [
@@ -212,7 +224,7 @@ if ($method === 'POST') {
     }
 
     $uploadDir = get_certificate_background_upload_dir();
-    if (!is_dir($uploadDir) && !mkdir($uploadDir, 0755, true) && !is_dir($uploadDir)) {
+    if (!database_file_storage() && !is_dir($uploadDir) && !mkdir($uploadDir, 0755, true) && !is_dir($uploadDir)) {
         error_log('[report_settings.php:upload] Unable to create certificate background directory.');
         sendResponse(500, [], 'Failed to prepare the certificate background upload directory.');
     }
@@ -221,7 +233,14 @@ if ($method === 'POST') {
     $safeName = 'certificate_background_' . time() . '_' . rand(1000, 9999) . '.' . $extension;
     $targetPath = $uploadDir . $safeName;
 
-    if (!move_uploaded_file($file['tmp_name'], $targetPath)) {
+    if (database_file_storage()) {
+        $db->beginTransaction();
+        try {
+            database_store_file($db, 'uploads/certificate_templates/' . $safeName, $file['tmp_name']);
+            if ($staged !== null) consume_staged_upload($db, $staged['reference'], (string)$actor['id']);
+            $db->commit();
+        } catch (Throwable $error) { if ($db->inTransaction()) $db->rollBack(); throw $error; }
+    } elseif (!move_uploaded_file($file['tmp_name'], $targetPath)) {
         error_log('[report_settings.php:upload] Unable to store certificate background image.');
         sendResponse(500, [], 'Failed to store the uploaded certificate background image.');
     }

@@ -1,6 +1,10 @@
 # HRMDO PRAISE MANAGEMENT
 
-React frontend plus a PHP/MySQL API for XAMPP deployment.
+React frontend plus a PHP/MySQL API. Deploy the complete app to Vercel in a PHP container with a shared cloud database, or run it locally with XAMPP.
+
+## Vercel deployment and shared data
+
+Follow [README_VERCEL.md](README_VERCEL.md) to deploy the frontend and API together on Vercel. Records, sessions, and uploads persist in one cloud database with the existing account permissions. A local XAMPP instance alone does not make your data available outside your network.
 
 ## Development
 

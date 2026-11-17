@@ -7,7 +7,7 @@ export default defineConfig(() => {
   const phpApiBasePath = (process.env.PHP_API_PROXY_BASE_PATH ?? path.basename(__dirname))
     .replace(/^\/+|\/+$/g, '');
   return {
-    base: './',
+    base: process.env.VERCEL === '1' ? '/' : './',
     build: {
       outDir: 'dist',
       assetsDir: 'assets',

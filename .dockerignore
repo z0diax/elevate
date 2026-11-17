@@ -1,0 +1,11 @@
+.git
+.vercel
+node_modules
+dist
+tmp
+output
+uploads
+.env*
+tests
+database.sql
+database_migrations

@@ -18,19 +18,19 @@ class Database {
         // XAMPP defaults are available only in explicit development mode.
         if (app_environment() === 'production') {
             foreach (['DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER', 'DB_PASS'] as $name) {
-                if (trim((string)(getenv($name) ?: '')) === '') {
+                if (trim((string)(database_environment($name) ?: '')) === '') {
                     throw new RuntimeException('Production database configuration is incomplete.');
                 }
             }
-            if (!$migrationCredentials && strtolower(trim((string)getenv('DB_USER'))) === 'root') {
+            if (!$migrationCredentials && strtolower(trim((string)database_environment('DB_USER'))) === 'root') {
                 throw new RuntimeException('The runtime database account must not be root.');
             }
         }
-        if (getenv('DB_HOST')) $this->host = getenv('DB_HOST');
-        if (getenv('DB_NAME')) $this->db_name = getenv('DB_NAME');
-        if (getenv('DB_USER')) $this->username = getenv('DB_USER');
-        if (getenv('DB_PASS') !== false) $this->password = getenv('DB_PASS');
-        if (getenv('DB_PORT')) $this->port = getenv('DB_PORT');
+        if (database_environment('DB_HOST')) $this->host = database_environment('DB_HOST');
+        if (database_environment('DB_NAME')) $this->db_name = database_environment('DB_NAME');
+        if (database_environment('DB_USER')) $this->username = database_environment('DB_USER');
+        if (database_environment('DB_PASS') !== false) $this->password = database_environment('DB_PASS');
+        if (database_environment('DB_PORT')) $this->port = database_environment('DB_PORT');
     }
 
     public function getConnection() {
@@ -43,6 +43,12 @@ class Database {
                 PDO::ATTR_EMULATE_PREPARES => false,
                 PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci"
             ];
+            $ca = trim((string)(getenv('DB_SSL_CA') ?: ''));
+            if ($ca !== '') {
+                if (!is_file($ca)) throw new RuntimeException('Database TLS certificate bundle is unavailable.');
+                $options[PDO::MYSQL_ATTR_SSL_CA] = $ca;
+                $options[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = true;
+            }
             $this->conn = new PDO($dsn, $this->username, $this->password, $options);
         } catch(PDOException $exception) {
             error_log('[database.php:connect] ' . get_class($exception) . ': ' . $exception->getMessage());

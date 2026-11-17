@@ -10,7 +10,7 @@ if ($db) {
     try {
         $actor = get_session_user($db);
         if (!$actor || $actor['role'] !== 'ADMINISTRATOR') {
-            sendResponse(200, ['database_connected' => true], 'XAMPP MySQL Database is connected and operational.');
+            sendResponse(200, ['database_connected' => true], 'Database is connected and operational.');
         }
         $stmt = $db->query("SELECT COUNT(*) as app_count FROM applications");
         $apps = $stmt->fetch();
@@ -20,13 +20,13 @@ if ($db) {
 
         sendResponse(200, [
             "database_connected" => true,
-            "engine" => "MySQL / MariaDB (XAMPP)",
-            "database" => "tacloban_praise_db",
+            "engine" => "MySQL / MariaDB compatible",
+            "database" => database_environment('DB_NAME') ?: 'tacloban_praise_db',
             "counts" => [
                 "applications" => (int)$apps['app_count'],
                 "users" => (int)$users['user_count']
             ]
-        ], "XAMPP MySQL Database is connected and operational.");
+        ], "Database is connected and operational.");
     } catch(Throwable $e) {
         sendInternalError($e, 'health.php:check', 'Database health check failed.');
     }

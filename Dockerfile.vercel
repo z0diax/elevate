@@ -1,0 +1,21 @@
+FROM node:22-alpine AS frontend
+WORKDIR /build
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY index.html tsconfig.json vite.config.ts ./
+COPY src ./src
+COPY public ./public
+ENV VERCEL=1 VITE_CLOUD_UPLOADS=1
+RUN npm run build
+
+FROM dunglas/frankenphp:1-php8.4-alpine
+RUN install-php-extensions pdo_mysql zip
+RUN cp "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
+COPY deploy/php.ini /usr/local/etc/php/conf.d/praise.ini
+WORKDIR /app
+COPY --from=frontend /build/dist ./public
+COPY api ./backend/api
+COPY deploy/router.php ./public/index.php
+COPY deploy/Caddyfile /etc/caddy/Caddyfile
+ENV PORT=80 APP_ENV=production VERCEL_CONTAINER=1 FILE_STORAGE=database SESSION_STORAGE=database DB_SSL_CA=/etc/ssl/certs/ca-certificates.crt
+CMD ["frankenphp", "run", "--config", "/etc/caddy/Caddyfile"]

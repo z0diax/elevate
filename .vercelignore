@@ -1,0 +1,11 @@
+# PHP source is copied outside the web root by Dockerfile.vercel.
+uploads/
+database_migrations/
+database.sql
+setup_db.php
+.htaccess
+tests/
+tmp/
+output/
+.env*
+!.env.example

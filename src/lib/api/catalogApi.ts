@@ -8,10 +8,15 @@ export const catalogApi = {
     return [...state.cachedOffices];
   },
 
-  async createOffice(office: Omit<Office, 'id'>): Promise<Office> {
+  async createOffice(office: Omit<Office, 'id' | 'is_active'>): Promise<Office> {
     const createdOffice = normalizeOffice(await apiRequest<any>('offices.php', {
       method: 'POST',
-      body: JSON.stringify(office),
+      body: JSON.stringify({
+        name: office.name,
+        code: office.code,
+        head_name: office.head_name,
+        head_title: office.head_title,
+      }),
     }));
     await loadOffices();
     return createdOffice;

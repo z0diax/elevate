@@ -26,9 +26,9 @@ export const NotificationDropdown: React.FC<NotificationDropdownProps> = ({
   return (
     <div
       id="notification-dropdown"
-      className="absolute right-0 mt-2 w-80 sm:w-96 bg-white dark:bg-slate-900 rounded-xl shadow-xl border border-slate-200 dark:border-slate-800 z-50 overflow-hidden"
+      className="fixed inset-x-3 top-16 sm:absolute sm:inset-x-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-96 bg-white dark:bg-slate-900 rounded-xl shadow-xl border border-slate-200 dark:border-slate-800 z-50 overflow-hidden"
     >
-      <div className="flex items-center justify-between px-4 py-3 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800">
         <div className="flex items-center gap-2">
           <Bell size={16} className="text-blue-600 dark:text-blue-400" />
           <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Notifications</h3>
@@ -50,7 +50,7 @@ export const NotificationDropdown: React.FC<NotificationDropdownProps> = ({
         )}
       </div>
 
-      <div className="max-h-96 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+      <div className="max-h-[calc(100dvh-10rem)] sm:max-h-96 overflow-y-auto overscroll-contain divide-y divide-slate-100 dark:divide-slate-800">
         {notifications.length === 0 ? (
           <div className="p-8 text-center text-slate-500 dark:text-slate-400">
             <Bell size={28} className="mx-auto mb-2 opacity-40" />

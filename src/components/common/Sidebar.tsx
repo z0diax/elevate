@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { UserProfile, UserRole } from '../../types';
 import { APP_LOGO_URL } from '../../lib/branding';
 import { 
@@ -15,7 +15,8 @@ import {
   History, 
   Search,
   CheckCircle2,
-  FolderOpen
+  FolderOpen,
+  X
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -43,6 +44,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isOpen,
   onClose
 }) => {
+  const sidebarRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!isOpen || window.matchMedia('(min-width: 1024px)').matches) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    sidebarRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); onClose(); }
+      if (event.key !== 'Tab') return;
+      const buttons = Array.from(sidebarRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []);
+      const first = buttons[0];
+      const last = buttons[buttons.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', handleKeyDown);
+      previousFocus?.focus();
+    };
+  }, [isOpen, onClose]);
   interface NavItem {
     id: string;
     label: string;
@@ -190,8 +214,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       )}
 
       <aside
+        ref={sidebarRef}
         id="app-sidebar"
-        className={`fixed top-0 bottom-0 left-0 z-50 w-64 bg-slate-900 border-r border-slate-800 text-slate-300 transition-transform duration-300 ${
+        inert={!isOpen}
+        aria-label="Main navigation"
+        className={`fixed top-0 bottom-0 left-0 z-50 w-72 max-w-[calc(100vw-2rem)] lg:w-64 bg-slate-900 border-r border-slate-800 text-slate-300 transition-transform duration-300 ${
           isOpen ? 'translate-x-0 lg:translate-x-0' : '-translate-x-full lg:-translate-x-full'
         } flex flex-col justify-between`}
       >
@@ -204,6 +231,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <h1 className="text-white text-xs font-bold tracking-widest uppercase truncate">HRMDO</h1>
             <p className="text-blue-400 text-[10px] uppercase tracking-tighter font-semibold truncate">PRAISE Management</p>
           </div>
+          <button type="button" onClick={onClose} aria-label="Close navigation" className="ml-auto shrink-0 rounded-lg p-2 text-slate-300 hover:bg-slate-800 lg:hidden"><X size={20} /></button>
         </div>
 
         {/* Navigation list */}

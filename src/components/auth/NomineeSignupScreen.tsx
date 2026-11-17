@@ -44,9 +44,9 @@ export const NomineeSignupScreen: React.FC<NomineeSignupScreenProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-4 sm:p-6">
+    <div className="min-h-dvh bg-slate-950 text-white flex items-start justify-center p-3 sm:p-6 lg:items-center">
       <div className="w-full max-w-5xl grid lg:grid-cols-[1.15fr_0.85fr] overflow-hidden rounded-3xl border border-slate-800 bg-slate-900 shadow-2xl">
-        <div className="relative p-8 sm:p-10 lg:p-12 bg-linear-to-br from-slate-950 via-slate-900 to-blue-950">
+        <div className="relative hidden lg:block p-8 sm:p-10 lg:p-12 bg-linear-to-br from-slate-950 via-slate-900 to-blue-950">
           <div className="absolute inset-0 opacity-40 pointer-events-none bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.28),_transparent_36%),radial-gradient(circle_at_bottom_right,_rgba(14,165,233,0.2),_transparent_42%)]" />
           <div className="relative space-y-6">
             <div className="flex h-20 w-20 items-center justify-center">
@@ -68,8 +68,12 @@ export const NomineeSignupScreen: React.FC<NomineeSignupScreenProps> = ({
           </div>
         </div>
 
-        <div className="p-8 sm:p-10 lg:p-12 bg-white text-slate-900">
+        <div className="min-w-0 p-5 sm:p-10 lg:p-12 bg-white text-slate-900">
           <div className="max-w-sm mx-auto">
+            <div className="mb-6 flex items-center gap-3 border-b border-slate-100 pb-4 lg:hidden">
+              <img src={APP_LOGO_URL} alt="" className="h-12 w-12 shrink-0 object-contain" />
+              <p className="min-w-0 text-sm font-bold text-slate-900">{APP_NAME}</p>
+            </div>
             <div className="space-y-2">
               <p className="text-[11px] font-bold uppercase tracking-[0.24em] text-blue-700">Create Account</p>
               <h2 className="text-2xl font-bold">Nominee Sign Up</h2>

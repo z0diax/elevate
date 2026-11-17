@@ -27,15 +27,15 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
     >
       <div
         id="audit-trail-modal-dialog"
-        className="bg-white rounded-xl max-w-3xl w-full max-h-[calc(100dvh-1.5rem)] overflow-y-auto shadow-2xl border border-slate-200 my-4 sm:my-8"
+        className="bg-white rounded-xl max-w-3xl w-full max-h-[calc(100dvh-1.5rem)] overflow-y-auto shadow-2xl border border-slate-200 my-auto"
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 bg-slate-900 text-white">
-          <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between gap-2 px-4 py-4 sm:px-6 bg-slate-900 text-white">
+          <div className="flex min-w-0 items-center gap-3">
             <div className="p-2 bg-blue-600 rounded-md">
               <History size={18} className="text-white" />
             </div>
-            <div>
+            <div className="min-w-0 break-words">
               <h3 className="text-sm font-bold">PRAISE Official Audit Trail & History Log</h3>
               <p className="text-xs text-slate-300">
                 {applicationNumber

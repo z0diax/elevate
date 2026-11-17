@@ -30,6 +30,7 @@ DROP TABLE IF EXISTS `award_document_requirements`;
 DROP TABLE IF EXISTS `award_eligibility_requirements`;
 DROP TABLE IF EXISTS `awards`;
 DROP TABLE IF EXISTS `report_settings`;
+DROP TABLE IF EXISTS `profile_offices`;
 DROP TABLE IF EXISTS `profiles`;
 DROP TABLE IF EXISTS `offices`;
 
@@ -66,6 +67,18 @@ CREATE TABLE `profiles` (
   KEY `idx_profiles_role` (`role`),
   KEY `idx_profiles_office` (`office_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Preserve the original office as the first/default assignment.
+CREATE TABLE IF NOT EXISTS `profile_offices` (
+  `profile_id` VARCHAR(64) NOT NULL,
+  `office_id` VARCHAR(64) NOT NULL,
+  `sort_order` INT NOT NULL DEFAULT 0,
+  PRIMARY KEY (`profile_id`, `office_id`),
+  KEY `idx_profile_offices_office` (`office_id`),
+  CONSTRAINT `fk_profile_offices_profile` FOREIGN KEY (`profile_id`) REFERENCES `profiles` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_profile_offices_office` FOREIGN KEY (`office_id`) REFERENCES `offices` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 
 CREATE TABLE `login_throttle` (
   `email_hash` CHAR(64) NOT NULL PRIMARY KEY,

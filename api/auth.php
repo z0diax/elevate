@@ -20,14 +20,6 @@ if (!$db) {
 $method = $_SERVER['REQUEST_METHOD'];
 $action = $_GET['action'] ?? '';
 
-function validate_account_office(PDO $db, $officeId): void {
-    if ($officeId === null || $officeId === '') return;
-    $officeId = requireId($officeId, 'office ID');
-    $stmt = $db->prepare('SELECT id FROM offices WHERE id = :id AND is_active = 1');
-    $stmt->execute([':id' => $officeId]);
-    if (!$stmt->fetch()) sendResponse(400, [], 'Office not found.');
-}
-
 if ($method === 'GET') {
     if ($action === 'current') {
         $currentUser = get_session_user($db);
@@ -60,7 +52,7 @@ if ($method === 'GET') {
             sendResponse(404, [], 'User not found.');
         }
 
-        sendResponse(200, format_profile_record($user));
+        sendResponse(200, format_profile_record($user, $db));
     }
 
     if ($actor['role'] !== 'ADMINISTRATOR') {
@@ -84,7 +76,7 @@ if ($method === 'GET') {
     $sql .= " ORDER BY full_name ASC";
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
-    $users = array_map('format_profile_record', $stmt->fetchAll());
+    $users = array_map(static fn(array $user): array => format_profile_record($user, $db), $stmt->fetchAll());
 
     sendResponse(200, $users);
 }
@@ -121,7 +113,7 @@ if ($method === 'POST') {
         set_auth_session($user['id']);
         $db->prepare("UPDATE profiles SET last_login_at = NOW() WHERE id = :id")->execute([':id' => $user['id']]);
 
-        $profile = format_profile_record($user);
+        $profile = format_profile_record($user, $db);
         $profile['csrf_token'] = get_or_create_csrf_token();
         sendResponse(200, $profile, 'Login successful.');
     }
@@ -201,13 +193,13 @@ if ($method === 'POST') {
         set_auth_session($id);
         $db->prepare('UPDATE profiles SET last_login_at = NOW() WHERE id = :id')->execute([':id' => $id]);
 
-        $profile = format_profile_record($user);
+        $profile = format_profile_record($user, $db);
         $profile['csrf_token'] = get_or_create_csrf_token();
         sendResponse(201, $profile, 'Nominee account created successfully.');
     }
 
     require_auth($db, ['ADMINISTRATOR']);
-    requireFields($data, ['full_name', 'email', 'role', 'password', 'office_id', 'office_name', 'position_title', 'employee_id', 'contact_number', 'barangay', 'is_active', 'must_change_password']);
+    requireFields($data, ['full_name', 'email', 'role', 'password', 'office_ids', 'office_id', 'office_name', 'position_title', 'employee_id', 'contact_number', 'barangay', 'is_active', 'must_change_password']);
 
     if (empty($data['full_name']) || empty($data['email']) || empty($data['role']) || empty($data['password'])) {
         sendResponse(400, [], 'full_name, email, role, and password are required.');
@@ -221,7 +213,7 @@ if ($method === 'POST') {
     if (strlen($data['password']) < 8) sendResponse(400, [], 'Password must be at least 8 characters long.');
     foreach (['office_name' => 255, 'position_title' => 255, 'employee_id' => 50, 'contact_number' => 50, 'barangay' => 255] as $field => $max) if (isset($data[$field])) requireText($data[$field], $field, $max);
     if (isset($data['office_id'])) $data['office_id'] = optionalId($data['office_id'], 'office ID');
-    validate_account_office($db, $data['office_id'] ?? null);
+    validate_profile_offices($db, $data);
     foreach (['is_active', 'must_change_password'] as $field) if (array_key_exists($field, $data)) $data[$field] = requireBool($data[$field], $field);
 
     $id = 'usr-' . time() . '-' . rand(100, 999);
@@ -235,21 +227,30 @@ if ($method === 'POST') {
         )
     ");
 
-    $stmt->execute([
-        ':id' => $id,
-        ':email' => trim((string)$data['email']),
-        ':full_name' => trim((string)$data['full_name']),
-        ':role' => $data['role'],
-        ':office_id' => $data['office_id'] ?? null,
-        ':office_name' => $data['office_name'] ?? null,
-        ':position_title' => $data['position_title'] ?? null,
-        ':employee_id' => $data['employee_id'] ?? null,
-        ':contact_number' => $data['contact_number'] ?? null,
-        ':barangay' => $data['barangay'] ?? null,
-        ':password_hash' => password_hash((string)$data['password'], PASSWORD_DEFAULT),
-        ':is_active' => !isset($data['is_active']) || $data['is_active'] ? 1 : 0,
-        ':must_change_password' => !empty($data['must_change_password']) ? 1 : 0,
-    ]);
+    $db->beginTransaction();
+    try {
+        $stmt->execute([
+            ':id' => $id,
+            ':email' => trim((string)$data['email']),
+            ':full_name' => trim((string)$data['full_name']),
+            ':role' => $data['role'],
+            ':office_id' => $data['office_id'] ?? null,
+            ':office_name' => $data['office_name'] ?? null,
+            ':position_title' => $data['position_title'] ?? null,
+            ':employee_id' => $data['employee_id'] ?? null,
+            ':contact_number' => $data['contact_number'] ?? null,
+            ':barangay' => $data['barangay'] ?? null,
+            ':password_hash' => password_hash((string)$data['password'], PASSWORD_DEFAULT),
+            ':is_active' => !isset($data['is_active']) || $data['is_active'] ? 1 : 0,
+            ':must_change_password' => !empty($data['must_change_password']) ? 1 : 0,
+        ]);
+
+        save_profile_offices($db, $id, $data['office_ids'] ?? []);
+        $db->commit();
+    } catch (Throwable $e) {
+        if ($db->inTransaction()) $db->rollBack();
+        sendInternalError($e, 'auth.php:create_user', 'Failed to create user account.');
+    }
 
     $stmt = $db->prepare("
         SELECT id, email, full_name, role, office_id, office_name, position_title,
@@ -261,14 +262,14 @@ if ($method === 'POST') {
     $stmt->execute([':id' => $id]);
     $user = $stmt->fetch();
 
-    sendResponse(201, format_profile_record($user), 'User created successfully.');
+    sendResponse(201, format_profile_record($user, $db), 'User created successfully.');
 }
 
 if ($method === 'PUT') {
     require_auth($db, ['ADMINISTRATOR']);
 
     $data = getJsonInput();
-    requireFields($data, ['id', 'full_name', 'role', 'office_id', 'office_name', 'position_title', 'employee_id', 'contact_number', 'barangay', 'is_active', 'must_change_password', 'password']);
+    requireFields($data, ['id', 'full_name', 'role', 'office_ids', 'office_id', 'office_name', 'position_title', 'employee_id', 'contact_number', 'barangay', 'is_active', 'must_change_password', 'password']);
     if (empty($data['id'])) {
         sendResponse(400, [], 'User id is required for update.');
     }
@@ -276,7 +277,7 @@ if ($method === 'PUT') {
     if (isset($data['full_name'])) requireText($data['full_name'], 'full name', 255, true);
     foreach (['office_name' => 255, 'position_title' => 255, 'employee_id' => 50, 'contact_number' => 50, 'barangay' => 255] as $field => $max) if (isset($data[$field])) requireText($data[$field], $field, $max);
     if (isset($data['office_id'])) $data['office_id'] = optionalId($data['office_id'], 'office ID');
-    validate_account_office($db, $data['office_id'] ?? null);
+    validate_profile_offices($db, $data);
     foreach (['is_active', 'must_change_password'] as $field) if (array_key_exists($field, $data)) $data[$field] = requireBool($data[$field], $field);
     if (array_key_exists('password', $data)) {
         requireText($data['password'], 'password', 1024);
@@ -357,6 +358,7 @@ if ($method === 'PUT') {
             $db->rollBack();
             sendResponse(404, [], 'User not found.');
         }
+        if (array_key_exists('office_ids', $data)) save_profile_offices($db, $data['id'], $data['office_ids']);
         $db->commit();
     } catch (Throwable $e) {
         if ($db->inTransaction()) {
@@ -365,7 +367,7 @@ if ($method === 'PUT') {
         sendInternalError($e, 'auth.php:update_user', 'Failed to update user account.');
     }
 
-    sendResponse(200, format_profile_record($user), 'User updated successfully.');
+    sendResponse(200, format_profile_record($user, $db), 'User updated successfully.');
 }
 
 if ($method === 'DELETE') {

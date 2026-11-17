@@ -5,6 +5,8 @@ export interface UserProfile {
   email: string;
   full_name: string;
   role: UserRole;
+  office_ids?: string[];
+  office_names?: string[];
   office_id?: string;
   office_name?: string;
   position_title?: string;

@@ -23,16 +23,52 @@ textarea {
   word-break: break-word;
 }
 
-@media (max-width: 639px) {
+@media (max-width: 1023px) {
+  button,
+  a[role="button"] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select {
+    min-height: 44px;
+  }
+
   input,
   select,
   textarea {
     font-size: 16px !important;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  input[type="checkbox"],
+  input[type="radio"] {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+  }
+
+  button:focus-visible,
+  a:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 2px;
   }
 
   .mobile-scroll-table {
     -webkit-overflow-scrolling: touch;
     overscroll-behavior-inline: contain;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
   }
 }
 /* Keep the transparent brand mark readable against the dark application chrome. */

@@ -1,3 +1,4 @@
+import { hasAssignedOffice } from './lib/userOffices';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Application, ApplicationHistory, Award, CertificateTemplateSettings, InAppNotification, Office, UserProfile } from './types';
 import { DEFAULT_CERTIFICATE_TEMPLATE_SETTINGS } from './lib/certificateTemplate';
@@ -350,7 +351,7 @@ export default function App() {
   }, [currentUser?.role]);
 
   const pendingEndorsementCount = applications.filter(application => {
-    const isSameOffice = !currentUser?.office_id || application.office_id === currentUser.office_id;
+    const isSameOffice = Boolean(currentUser && hasAssignedOffice(currentUser, application.office_id));
     return (application.status === 'Submitted' || application.status === 'For Endorsement') && isSameOffice;
   }).length;
 
@@ -430,6 +431,7 @@ export default function App() {
           onMarkNotificationRead={handleMarkNotificationRead}
           onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
           onToggleSidebar={handleToggleSidebar}
+          isSidebarOpen={isSidebarOpen}
           onNavigateToTab={tab => {
             if (tab === 'new-nomination') {
               handleOpenNominationForm();

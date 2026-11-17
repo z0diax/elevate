@@ -980,7 +980,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
         )}
 
         {/* Wizard Controls Navigation */}
-        <div className="flex items-center justify-between pt-6 border-t border-slate-200">
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-6 border-t border-slate-200">
           {step > 1 ? (
             <button
               id="wizard-prev-btn"

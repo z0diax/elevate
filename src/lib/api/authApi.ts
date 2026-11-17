@@ -75,12 +75,13 @@ export const authApi = {
     return createdUser;
   },
 
-  async updateUserRole(userId: string, newRole: UserRole, officeId?: string, officeName?: string, password?: string): Promise<UserProfile> {
+  async updateUserRole(userId: string, newRole: UserRole, officeId?: string, officeName?: string, password?: string, officeIds?: string[]): Promise<UserProfile> {
     const updatedUser = normalizeUser(await apiRequest<any>('auth.php', {
       method: 'PUT',
       body: JSON.stringify({
         id: userId,
         role: newRole,
+        office_ids: officeIds,
         office_id: officeId || null,
         office_name: officeName || null,
         password: password || undefined,

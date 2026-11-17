@@ -35,8 +35,8 @@ function find_office_by_code(PDO $db, string $officeCode): ?array {
 }
 
 function get_office_dependency_counts(PDO $db, string $officeId): array {
-    $profileStmt = $db->prepare("SELECT COUNT(*) FROM profiles WHERE office_id = :office_id");
-    $profileStmt->execute([':office_id' => $officeId]);
+    $profileStmt = $db->prepare("SELECT COUNT(*) FROM profiles p WHERE p.office_id = :office_id OR EXISTS (SELECT 1 FROM profile_offices po WHERE po.profile_id = p.id AND po.office_id = :assigned_office_id)");
+    $profileStmt->execute([':office_id' => $officeId, ':assigned_office_id' => $officeId]);
 
     $applicationStmt = $db->prepare("SELECT COUNT(*) FROM applications WHERE office_id = :office_id");
     $applicationStmt->execute([':office_id' => $officeId]);

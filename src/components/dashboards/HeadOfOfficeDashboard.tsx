@@ -1,3 +1,4 @@
+import { assignedOfficeIds, hasAssignedOffice } from '../../lib/userOffices';
 import { NominationReferenceButton } from '../nomination/NominationFormViewerModal';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Application, Award, UserProfile } from '../../types';
@@ -30,9 +31,8 @@ export const HeadOfOfficeDashboard: React.FC<HeadOfOfficeDashboardProps> = ({
 }) => {
   const officeApplications = useMemo(() => applications.filter(application =>
     application.status !== 'Draft'
-    && Boolean(currentUser.office_id)
-    && application.office_id === currentUser.office_id
-  ), [applications, currentUser.office_id]);
+    && hasAssignedOffice(currentUser, application.office_id)
+  ), [applications, currentUser]);
 
   const [selectedAppId, setSelectedAppId] = useState<string>('');
   const [remarks, setRemarks] = useState('');
@@ -181,12 +181,12 @@ export const HeadOfOfficeDashboard: React.FC<HeadOfOfficeDashboardProps> = ({
           <div className="flex items-center gap-2">
             <Building2 size={16} className="text-blue-400" />
             <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">
-              {currentUser.office_name || 'Department Endorsement Portal'}
+              {currentUser.office_names?.join(', ') || currentUser.office_name || 'Department Endorsement Portal'}
             </span>
           </div>
           <h2 className="text-xl font-bold text-white mt-0.5">Head of Office Endorsement Desk</h2>
           <p className="text-xs text-slate-300 mt-1 max-w-2xl">
-            Monitor nominations from your office and record endorsement decisions when they await your review.
+            Monitor nominations from your assigned offices and record endorsement decisions when they await your review.
           </p>
         </div>
 
@@ -215,7 +215,7 @@ export const HeadOfOfficeDashboard: React.FC<HeadOfOfficeDashboardProps> = ({
               <div className="p-10 text-center text-slate-400">
                 <FileText size={32} className="mx-auto mb-2 opacity-30 text-slate-400" />
                 <p className="text-xs font-semibold">
-                  {currentUser.office_id ? 'No nominations found in your assigned office.' : 'No office is assigned to your account.'}
+                  {assignedOfficeIds(currentUser).length ? 'No nominations found in your assigned offices.' : 'No office is assigned to your account.'}
                 </p>
               </div>
             ) : (

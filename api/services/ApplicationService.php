@@ -190,7 +190,7 @@ function handle_return_for_revision(PDO $db, array $actor, array $data, string $
         sendResponse(403, [], 'Your role is not assigned to return this nomination at its current stage.');
     }
     if ($actor['role'] === 'HEAD_OF_OFFICE'
-        && (empty($actor['office_id']) || $current['office_id'] !== $actor['office_id'])) {
+        && !has_assigned_office($actor, $current['office_id'])) {
         sendResponse(403, [], 'You can only return nominations from your assigned office.');
     }
     if ($actor['role'] === 'EVALUATOR'

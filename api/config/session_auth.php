@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/runtime.php';
+require_once __DIR__ . '/profile_offices.php';
 
 function praise_session_cookie_path(): string {
     $path = dirname(dirname((string)($_SERVER['SCRIPT_NAME'] ?? '/api/auth.php')));
@@ -38,7 +39,8 @@ function praise_start_session(): void {
     if (isset($_SESSION['praise_user_id'])) $_SESSION['last_activity'] = time();
 }
 
-function format_profile_record(array $user): array {
+function format_profile_record(array $user, ?PDO $db = null): array {
+    if ($db) $user = load_profile_offices($db, $user);
     unset($user['password_hash']);
     $user['is_active'] = isset($user['is_active']) ? (bool)$user['is_active'] : true;
     $user['must_change_password'] = isset($user['must_change_password']) ? (bool)$user['must_change_password'] : false;
@@ -89,7 +91,7 @@ function get_session_user($db): ?array {
     $stmt->execute([':id' => $userId]);
     $user = $stmt->fetch();
 
-    return $user ? format_profile_record($user) : null;
+    return $user ? format_profile_record($user, $db instanceof PDO ? $db : null) : null;
 }
 
 function set_auth_session(string $userId): void {
@@ -156,7 +158,7 @@ function require_application_access(PDO $db, array $actor, string $applicationId
         sendResponse(404, [], 'Application not found.');
     }
     if ($own) return $application;
-    if ($role === 'HEAD_OF_OFFICE' && !empty($actor['office_id']) && $application['office_id'] === $actor['office_id']) return $application;
+    if ($role === 'HEAD_OF_OFFICE' && has_assigned_office($actor, $application['office_id'])) return $application;
     if ($role === 'SECRETARIAT' && in_array($application['processing_stage'], ['Document Verification', 'Evaluation', 'Deliberation', 'Final Decision', 'Awarded'], true)) return $application;
     sendResponse(404, [], 'Application not found.');
 }

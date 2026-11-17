@@ -13,6 +13,8 @@ export function normalizeUser(user: any): UserProfile {
     email: String(user.email),
     full_name: String(user.full_name),
     role: user.role as UserRole,
+    office_ids: Array.isArray(user.office_ids) ? user.office_ids.map(String) : (user.office_id ? [String(user.office_id)] : []),
+    office_names: Array.isArray(user.office_names) ? user.office_names.map(String) : (user.office_name ? [String(user.office_name)] : []),
     office_id: user.office_id || undefined,
     office_name: user.office_name || undefined,
     position_title: user.position_title || undefined,

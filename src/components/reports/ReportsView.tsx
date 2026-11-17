@@ -184,7 +184,18 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="divide-y divide-slate-200 xl:hidden" data-mobile-list="report-offices">
+          {officeStats.length === 0 && <p className="p-6 text-center text-sm text-slate-500">No offices to display.</p>}
+          {officeStats.map(stat => <article key={stat.office.id} className="min-w-0 space-y-3 p-4">
+            <div><h4 className="break-words text-base font-bold text-slate-900">{stat.office.name}</h4><p className="mt-1 break-words text-sm text-slate-500">{stat.office.head_name}</p></div>
+            <dl className="grid grid-cols-2 gap-3 text-sm">
+              <div><dt className="text-xs text-slate-500">Total nominees</dt><dd className="mt-1 font-bold text-blue-600">{stat.totalNominations}</dd></div>
+              <div><dt className="text-xs text-slate-500">Conferred awards</dt><dd className="mt-1 font-bold text-amber-600">{stat.awardedCount}</dd></div>
+              <div className="col-span-2"><dt className="text-xs text-slate-500">Average score</dt><dd className="mt-1 font-bold text-slate-800">{stat.avgScore}%</dd></div>
+            </dl>
+          </article>)}
+        </div>
+        <div className="hidden overflow-x-auto xl:block">
           <table className="w-full min-w-[720px] text-left text-xs">
             <thead className="bg-slate-50 text-slate-500 uppercase font-bold border-b border-slate-200">
               <tr>

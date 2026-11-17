@@ -30,8 +30,15 @@ let socket;
 const delay = milliseconds => new Promise(ok => setTimeout(ok, milliseconds));
 try {
   const activePort = join(temporary, 'profile/DevToolsActivePort');
-  for (let count = 0; count < 100 && !existsSync(activePort); count++) await delay(100);
-  const port = readFileSync(activePort, 'utf8').split('\n')[0];
+  let port;
+  for (let count = 0; count < 100; count++) {
+    try {
+      const candidate = readFileSync(activePort, 'utf8').split('\n')[0].trim();
+      if (/^[0-9]+$/.test(candidate)) { port = candidate; break; }
+    } catch { /* Chromium can briefly lock the file while writing it on Windows. */ }
+    await delay(100);
+  }
+  if (!port) throw Error('Chromium debugging port did not become available.');
   const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
   socket = new WebSocket(targets.find(target => target.type === 'page').webSocketDebuggerUrl);
   await new Promise(ok => socket.addEventListener('open', ok, { once: true }));
@@ -93,7 +100,8 @@ try {
       const rows = await evaluate('Array.from(document.querySelectorAll("tbody, article")).map(row => row.textContent).join(" ")');
       for (const detail of ['Original Nominator', 'Nominated by Others', 'Filing Account']) assert.ok(!rows.includes(detail), `${detail} stays inside viewer`);
       await waitFor(`!!(${visibleFormButton})`);
-      assert.ok(await evaluate(`(${visibleFormButton}).getBoundingClientRect().height <= 24`), 'reference control does not enlarge rows');
+      const referenceHeight = await evaluate(`(${visibleFormButton}).getBoundingClientRect().height`);
+      assert.ok(width < 1024 ? referenceHeight >= 44 : referenceHeight <= 24, width < 1024 ? 'reference has a touch target' : 'desktop reference remains compact');
       assert.equal(await evaluate(`(${visibleFormButton}).getAttribute('aria-haspopup')`), 'dialog');
       const before = await evaluate('window.viewerTest.state.calls');
       await open();
@@ -166,7 +174,7 @@ try {
       }
       await close();
       writeFileSync(join(temporary, `table-${role}-${screen || 'dashboard'}-${width}.png`), Buffer.from((await command('Page.captureScreenshot')).data, 'base64'));
-      await evaluate(`Array.from((${visibleFormButton}).closest('tr, article').querySelectorAll('p, h3, td, div')).find(element => element.textContent==='Nominee Record').click()`);
+      await evaluate(`Array.from((${visibleFormButton}).closest('tr, article').querySelectorAll('p, h3, h4, td, div')).find(element => element.textContent==='Nominee Record').click()`);
       assert.equal(await evaluate('document.querySelectorAll("[role=dialog]").length'), 0, 'nominee name is passive across all roles');
       if (role === 'NOMINEE') {
         assert.equal(await evaluate('Array.from(document.querySelectorAll("button")).filter(button => /^(Track nomination for |View nomination for )/.test(button.getAttribute("aria-label") || "")).length'), 0, 'nominee names do not open another modal');

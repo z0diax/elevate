@@ -1,3 +1,6 @@
+import { AdminMobileApplications, AdminMobileOffices, AdminMobileUsers } from './AdminMobileLists';
+import { OfficeAssignmentSelect } from '../common/OfficeAssignmentSelect';
+import { assignedOfficeIds, hasAssignedOffice } from '../../lib/userOffices';
 import { NominationReferenceButton } from '../nomination/NominationFormViewerModal';
 import React, { useEffect, useState } from 'react';
 import { Application, Award, AwardEvaluationRoute, Office, UserProfile, UserRole } from '../../types';
@@ -39,6 +42,15 @@ type ConfirmationRequest = {
 };
 
 type AwardModalTab = 'details' | 'criteria' | 'attachments';
+type UserSortOrder = 'name' | 'role-asc' | 'role-desc';
+
+const USER_ROLE_LABELS: Record<UserRole, string> = {
+  ADMINISTRATOR: 'Administrator',
+  SECRETARIAT: 'Secretariat',
+  HEAD_OF_OFFICE: 'Head of Office',
+  EVALUATOR: 'Evaluator',
+  NOMINEE: 'Nominee',
+};
 
 const OFFICES_PER_PAGE = 10;
 
@@ -73,6 +85,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [selectedOfficeFilter, setSelectedOfficeFilter] = useState('ALL');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState('ALL');
   const [selectedYearFilter, setSelectedYearFilter] = useState('ALL');
+  const [selectedUserRoleFilter, setSelectedUserRoleFilter] = useState<UserRole | 'ALL'>('ALL');
+  const [userSortOrder, setUserSortOrder] = useState<UserSortOrder>('name');
 
   // Modals & Forms
   const [auditApp, setAuditApp] = useState<Application | null>(null);
@@ -133,7 +147,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // User Role Form State
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   const [newUserRole, setNewUserRole] = useState<UserRole>('NOMINEE');
-  const [newUserOffice, setNewUserOffice] = useState('');
+  const [newUserOffices, setNewUserOffices] = useState<string[]>([]);
   const [resetPassword, setResetPassword] = useState('');
 
   // User Creation Form State
@@ -141,7 +155,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [createUserName, setCreateUserName] = useState('');
   const [createUserEmail, setCreateUserEmail] = useState('');
   const [createUserRole, setCreateUserRole] = useState<UserRole>('NOMINEE');
-  const [createUserOffice, setCreateUserOffice] = useState('');
+  const [createUserOffices, setCreateUserOffices] = useState<string[]>([]);
   const [createUserPosition, setCreateUserPosition] = useState('');
   const [createUserPassword, setCreateUserPassword] = useState('ChangeMe123!');
   const [isSaving, setIsSaving] = useState(false);
@@ -263,6 +277,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   });
 
   const criteriaTotalWeight = awardCriteria.reduce((sum, criterion) => sum + Number(criterion.weight_percentage || 0), 0);
+  const sortedUsers = users
+    .filter(user => selectedUserRoleFilter === 'ALL' || user.role === selectedUserRoleFilter)
+    .sort((a, b) => {
+      if (userSortOrder !== 'name') {
+        const roleComparison = USER_ROLE_LABELS[a.role].localeCompare(USER_ROLE_LABELS[b.role]);
+        if (roleComparison !== 0) return userSortOrder === 'role-asc' ? roleComparison : -roleComparison;
+      }
+      return a.full_name.localeCompare(b.full_name, undefined, { sensitivity: 'base' })
+        || a.id.localeCompare(b.id);
+    });
   const officePageCount = Math.max(1, Math.ceil(offices.length / OFFICES_PER_PAGE));
   const officePageStart = (officePage - 1) * OFFICES_PER_PAGE;
   const paginatedOffices = offices.slice(officePageStart, officePageStart + OFFICES_PER_PAGE);
@@ -484,7 +508,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   const getOfficeDependencyCounts = (officeId: string) => ({
-    profiles: users.filter(user => user.office_id === officeId).length,
+    profiles: users.filter(user => hasAssignedOffice(user, officeId)).length,
     applications: applications.filter(application => application.office_id === officeId).length,
   });
 
@@ -536,8 +560,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           name: officeName,
           code: officeCode,
           head_name: officeHead,
-          head_title: officeHeadTitle || 'Department Head',
-          is_active: true
+          head_title: officeHeadTitle || 'Department Head'
         });
       }
 
@@ -587,17 +610,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     });
   };
 
+  const openUserRoleModal = (user: UserProfile) => {
+    setEditingUser(user);
+    setNewUserRole(user.role);
+    setNewUserOffices(assignedOfficeIds(user));
+    setResetPassword('');
+  };
+
   const handleUpdateUserRole = async () => {
     if (!editingUser) return;
-    const off = offices.find(o => o.id === newUserOffice);
+    const off = offices.find(o => o.id === newUserOffices[0]);
     setIsSaving(true);
     try {
       await praiseService.updateUserRole(
         editingUser.id,
         newUserRole,
-        newUserOffice || undefined,
+        newUserOffices[0] || undefined,
         off?.name,
-        resetPassword.trim() || undefined
+        resetPassword.trim() || undefined,
+        newUserOffices
       );
       setEditingUser(null);
       setResetPassword('');
@@ -651,7 +682,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       return;
     }
 
-    const selectedOffice = offices.find(office => office.id === createUserOffice);
+    const selectedOffice = offices.find(office => office.id === createUserOffices[0]);
 
     setIsSaving(true);
     try {
@@ -659,7 +690,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         full_name: createUserName.trim(),
         email: createUserEmail.trim(),
         role: createUserRole,
-        office_id: createUserOffice || undefined,
+        office_ids: createUserOffices,
+        office_id: createUserOffices[0] || undefined,
         office_name: selectedOffice?.name,
         position_title: createUserPosition.trim() || undefined,
         employee_id: undefined,
@@ -673,7 +705,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setCreateUserName('');
       setCreateUserEmail('');
       setCreateUserRole('NOMINEE');
-      setCreateUserOffice('');
+      setCreateUserOffices([]);
       setCreateUserPosition('');
       setCreateUserPassword('ChangeMe123!');
       showToast('User account created successfully.');
@@ -688,7 +720,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   return (
     <div id="admin-dashboard-container" className="space-y-6">
       {/* Top Metric Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
+      <div className={`${activeSubTab === 'overview' || activeSubTab === 'applications' ? 'grid' : 'hidden xl:grid'} grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4`}>
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
           <p className="text-[10px] uppercase font-bold text-slate-500 mb-1">Total Filings</p>
           <div className="flex items-end justify-between">
@@ -740,7 +772,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       {/* Sub-Navigation Tabs */}
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-3">
-        <div className="flex max-w-full items-center gap-1 overflow-x-auto pb-1 sm:gap-2">
+        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:max-w-full sm:items-center sm:overflow-x-auto sm:pb-1">
           {[
             { id: 'overview', label: 'All Applications', icon: FileText },
             { id: 'awards', label: 'Awards & Criteria', icon: AwardIcon },
@@ -763,7 +795,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                 }`}
               >
-                <Icon size={14} />
+                <Icon size={14} className="shrink-0" />
                 <span>{tab.label}</span>
               </button>
             );
@@ -855,7 +887,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           {/* Applications Table */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-            <div className="mobile-scroll-table overflow-x-auto">
+            <AdminMobileApplications applications={filteredApplications} role={currentUser.role} isSaving={isSaving}
+              onTrack={app => { setTrackingTab('status'); setTrackingDocId(null); setReassigningAssignmentId(null); setTrackingApp(app); }}
+              onAudit={setAuditApp}
+              onDownload={app => pdfGenerator.generateApplicationSummary(app, awards.find(award => award.id === app.award_id))}
+              onDelete={handleDeleteNomination} />
+            <div className="mobile-scroll-table hidden overflow-x-auto xl:block">
               <table className="w-full min-w-[780px] text-left text-xs border-collapse">
                 <thead className="bg-slate-50 text-slate-500 uppercase text-[10px] font-bold border-b border-slate-200">
                   <tr>
@@ -1094,7 +1131,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         <div className="space-y-4">
           <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">LGU Offices & Departments</h3>
+              <h3 className="text-base font-bold text-slate-900">LGU Offices & Departments</h3>
               <p className="text-xs text-slate-500">Official administrative units and Department Heads of Tacloban City Hall.</p>
               <p className="text-[11px] text-slate-400 mt-1">Only departments without linked users or nomination records can be permanently deleted.</p>
             </div>
@@ -1108,7 +1145,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
 
           <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
-            <div className="mobile-scroll-table overflow-x-auto">
+            <AdminMobileOffices offices={paginatedOffices} isSaving={isSaving} getDependencies={getOfficeDependencyCounts} onEdit={handleOpenOfficeModal} onDelete={handleDeleteOffice} />
+            <div className="mobile-scroll-table hidden overflow-x-auto xl:block">
             <table className="w-full min-w-[720px] text-left text-xs">
               <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500 uppercase font-bold border-b border-slate-200 dark:border-slate-800">
                 <tr>
@@ -1225,12 +1263,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         <div className="space-y-4">
           <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">PRAISE Users & Role Assignments</h3>
+              <h3 className="text-base font-bold text-slate-900">PRAISE Users & Role Assignments</h3>
               <p className="text-xs text-slate-500">Manage 5 user tiers: Administrator, Secretariat, Head of Office, Evaluator, Nominee.</p>
             </div>
             <button
               onClick={() => {
-                setCreateUserOffice('');
+                setCreateUserOffices([]);
                 setIsCreateUserModalOpen(true);
               }}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl inline-flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer"
@@ -1241,7 +1279,36 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
 
           <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
-            <div className="mobile-scroll-table overflow-x-auto">
+            <div className="flex flex-col gap-3 border-b border-slate-200 p-4 dark:border-slate-800 sm:flex-row sm:items-end">
+              <div className="min-w-0 sm:w-48">
+                <label htmlFor="user-role-filter" className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">Filter by role</label>
+                <select
+                  id="user-role-filter"
+                  value={selectedUserRoleFilter}
+                  onChange={event => setSelectedUserRoleFilter(event.target.value as UserRole | 'ALL')}
+                  className="min-h-11 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                >
+                  <option value="ALL">All roles</option>
+                  {Object.entries(USER_ROLE_LABELS).map(([role, label]) => <option key={role} value={role}>{label}</option>)}
+                </select>
+              </div>
+              <div className="min-w-0 sm:w-48">
+                <label htmlFor="user-role-sort" className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">Sort users by</label>
+                <select
+                  id="user-role-sort"
+                  value={userSortOrder}
+                  onChange={event => setUserSortOrder(event.target.value as UserSortOrder)}
+                  className="min-h-11 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                >
+                  <option value="name">Name (A–Z)</option>
+                  <option value="role-asc">Role (A–Z)</option>
+                  <option value="role-desc">Role (Z–A)</option>
+                </select>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 sm:ml-auto sm:pb-3" role="status">Showing {sortedUsers.length} of {users.length} users</p>
+            </div>
+            <AdminMobileUsers users={sortedUsers} currentUserId={currentUser.id} isSaving={isSaving} onEdit={openUserRoleModal} onDelete={handleDeleteUser} />
+            <div className="mobile-scroll-table hidden overflow-x-auto xl:block">
             <table className="w-full min-w-[760px] text-left text-xs">
               <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500 uppercase font-bold border-b border-slate-200 dark:border-slate-800">
                 <tr>
@@ -1253,13 +1320,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {users.map(u => (
+                {sortedUsers.length === 0 && (
+                  <tr><td colSpan={5} className="p-6 text-center text-slate-500">No user accounts to display.</td></tr>
+                )}
+                {sortedUsers.map(u => (
                   <tr key={u.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                     <td className="px-4 py-3 font-semibold text-slate-900 dark:text-white">
                       {u.full_name}
                     </td>
-                    <td className="px-4 py-3 text-slate-500">{u.email}</td>
-                    <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{u.office_name || '-'}</td>
+                    <td className="max-w-48 break-all px-4 py-3 text-slate-500">{u.email}</td>
+                    <td className="max-w-56 break-words px-4 py-3 text-slate-600 dark:text-slate-300">{u.office_names?.join(', ') || u.office_name || '-'}</td>
                     <td className="px-4 py-3">
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300">
                         {u.role.replace(/_/g, ' ')}
@@ -1268,12 +1338,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <td className="px-4 py-3 text-right">
                       <div className="inline-flex items-center gap-2">
                         <button
-                          onClick={() => {
-                            setEditingUser(u);
-                            setNewUserRole(u.role);
-                            setNewUserOffice(u.office_id || offices[0]?.id || '');
-                            setResetPassword('');
-                          }}
+                          onClick={() => openUserRoleModal(u)}
                           className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold rounded text-[11px] cursor-pointer"
                         >
                           Change Role
@@ -1301,7 +1366,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {/* Award Edit Modal */}
       {isAwardModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-2xl w-full max-h-[calc(100dvh-2rem)] overflow-y-auto p-5 sm:p-6 space-y-4 shadow-2xl border border-slate-200 dark:border-slate-800 my-8">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-2xl w-full max-h-[calc(100dvh-2rem)] overflow-y-auto p-5 sm:p-6 space-y-4 shadow-2xl border border-slate-200 dark:border-slate-800 my-auto">
             <h3 className="text-base font-bold text-slate-900 dark:text-white">
               {editingAward
                 ? `Configure Award: ${editingAward.name}`
@@ -1727,7 +1792,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     const role = e.target.value as UserRole;
                     setCreateUserRole(role);
                     if (role === 'ADMINISTRATOR') {
-                      setCreateUserOffice('');
+                      setCreateUserOffices([]);
                     }
                   }}
                   className="w-full p-2 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
@@ -1740,19 +1805,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </select>
               </div>
 
-              <div>
-                <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-200">Assigned Department (optional for administrators)</label>
-                <select
-                  value={createUserOffice}
-                  onChange={e => setCreateUserOffice(e.target.value)}
-                  className="w-full p-2 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
-                >
-                  <option value="">Unassigned</option>
-                  {offices.map(office => (
-                    <option key={office.id} value={office.id}>{office.name}</option>
-                  ))}
-                </select>
-              </div>
+              <OfficeAssignmentSelect offices={offices} value={createUserOffices} onChange={setCreateUserOffices} />
 
               <div>
                 <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-200">Position Title</label>
@@ -1798,7 +1851,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {/* Role Assignment Modal */}
       {editingUser && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-slate-200 dark:border-slate-800">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full max-h-[calc(100dvh-2rem)] overflow-y-auto p-5 sm:p-6 space-y-4 shadow-2xl border border-slate-200 dark:border-slate-800">
             <h3 className="text-base font-bold text-slate-900 dark:text-white">
               Assign Role for {editingUser.full_name}
             </h3>
@@ -1812,7 +1865,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     const role = e.target.value as UserRole;
                     setNewUserRole(role);
                     if (role === 'ADMINISTRATOR') {
-                      setNewUserOffice('');
+                      setNewUserOffices([]);
                     }
                   }}
                   className="w-full p-2 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
@@ -1825,19 +1878,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </select>
               </div>
 
-              <div>
-                <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-200">Assigned Department (optional for administrators)</label>
-                <select
-                  value={newUserOffice}
-                  onChange={e => setNewUserOffice(e.target.value)}
-                  className="w-full p-2 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
-                >
-                  <option value="">Unassigned</option>
-                  {offices.map(o => (
-                    <option key={o.id} value={o.id}>{o.name}</option>
-                  ))}
-                </select>
-              </div>
+              <OfficeAssignmentSelect offices={offices} value={newUserOffices} onChange={setNewUserOffices} />
 
               <div>
                 <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-200">Reset Password (optional)</label>

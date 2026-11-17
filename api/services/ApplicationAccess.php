@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/../config/profile_offices.php';
 
 function canViewApplication(array $application, array $actor): bool {
     $role = $actor['role'] ?? '';
@@ -34,7 +35,7 @@ function canViewApplication(array $application, array $actor): bool {
     }
 
     if ($role === 'HEAD_OF_OFFICE') {
-        return !empty($actor['office_id']) && $application['office_id'] === $actor['office_id'];
+        return has_assigned_office($actor, $application['office_id']);
     }
 
     return false;

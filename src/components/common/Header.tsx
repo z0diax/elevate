@@ -17,6 +17,7 @@ interface HeaderProps {
   onMarkNotificationRead: (id: string) => void | Promise<void>;
   onMarkAllNotificationsRead: () => void | Promise<void>;
   onToggleSidebar: () => void;
+  isSidebarOpen?: boolean;
   onNavigateToTab: (tab: string, appId?: string) => void;
   onLogout: () => void | Promise<void>;
 }
@@ -36,6 +37,7 @@ export const Header: React.FC<HeaderProps> = ({
   onMarkNotificationRead,
   onMarkAllNotificationsRead,
   onToggleSidebar,
+  isSidebarOpen = false,
   onNavigateToTab,
   onLogout,
 }) => {
@@ -90,7 +92,9 @@ export const Header: React.FC<HeaderProps> = ({
           onClick={onToggleSidebar}
           title="Toggle sidebar"
           aria-label="Toggle sidebar"
-          className="p-1.5 rounded-md text-slate-600 hover:bg-slate-100 cursor-pointer"
+          aria-controls="app-sidebar"
+          aria-expanded={isSidebarOpen}
+          className="shrink-0 p-1.5 rounded-md text-slate-600 hover:bg-slate-100 cursor-pointer"
         >
           <Menu size={20} />
         </button>
@@ -103,7 +107,7 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       <div className="flex shrink-0 items-center gap-1.5 sm:gap-4">
-        <div className="relative hidden md:block">
+        <div className="relative hidden xl:block">
           <input
             type="text"
             placeholder="Search reference no."
@@ -116,6 +120,7 @@ export const Header: React.FC<HeaderProps> = ({
 
         <button
           id="header-new-nomination-cta-btn"
+          aria-label="New nomination"
           onClick={() => onNavigateToTab('new-nomination')}
           className="bg-blue-600 hover:bg-blue-700 text-white p-2 sm:px-4 sm:py-2 rounded-md text-xs font-semibold shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
         >
@@ -126,7 +131,9 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="relative">
           <button
             id="header-notification-bell-btn"
-            onClick={() => setIsNotifOpen(!isNotifOpen)}
+            aria-label="Notifications"
+            aria-expanded={isNotifOpen}
+            onClick={() => { setIsNotifOpen(!isNotifOpen); setIsUserMenuOpen(false); }}
             className="relative p-1.5 sm:p-2 rounded-md text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
           >
             <Bell size={18} />
@@ -150,7 +157,9 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="relative">
           <button
             id="user-account-menu-btn"
-            onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+            aria-label="Account menu"
+            aria-expanded={isUserMenuOpen}
+            onClick={() => { setIsUserMenuOpen(!isUserMenuOpen); setIsNotifOpen(false); }}
             className="flex items-center gap-2 p-1 sm:px-2.5 sm:py-1 rounded-md border border-slate-200 bg-white hover:bg-slate-50 transition-colors cursor-pointer"
           >
             <div className="w-7 h-7 rounded-full bg-blue-600 text-white font-bold text-xs flex items-center justify-center shrink-0">
@@ -167,7 +176,7 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           {isUserMenuOpen && (
-            <div className="absolute right-0 mt-2 w-72 bg-white rounded-xl shadow-xl border border-slate-200 z-50 overflow-hidden py-1">
+            <div className="fixed inset-x-3 top-16 max-h-[calc(100dvh-5rem)] overflow-y-auto sm:absolute sm:inset-x-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-72 bg-white rounded-xl shadow-xl border border-slate-200 z-50 py-1">
               <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">

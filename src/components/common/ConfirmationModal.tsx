@@ -56,19 +56,19 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
         aria-modal="true"
         aria-labelledby="confirmation-modal-title"
         aria-describedby="confirmation-modal-message"
-        className="relative w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl"
+        className="relative w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl"
       >
         <div className="flex items-start gap-3">
           <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-red-50 text-red-600">
             <AlertTriangle size={20} />
           </div>
-          <div>
+          <div className="min-w-0 break-words">
             <h2 id="confirmation-modal-title" className="text-base font-bold text-slate-900">{title}</h2>
             <p id="confirmation-modal-message" className="mt-1.5 text-sm leading-6 text-slate-600">{message}</p>
           </div>
         </div>
 
-        <div className="mt-6 flex justify-end gap-3">
+        <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-3">
           <button
             ref={cancelButtonRef}
             type="button"

@@ -152,6 +152,43 @@ async function main() {
     await login('filer');
   });
   for (const name of ['admin', 'secretary', 'head', 'other-head', 'other-filer', 'A', 'B', 'C', 'D', 'E', 'F']) await login(name);
+  await test('multiple offices persist, govern head access, and can be removed', async () => {
+    let user, app;
+    try {
+      user = expect(await request('/api/auth.php', { method: 'POST', actor: 'admin', json: {
+        full_name: 'Multi Office Head', email: `multi-office-${run}@example.invalid`, role: 'HEAD_OF_OFFICE', password,
+        office_ids: [id('office-one'), id('office-two'), id('office-one')], must_change_password: false,
+      } }), 201, 'create multi-office account');
+      assert.deepEqual(user.office_ids, [id('office-one'), id('office-two')]);
+      assert.equal(user.office_id, id('office-one'));
+      assert.equal(user.office_names.length, 2);
+      const loggedIn = expect(await request('/api/auth.php?action=login', { method: 'POST', actor: 'multi-head', json: { email: user.email, password } }), 200, 'multi head login');
+      sessions.set('multi-head', { ...sessions.get('multi-head'), csrf: loggedIn.csrf_token });
+      assert.deepEqual(loggedIn.office_ids, user.office_ids);
+      app = await createNomination('filer', { office_id: id('office-two') });
+      expect(await request('/api/documents.php', { method: 'POST', actor: 'filer', form: makeForm(app.id, 'multiple-offices.pdf', pdf) }), 201, 'upload');
+      expect(await action(app.id, 'finalize_submission', 'filer'), 200, 'finalize secondary office');
+      const listed = expect(await request('/api/applications.php', { actor: 'multi-head' }), 200, 'multi office listing');
+      assert.ok(listed.some(record => record.id === app.id));
+      const documentId = listed.find(record => record.id === app.id).documents[0].id;
+      expect(await action(app.id, 'inspect_document', 'multi-head', { document_id: documentId, status: 'Head Approved' }), 200, 'inspect secondary office');
+      expect(await request('/api/auth.php', { method: 'PUT', actor: 'admin', json: { id: user.id, role: 'HEAD_OF_OFFICE' } }), 200, 'unrelated update');
+      assert.deepEqual(expect(await request('/api/auth.php?action=current', { actor: 'multi-head' }), 200, 'current offices').office_ids, user.office_ids);
+      for (const office_ids of [null, 'invalid', ['missing-office'], [id('office-inactive')]]) {
+        expect(await request('/api/auth.php', { method: 'PUT', actor: 'admin', json: { id: user.id, office_ids } }), 400, 'reject invalid offices');
+      }
+      expect(await request('/api/auth.php', { method: 'PUT', actor: 'multi-head', json: { id: user.id, office_ids: [] } }), 403, 'only admin assigns offices');
+      expect(await request('/api/auth.php', { method: 'PUT', actor: 'admin', json: { id: user.id, office_ids: [id('office-one')] } }), 200, 'remove secondary office');
+      expect(await request(`/api/applications.php?id=${app.id}`, { actor: 'multi-head' }), 403, 'removed office inaccessible');
+      expect(await action(app.id, 'endorse', 'multi-head'), 403, 'removed office cannot endorse');
+      const cleared = expect(await request('/api/auth.php', { method: 'PUT', actor: 'admin', json: { id: user.id, office_ids: [] } }), 200, 'clear assignments');
+      assert.deepEqual(cleared.office_ids, []);
+      assert.equal(cleared.office_id, null);
+    } finally {
+      if (app) expect(await request(`/api/applications.php?id=${app.id}`, { method: 'DELETE', actor: 'admin', json: {} }), 200, 'delete multi-office nomination');
+      if (user) expect(await request(`/api/auth.php?id=${user.id}`, { method: 'DELETE', actor: 'admin', json: {} }), 200, 'delete multi-office account');
+    }
+  });
   await test('self-registration still submits a signed nomination under the new account', async () => {
     let registered, app;
     try {

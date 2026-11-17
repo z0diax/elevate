@@ -102,8 +102,10 @@ function listApplications(PDO $db, array $actor): array {
         $stmt = $db->prepare("SELECT id FROM applications WHERE processing_stage IN ('Document Verification', 'Evaluation', 'Deliberation', 'Final Decision', 'Awarded') AND status <> 'Draft' ORDER BY created_at DESC");
         $stmt->execute();
     } elseif ($role === 'HEAD_OF_OFFICE') {
-        $stmt = $db->prepare("SELECT id FROM applications WHERE nominator_id = :id OR nominee_id = :nominee_id OR (office_id = :office_id AND status <> 'Draft') ORDER BY created_at DESC");
-        $stmt->execute([':id' => $actor['id'], ':nominee_id' => $actor['id'], ':office_id' => $actor['office_id'] ?? '']);
+        $officeIds = assigned_office_ids($actor);
+        $placeholders = implode(',', array_fill(0, max(1, count($officeIds)), '?'));
+        $stmt = $db->prepare("SELECT id FROM applications WHERE nominator_id = ? OR nominee_id = ? OR (office_id IN ($placeholders) AND status <> 'Draft') ORDER BY created_at DESC");
+        $stmt->execute(array_merge([$actor['id'], $actor['id']], $officeIds ?: ['']));
     } else {
         $stmt = $db->prepare('SELECT id FROM applications WHERE nominator_id = :id OR nominee_id = :nominee_id ORDER BY created_at DESC');
         $stmt->execute([':id' => $actor['id'], ':nominee_id' => $actor['id']]);

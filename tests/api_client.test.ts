@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { praiseService } from '../src/lib/api';
 import { apiRequest, rememberCsrfToken } from '../src/lib/api/client';
+import { assignedOfficeIds, hasAssignedOffice } from '../src/lib/userOffices';
 import { clearCaches, state } from '../src/lib/api/state';
-import { normalizeApplication, normalizeAuditLog, normalizeDocument } from '../src/lib/api/normalizers';
+import { normalizeApplication, normalizeAuditLog, normalizeDocument, normalizeUser } from '../src/lib/api/normalizers';
 
 test('legacy nomination records retain missing dates and identity rather than inventing records', () => {
   const application = normalizeApplication({ id: 'legacy', status: 'Submitted' });
@@ -165,5 +166,42 @@ test('document upload uses the shared client without a JSON content type', async
     globalThis.fetch = originalFetch;
     globalThis.window = originalWindow;
     clearCaches();
+  }
+});
+
+
+test('office assignments survive normalization and only assigned offices are accessible', () => {
+  const user = normalizeUser({ id: 'head', email: 'head@example.invalid', full_name: 'Head', role: 'HEAD_OF_OFFICE', office_id: 'one', office_ids: ['one', 'two'], office_names: ['First', 'Second'] });
+  assert.deepEqual(assignedOfficeIds(user), ['one', 'two']);
+  assert.equal(hasAssignedOffice(user, 'two'), true);
+  assert.equal(hasAssignedOffice(user, 'three'), false);
+  const legacy = normalizeUser({ id: 'legacy', office_id: 'one', office_name: 'First' });
+  assert.deepEqual(assignedOfficeIds(legacy), ['one']);
+  assert.deepEqual(legacy.office_names, ['First']);
+  assert.equal(hasAssignedOffice({ ...user, office_ids: [] }, 'one'), false);
+});
+
+test('office creation sends only fields accepted by the API and refreshes the office list', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalOffices = state.cachedOffices;
+  const office = { name: 'Test Office', code: 'TEST', head_name: 'Test Head', head_title: 'Department Head' };
+  const storedOffice = { id: 'office-new', ...office, is_active: true };
+  const methods: string[] = [];
+  globalThis.fetch = async (input, init) => {
+    assert.ok(String(input).endsWith('offices.php'));
+    methods.push(init?.method ?? 'GET');
+    if (init?.method === 'POST') assert.deepEqual(JSON.parse(String(init.body)), office);
+    return new Response(JSON.stringify({ status: 'success', data: init?.method === 'POST' ? storedOffice : [storedOffice] }), { status: init?.method === 'POST' ? 201 : 200 });
+  };
+  try {
+    // Extra profile metadata must never leak into the strict creation payload.
+    const created = await praiseService.createOffice({ ...storedOffice });
+    assert.equal(created.id, storedOffice.id);
+    assert.equal(created.is_active, true);
+    assert.deepEqual(methods, ['POST', 'GET']);
+    assert.deepEqual(praiseService.getOffices(), [storedOffice]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    state.cachedOffices = originalOffices;
   }
 });

@@ -12,7 +12,7 @@ function handle_endorse(PDO $db, array $actor, array $data, string $appId, array
     if ($current['processing_stage'] !== 'Endorsement' || !in_array($current['status'], ['For Endorsement', 'Submitted'], true)) {
         sendResponse(409, [], 'This nomination is no longer awaiting Head of Office endorsement.');
     }
-    if ($actor['role'] === 'HEAD_OF_OFFICE' && (empty($actor['office_id']) || $current['office_id'] !== $actor['office_id'])) {
+    if ($actor['role'] === 'HEAD_OF_OFFICE' && !has_assigned_office($actor, $current['office_id'])) {
         sendResponse(403, [], 'You can only endorse nominations from your assigned office.');
     }
     if ($decision === 'Endorsed') {
@@ -110,7 +110,7 @@ function handle_inspect_document(PDO $db, array $actor, array $data, string $app
     if ($current['processing_stage'] !== 'Endorsement' || !in_array($current['status'], ['For Endorsement', 'Submitted'], true)) {
         sendResponse(409, [], 'This nomination is no longer awaiting Head of Office document inspection.');
     }
-    if (empty($actor['office_id']) || $current['office_id'] !== $actor['office_id']) {
+    if (!has_assigned_office($actor, $current['office_id'])) {
         sendResponse(403, [], 'You can only inspect documents for nominations from your assigned office.');
     }
 

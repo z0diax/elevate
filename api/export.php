@@ -36,6 +36,7 @@ if ($format === 'json') {
     $backup = [
         "offices" => $db->query("SELECT * FROM offices")->fetchAll(PDO::FETCH_ASSOC),
         "profiles" => export_safe_profiles($db),
+        "profile_offices" => $db->query("SELECT profile_id, office_id, sort_order FROM profile_offices")->fetchAll(PDO::FETCH_ASSOC),
         "awards" => $db->query("SELECT * FROM awards")->fetchAll(PDO::FETCH_ASSOC),
         "award_evaluation_routes" => $db->query("SELECT * FROM award_evaluation_routes")->fetchAll(PDO::FETCH_ASSOC),
         "award_route_evaluators" => $db->query("SELECT * FROM award_route_evaluators")->fetchAll(PDO::FETCH_ASSOC),

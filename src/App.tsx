@@ -268,11 +268,11 @@ export default function App() {
     }
   }, [bootstrapSession]);
 
-  const handleNomineeSignup = useCallback(async (fullName: string, email: string, password: string) => {
+  const handleNomineeSignup = useCallback(async (fullName: string, email: string, password: string, officeId: string) => {
     setIsLoading(true);
     setLoginError('');
     try {
-      await praiseService.registerNominee(fullName, email, password);
+      await praiseService.registerNominee(fullName, email, password, officeId);
       showToast('Nominee account created successfully.');
       await bootstrapSession(false);
       navigatePublicAuthRoute('login');

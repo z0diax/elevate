@@ -8,6 +8,7 @@ import { ReportsView } from '../src/components/reports/ReportsView';
 import { Header } from '../src/components/common/Header';
 import { Sidebar } from '../src/components/common/Sidebar';
 import { Application, Award, Office, UserProfile } from '../src/types';
+import { praiseService } from '../src/lib/api';
 
 const offices: Office[] = Array.from({ length: 12 }, (_, index) => ({
   id: `office-${index}`, code: `OFF${index}`, name: index === 0 ? 'City Government Department of Community Development and Public Services' : `Test Department ${index}`,
@@ -18,13 +19,14 @@ const users: UserProfile[] = [currentUser, { id: 'head', full_name: 'Department 
 const awards: Award[] = [{ id: 'award', name: 'Outstanding Public Service Award', code: 'OPS', description: 'Award description', award_year: 2026, min_qualifying_score: 85, is_active: true, criteria: [], document_requirements: [] }];
 const applications = [{ id: 'application', application_number: 'PRAISE-2026-0001', nominee_name: 'Nominee With A Long Name', position_title: 'Senior Public Services Officer', award_id: 'award', award_name: awards[0].name, office_id: offices[0].id, office_name: offices[0].name, status: 'For Endorsement', processing_stage: 'Endorsement', created_at: '2026-11-09', updated_at: '2026-11-09', documents: [], evaluations: [], evaluator_assignments: [] }] as unknown as Application[];
 const noop = async () => {};
+praiseService.getNomineeRegistrationOffices = async () => offices.map(({ id, name }) => ({ id, name }));
 
 function Fixture() {
   const view = new URLSearchParams(location.search).get('view') || 'login';
   const [section, setSection] = useState<'overview' | 'awards' | 'offices' | 'users'>(view === 'offices' || view === 'users' || view === 'awards' ? view : 'overview');
   const [menuOpen, setMenuOpen] = useState(window.matchMedia('(min-width: 1024px)').matches);
   if (view === 'login') return <LoginScreen isSubmitting={false} onLogin={noop} onNavigateToSignup={() => {}} />;
-  if (view === 'signup') return <NomineeSignupScreen isSubmitting={false} onSignup={noop} onNavigateToLogin={() => {}} />;
+  if (view === 'signup') return <NomineeSignupScreen isSubmitting={false} onSignup={async (...payload) => { Object.assign(window, { signupPayload: payload }); }} onNavigateToLogin={() => {}} />;
   if (view === 'password') return <ChangePasswordScreen onChangePassword={noop} onLogout={noop} />;
   return <div className="min-h-screen bg-slate-50">
     <Sidebar currentTab="users-management" userRole={currentUser.role} currentUser={currentUser} isOpen={menuOpen} onClose={() => setMenuOpen(false)} onSelectTab={() => {}} counts={{ pendingEndorsement: 1, pendingVerification: 0, pendingEvaluation: 0, forDeliberation: 0, myApplications: 0 }} />

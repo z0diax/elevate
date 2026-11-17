@@ -81,6 +81,19 @@ try {
         assert.equal(await evaluate(`Array.from(document.querySelectorAll('table')).some(el => el.getClientRects().length)`), false, 'wide tables hidden');
       }
       if (width < 768 && view === 'login') assert.ok(await evaluate('document.querySelector("input[type=email]").getBoundingClientRect().bottom < innerHeight'), 'login input visible without scrolling');
+      if (view === 'signup') {
+        assert.equal(await evaluate('document.querySelector("select[name=office_id]").options.length'), 13, 'office dropdown loads available offices');
+        await set('input[type=text]', 'Test Nominee');
+        await set('input[type=email]', 'nominee@example.invalid');
+        await set('input[autocomplete=new-password]', 'nominee-password');
+        await set('input[placeholder="Re-enter password"]', 'nominee-password');
+        await click('button[type=submit]');
+        assert.equal(await evaluate('window.signupPayload'), undefined, 'office is required before registration');
+        await evaluate(`(() => { const select = document.querySelector('select[name=office_id]'); select.value = 'office-0'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await fits(`signup with long office name at ${width}`);
+        await click('button[type=submit]');
+        assert.deepEqual(await evaluate('window.signupPayload'), ['Test Nominee', 'nominee@example.invalid', 'nominee-password', 'office-0'], 'registration includes selected office');
+      }
       if (view === 'password') {
         await click('button[aria-label="Show current password"]');
         assert.equal(await evaluate('document.querySelector("input").type'), 'text');
@@ -114,7 +127,7 @@ try {
         await fits('account menu');
         await click('#user-account-menu-btn');
       }
-      if ([320, 390, 1280].includes(width) && ['login', 'users', 'reports'].includes(view)) {
+      if ([320, 390, 1280].includes(width) && ['login', 'signup', 'users', 'reports'].includes(view)) {
         writeFileSync(join(temporary, `${view}-${width}.png`), Buffer.from((await command('Page.captureScreenshot', { captureBeyondViewport: true })).data, 'base64'));
       }
       console.log(`PASS: ${view} at ${width}px`);

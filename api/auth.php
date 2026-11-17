@@ -21,6 +21,11 @@ $method = $_SERVER['REQUEST_METHOD'];
 $action = $_GET['action'] ?? '';
 
 if ($method === 'GET') {
+    if ($action === 'registration_offices') {
+        $stmt = $db->query('SELECT id, name FROM offices WHERE is_active = 1 ORDER BY name ASC');
+        sendResponse(200, $stmt->fetchAll());
+    }
+
     if ($action === 'current') {
         $currentUser = get_session_user($db);
         if (!$currentUser) {
@@ -155,7 +160,7 @@ if ($method === 'POST') {
     }
 
     if ($action === 'register_nominee') {
-        requireFields($data, ['full_name', 'email', 'password']);
+        requireFields($data, ['full_name', 'email', 'password', 'office_id']);
         $fullName = trim(requireText($data['full_name'] ?? '', 'full name', 255));
         $email = trim(requireText($data['email'] ?? '', 'email', 255));
         $password = requireText($data['password'] ?? '', 'password', 1024);
@@ -172,6 +177,9 @@ if ($method === 'POST') {
             sendResponse(400, [], 'Password must be at least 8 characters long.');
         }
 
+        $officeData = ['office_id' => requireId($data['office_id'] ?? null, 'office ID')];
+        validate_profile_offices($db, $officeData);
+
         $existingUser = $db->prepare('SELECT id FROM profiles WHERE email = :email LIMIT 1');
         $existingUser->execute([':email' => $email]);
         if ($existingUser->fetch()) {
@@ -179,12 +187,25 @@ if ($method === 'POST') {
         }
 
         $id = 'usr-' . time() . '-' . rand(100, 999);
-        $db->prepare("\n            INSERT INTO profiles (id, email, full_name, role, password_hash, is_active, must_change_password)\n            VALUES (:id, :email, :full_name, 'NOMINEE', :password_hash, 1, 0)\n        ")->execute([
-            ':id' => $id,
-            ':email' => $email,
-            ':full_name' => $fullName,
-            ':password_hash' => password_hash($password, PASSWORD_DEFAULT),
-        ]);
+        $db->beginTransaction();
+        try {
+            $db->prepare("
+                INSERT INTO profiles (id, email, full_name, role, office_id, office_name, password_hash, is_active, must_change_password)
+                VALUES (:id, :email, :full_name, 'NOMINEE', :office_id, :office_name, :password_hash, 1, 0)
+            ")->execute([
+                ':id' => $id,
+                ':email' => $email,
+                ':full_name' => $fullName,
+                ':office_id' => $officeData['office_id'],
+                ':office_name' => $officeData['office_name'],
+                ':password_hash' => password_hash($password, PASSWORD_DEFAULT),
+            ]);
+            save_profile_offices($db, $id, $officeData['office_ids']);
+            $db->commit();
+        } catch (Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            sendInternalError($e, 'auth.php:register_nominee', 'Failed to create nominee account.');
+        }
 
         $stmt = $db->prepare("\n            SELECT id, email, full_name, role, office_id, office_name, position_title,\n                   employee_id, contact_number, barangay, avatar_url, is_active,\n                   must_change_password, created_at, updated_at, last_login_at\n            FROM profiles\n            WHERE id = :id\n        ");
         $stmt->execute([':id' => $id]);

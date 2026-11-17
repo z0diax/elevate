@@ -1,4 +1,4 @@
-import { UserProfile, UserRole } from '../../types';
+import { Office, UserProfile, UserRole } from '../../types';
 import { apiRequest, rememberCsrfToken } from './client';
 import { normalizeUser } from './normalizers';
 import { clearCaches, fetchCurrentSessionUser, loadUsers, sortedUsers, state } from './state';
@@ -31,10 +31,14 @@ export const authApi = {
     return user;
   },
 
-  async registerNominee(fullName: string, email: string, password: string): Promise<UserProfile> {
+  async getNomineeRegistrationOffices(): Promise<Pick<Office, 'id' | 'name'>[]> {
+    return apiRequest('auth.php?action=registration_offices');
+  },
+
+  async registerNominee(fullName: string, email: string, password: string, officeId: string): Promise<UserProfile> {
     const response = await apiRequest<any>('auth.php?action=register_nominee', {
       method: 'POST',
-      body: JSON.stringify({ full_name: fullName, email, password }),
+      body: JSON.stringify({ full_name: fullName, email, password, office_id: officeId }),
     });
     rememberCsrfToken(response);
     const user = normalizeUser(response);

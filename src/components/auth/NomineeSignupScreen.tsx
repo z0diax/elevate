@@ -1,12 +1,14 @@
-import React, { useState } from 'react';
-import { AlertCircle, ArrowLeft, Mail, ShieldCheck, UserPlus, UserRound } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { AlertCircle, ArrowLeft, Building2, Mail, ShieldCheck, UserPlus, UserRound } from 'lucide-react';
 import { APP_LOGO_URL, APP_NAME } from '../../lib/branding';
+import { praiseService } from '../../lib/api';
+import { Office } from '../../types';
 import { AuthPasswordField } from './AuthPasswordField';
 
 interface NomineeSignupScreenProps {
   errorMessage?: string;
   isSubmitting: boolean;
-  onSignup: (fullName: string, email: string, password: string) => Promise<void>;
+  onSignup: (fullName: string, email: string, password: string, officeId: string) => Promise<void>;
   onNavigateToLogin: () => void;
 }
 
@@ -18,15 +20,42 @@ export const NomineeSignupScreen: React.FC<NomineeSignupScreenProps> = ({
 }) => {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
+  const [officeId, setOfficeId] = useState('');
+  const [offices, setOffices] = useState<Pick<Office, 'id' | 'name'>[]>([]);
+  const [isLoadingOffices, setIsLoadingOffices] = useState(true);
+  const [officesError, setOfficesError] = useState('');
+  const [officeLoadAttempt, setOfficeLoadAttempt] = useState(0);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [localError, setLocalError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoadingOffices(true);
+    setOfficesError('');
+    praiseService.getNomineeRegistrationOffices()
+      .then(availableOffices => {
+        if (!cancelled) setOffices(availableOffices);
+      })
+      .catch(() => {
+        if (!cancelled) setOfficesError('Unable to load offices. Please try again.');
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingOffices(false);
+      });
+    return () => { cancelled = true; };
+  }, [officeLoadAttempt]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     if (!fullName.trim() || !email.trim() || !password || !confirmPassword) {
       setLocalError('Complete all required fields to create your account.');
+      return;
+    }
+
+    if (isLoadingOffices || officesError || !offices.some(office => office.id === officeId)) {
+      setLocalError('Select your office to create your account.');
       return;
     }
 
@@ -41,7 +70,11 @@ export const NomineeSignupScreen: React.FC<NomineeSignupScreenProps> = ({
     }
 
     setLocalError('');
-    await onSignup(fullName.trim(), email.trim(), password);
+    try {
+      await onSignup(fullName.trim(), email.trim(), password, officeId);
+    } catch {
+      // The parent displays the registration error through errorMessage.
+    }
   };
 
   return (
@@ -98,6 +131,33 @@ export const NomineeSignupScreen: React.FC<NomineeSignupScreenProps> = ({
                 </div>
               </label>
 
+              <label className="block space-y-1.5">
+                <span className="text-xs font-semibold text-slate-700">Office</span>
+                <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 focus-within:border-blue-500 focus-within:bg-white">
+                  <Building2 size={16} className="shrink-0 text-slate-400" />
+                  <select
+                    name="office_id"
+                    required
+                    value={officeId}
+                    onChange={event => setOfficeId(event.target.value)}
+                    disabled={isSubmitting || isLoadingOffices || !!officesError || !offices.length}
+                    aria-describedby={officesError || (!isLoadingOffices && !offices.length) ? 'signup-office-status' : undefined}
+                    className="min-w-0 w-full bg-transparent text-sm outline-none disabled:opacity-70"
+                  >
+                    <option value="" disabled>{isLoadingOffices ? 'Loading offices...' : 'Select your office'}</option>
+                    {offices.map(office => <option key={office.id} value={office.id}>{office.name}</option>)}
+                  </select>
+                </div>
+              </label>
+              {officesError ? (
+                <div id="signup-office-status" role="alert" className="text-sm text-red-700">
+                  {officesError}{' '}
+                  <button type="button" onClick={() => setOfficeLoadAttempt(attempt => attempt + 1)} className="font-semibold underline">Retry</button>
+                </div>
+              ) : !isLoadingOffices && !offices.length && (
+                <p id="signup-office-status" role="status" className="text-sm text-slate-500">No offices are available. Please contact the administrator.</p>
+              )}
+
               <AuthPasswordField
                 label="Password"
                 autoComplete="new-password"
@@ -121,7 +181,7 @@ export const NomineeSignupScreen: React.FC<NomineeSignupScreenProps> = ({
                 </div>
               )}
 
-              <button type="submit" disabled={isSubmitting} className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70 inline-flex items-center justify-center gap-2">
+              <button type="submit" disabled={isSubmitting || isLoadingOffices || !!officesError || !offices.length} className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70 inline-flex items-center justify-center gap-2">
                 <UserPlus size={16} />
                 <span>{isSubmitting ? 'Creating account...' : 'Create nominee account'}</span>
               </button>

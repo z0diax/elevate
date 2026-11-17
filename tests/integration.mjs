@@ -154,6 +154,29 @@ async function main() {
     await login('filer');
   });
   for (const name of ['admin', 'secretary', 'head', 'other-head', 'other-filer', 'A', 'B', 'C', 'D', 'E', 'F']) await login(name);
+  await test('public nominee registration lists active offices and persists a required office', async () => {
+    const offices = expect(await request('/api/auth.php?action=registration_offices'), 200, 'public registration offices');
+    assert.deepEqual(offices.map(office => office.id).sort(), [id('office-one'), id('office-two')].sort());
+    assert.ok(offices.every(office => Object.keys(office).sort().join(',') === 'id,name'), 'only office IDs and names are public');
+    const body = { full_name: 'Registered Test Nominee', email: `signup-${run}@example.invalid`, password };
+    for (const office of [{}, { office_id: '' }, { office_id: null }, { office_id: [] }, { office_id: id('missing-office') }, { office_id: id('office-inactive') }]) {
+      expect(await request('/api/auth.php?action=register_nominee', { method: 'POST', json: { ...body, ...office } }), 400, 'reject missing or invalid office');
+    }
+    const user = expect(await request('/api/auth.php?action=register_nominee', { method: 'POST', actor: 'signup', json: { ...body, office_id: id('office-two') } }), 201, 'register nominee');
+    try {
+      assert.equal(user.role, 'NOMINEE');
+      assert.equal(user.office_id, id('office-two'));
+      assert.equal(user.office_name, 'Automated Test Office two');
+      assert.deepEqual(user.office_ids, [id('office-two')]);
+      const current = expect(await request('/api/auth.php?action=current', { actor: 'signup' }), 200, 'registered session');
+      assert.deepEqual(current.office_ids, [id('office-two')]);
+      const loggedIn = expect(await request('/api/auth.php?action=login', { method: 'POST', actor: 'signup', json: { email: body.email, password } }), 200, 'registered nominee login');
+      assert.equal(loggedIn.office_id, id('office-two'));
+      assert.deepEqual(loggedIn.office_names, ['Automated Test Office two']);
+    } finally {
+      expect(await request('/api/auth.php', { method: 'DELETE', actor: 'admin', json: { id: user.id } }), 200, 'remove registered test nominee');
+    }
+  });
   if (cloudStorage) await test('chunked uploads preserve large files, enforce ownership and survive a server restart', async () => {
     const app = await createNomination();
     const bytes = Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(6 * 1024 * 1024, 65), Buffer.from('\n%%EOF\n')]);
@@ -236,7 +259,7 @@ async function main() {
   await test('self-registration still submits a signed nomination under the new account', async () => {
     let registered, app;
     try {
-      registered = expect(await request('/api/auth.php?action=register_nominee', { method: 'POST', actor: 'registered', json: { full_name: 'New Registered Nominator', email: `registered-${run}@example.invalid`, password } }), 201, 'registration');
+      registered = expect(await request('/api/auth.php?action=register_nominee', { method: 'POST', actor: 'registered', json: { full_name: 'New Registered Nominator', email: `registered-${run}@example.invalid`, password, office_id: id('office-one') } }), 201, 'registration');
       sessions.set('registered', { ...sessions.get('registered'), csrf: registered.csrf_token });
       assert.equal(registered.role, 'NOMINEE');
       app = await createNomination('registered');

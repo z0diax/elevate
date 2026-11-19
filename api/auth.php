@@ -7,6 +7,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/config/cors.php';
 require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/config/session_auth.php';
+require_once __DIR__ . '/config/login_throttle.php';
 
 header('Cache-Control: no-store');
 
@@ -98,22 +99,20 @@ if ($method === 'POST') {
             sendResponse(400, [], 'Email and password are required.');
         }
 
-        $stmt = $db->prepare("
-            SELECT *
-            FROM profiles
-            WHERE email = :email
-            LIMIT 1
-        ");
-        $stmt->execute([':email' => $email]);
-        $user = $stmt->fetch();
-
-        if (!$user || !(bool)$user['is_active']) {
+        try {
+            $login = authenticate_throttled_login($db, $email, $password, $_SERVER);
+        } catch (Throwable $error) {
+            logInternalError($error, 'auth.php:login');
+            sendResponse(503, [], 'Sign-in is temporarily unavailable. Please try again.');
+        }
+        if ($login['status'] === 429) {
+            header('Retry-After: ' . $login['retry_after']);
+            sendResponse(429, [], 'Too many sign-in attempts. Please wait a few minutes and try again.');
+        }
+        if ($login['status'] !== 200) {
             sendResponse(401, [], 'Invalid credentials.');
         }
-
-        if (!password_verify($password, $user['password_hash'])) {
-            sendResponse(401, [], 'Invalid credentials.');
-        }
+        $user = $login['user'];
 
         set_auth_session($user['id']);
         $db->prepare("UPDATE profiles SET last_login_at = NOW() WHERE id = :id")->execute([':id' => $user['id']]);

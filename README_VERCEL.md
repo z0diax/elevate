@@ -67,6 +67,20 @@ This adds only the cloud storage tables. It does not automatically import local 
 
 The migration `database_migrations/20261117_cloud_storage.sql` creates `praise_sessions`, `praise_files`, and `praise_file_chunks`. Binary chunks stay below common database packet limits. Files are reassembled only in request-local temporary storage for content validation, signatures, and downloads. The database holds the durable copy; include these tables in backups.
 
+## Login rate limiting
+
+Before deploying the rate-limited login API to an existing installation, create its counter table with the maintenance account:
+
+```text
+node scripts/cloud_database.mjs add-login-throttle --env-file=.env.maintenance
+```
+
+This applies `database_migrations/20260929_login_throttle.sql`, which only creates `login_throttle` if missing. It does not change existing accounts, nominations, files, or evaluations. New installations already include the table. The restricted production account's database-scoped DML permissions cover it; do not grant it schema or user-administration privileges.
+
+Eight failed attempts against one account within 15 minutes trigger a five-minute cooldown. A separate source-address budget allows 50 failures across accounts in 15 minutes before the same cooldown. Unknown and disabled accounts receive generic errors. Blocked attempts return HTTP 429 with `Retry-After`; correct credentials cannot bypass an active cooldown. A successful login resets that account's failure budget while preserving unrelated source failures. Checks and counter updates are serialized in database transactions across container instances.
+
+Source addresses come from Vercel's overwritten forwarding headers in the Vercel container; see [Vercel request headers](https://vercel.com/docs/headers/request-headers). Other deployments use the direct address or an explicitly trusted proxy chain; untrusted forwarding headers are ignored. Counter times use UTC, raw emails and IP addresses are not stored in the throttle table, and expired metadata is removed in bounded batches. If throttle storage is unavailable, login returns HTTP 503 instead of bypassing the limit. Existing authenticated sessions continue to work.
+
 ## Deploy
 
 Use a current Vercel CLI with Container support, or import the repository through the dashboard. `Dockerfile.vercel` and `vercel.json` select Container. An external PHP server and `PHP_BACKEND_URL` are no longer needed.

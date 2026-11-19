@@ -76,6 +76,12 @@ private $port = "3306";
 - The checked-in `index.html` is the Vite development entry and is not the Apache runtime entry.
 - `setup_db.php` loads the checked-in `database.sql`, which now seeds only the bootstrap administrator plus the base award and office configuration.
 
+## Login rate limiting upgrade
+
+For an existing database, apply `database_migrations/20260929_login_throttle.sql` before deploying the updated login API. It creates only the failed-attempt counter table; existing records are retained. Fresh installs already include it. Login allows eight failed attempts per account or 50 per source address in a 15-minute window, followed by a five-minute cooldown. The API returns HTTP 429 and `Retry-After` during the cooldown. Missing throttle storage causes HTTP 503 for login; it does not bypass protection. Existing sessions remain available.
+
+Use `TRUSTED_PROXY_IPS` only for actual trusted reverse proxies. Direct XAMPP requests cannot choose their throttle address using arbitrary forwarding headers.
+
 ## Nomination attachment uploads
 
 New uploads and replacements accept PDF, DOCX, JPG, JPEG, and PNG up to 10 MB per file. PHP needs Fileinfo and image inspection (`getimagesize`). DOCX validation uses ZipArchive or the bundled PharData ZIP reader. Set `upload_max_filesize = 10M` and `post_max_size = 12M` (or larger) in the deployment's PHP configuration so the application can enforce its own limit. Restart Apache after changing PHP settings.

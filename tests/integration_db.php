@@ -99,6 +99,8 @@ try {
         $db->prepare('DELETE FROM applications WHERE id = ?')->execute([$app]);
     }
     foreach (['awards', 'profiles', 'offices'] as $table) $db->prepare("DELETE FROM {$table} WHERE id LIKE ?")->execute([$like]);
+    // Setup rejects all existing records, so every throttle row belongs to this run.
+    $db->exec('DELETE FROM login_throttle');
     if (getenv('TEST_CLOUD_STORAGE') === '1') {
         // Setup refuses any preexisting records; these tables contain only this run.
         $db->exec('DELETE FROM praise_files');

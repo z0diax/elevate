@@ -4,10 +4,15 @@ declare(strict_types=1);
 if (PHP_SAPI !== 'cli') { http_response_code(403); exit(); }
 require_once __DIR__ . '/../api/config/database.php';
 $mode = $argv[1] ?? '';
-if (!in_array($mode, ['inspect', 'create-app-database', 'initialize-empty', 'import-local', 'add-cloud-storage'], true)) throw new RuntimeException('Invalid cloud maintenance operation.');
+if (!in_array($mode, ['inspect', 'create-app-database', 'initialize-empty', 'import-local', 'add-cloud-storage', 'add-login-throttle'], true)) throw new RuntimeException('Invalid cloud maintenance operation.');
 $db = (new Database())->getConnection();
 if (!$db) throw new RuntimeException('Cannot connect to the configured database.');
 $root = dirname(__DIR__);
+if ($mode === 'add-login-throttle') {
+    $db->exec((string)file_get_contents($root . '/database_migrations/20260929_login_throttle.sql'));
+    echo "Login throttle storage is available. Existing application records were not changed.\n";
+    exit();
+}
 if ($mode === 'create-app-database') {
     $db->exec('CREATE DATABASE IF NOT EXISTS `tacloban_praise_db` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
     echo "Application database is available.\n";

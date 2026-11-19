@@ -154,6 +154,17 @@ async function main() {
     await login('filer');
   });
   for (const name of ['admin', 'secretary', 'head', 'other-head', 'other-filer', 'A', 'B', 'C', 'D', 'E', 'F']) await login(name);
+  await test('login rate limits return generic errors, Retry-After and preserve existing sessions', async () => {
+    const email = `missing-throttle-${run}@example.invalid`;
+    for (let attempt = 1; attempt <= 8; attempt++) {
+      const result = await request('/api/auth.php?action=login', { method: 'POST', json: { email, password: 'incorrect-password' } });
+      expect(result, attempt < 8 ? 401 : 429, 'login failure limit');
+      if (attempt < 8) assert.equal(result.data.message, 'Invalid credentials.');
+      else assert.ok(Number(result.headers.get('retry-after')) > 0 && Number(result.headers.get('retry-after')) <= 300);
+    }
+    expect(await request('/api/auth.php?action=login', { method: 'POST', json: { email: email.toUpperCase(), password } }), 429, 'case variation remains blocked');
+    expect(await request('/api/auth.php?action=current', { actor: 'filer' }), 200, 'existing session unaffected');
+  });
   await test('public nominee registration lists active offices and persists a required office', async () => {
     const offices = expect(await request('/api/auth.php?action=registration_offices'), 200, 'public registration offices');
     assert.deepEqual(offices.map(office => office.id).sort(), [id('office-one'), id('office-two')].sort());

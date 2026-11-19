@@ -11,7 +11,7 @@ import { praiseService } from '../src/lib/api';
 import { NominationFormViewerModal } from '../src/components/nomination/NominationFormViewerModal';
 import { Application, UserRole } from '../src/types';
 
-const state = { calls: 0, corrections: 0, fail: false, legacy: false, signed: false, signatureFail: false, longIdentity: false, status: 'For Evaluation' as Application['status'], stage: 'Evaluation' as Application['processing_stage'], role: 'NOMINEE' as UserRole };
+const state = { calls: 0, signatureCalls: 0, corrections: 0, fail: false, legacy: false, signed: false, signatureFail: false, longIdentity: false, status: 'For Evaluation' as Application['status'], stage: 'Evaluation' as Application['processing_stage'], role: 'NOMINEE' as UserRole };
 const root = createRoot(document.getElementById('root')!);
 const app: Application = {
   id: 'viewer-record', application_number: 'PRAISE-VIEWER', award_id: 'award', award_name: 'Service Award', award_year: 2026,
@@ -38,6 +38,7 @@ praiseService.getNominationForm = async id => {
 };
 praiseService.getAuditLogsForApplication = () => history;
 praiseService.getNominationSignature = async () => {
+  state.signatureCalls++;
   if (state.signatureFail) throw Error('Recorded signature could not be loaded.');
   return { strokes: [[[0.1, 0.2], [0.4, 0.7], [0.7, 0.3]]], signed_at: '2026-10-08 10:30:00', sha256: 'synthetic-test-digest', signed_snapshot: app };
 };

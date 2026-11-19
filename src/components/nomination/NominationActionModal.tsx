@@ -19,6 +19,7 @@ interface NominationActionModalProps {
   onTabChange: (tab: string) => void;
   onClose: () => void;
   footer?: React.ReactNode;
+  headerActions?: React.ReactNode;
   children: React.ReactNode;
   presentation?: 'workflow' | 'document';
   tabIdPrefix?: string;
@@ -37,7 +38,7 @@ const STAGE_LABELS: Record<Application['processing_stage'], string> = {
 const STAGE_ORDER = Object.keys(STAGE_LABELS) as Application['processing_stage'][];
 
 export const NominationActionModal: React.FC<NominationActionModalProps> = ({
-  application, title, task, tabs, activeTab, onTabChange, onClose, footer, children, presentation = 'workflow', tabIdPrefix,
+  application, title, task, tabs, activeTab, onTabChange, onClose, footer, headerActions, children, presentation = 'workflow', tabIdPrefix,
 }) => {
   const titleId = useId();
   const tabPrefix = tabIdPrefix || titleId;
@@ -108,6 +109,7 @@ export const NominationActionModal: React.FC<NominationActionModalProps> = ({
               <X size={19} />
             </button>
           </div>
+          {headerActions && <div className="mt-3 flex justify-end">{headerActions}</div>}
         </header>
 
         {application && presentation === 'workflow' && <div className="shrink-0 border-b border-slate-200 bg-slate-50 px-4 py-3 sm:px-6">

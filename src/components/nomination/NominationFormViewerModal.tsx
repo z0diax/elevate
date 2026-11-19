@@ -8,6 +8,7 @@ import { NominationDetails, NominationDocuments, NominationHistory } from './Nom
 import { NominationIdentityDetails } from './NominationIdentity';
 import { NominationFieldGrid, NominationFormSection, NominationTabPanel } from './NominationFormPresentation';
 import { StageProgressTracker } from '../common/StageProgressTracker';
+import { DownloadNominationButton } from './DownloadNominationButton';
 
 const recordedDate = (value?: string, dateOnly = false) => {
   if (!value || Number.isNaN(new Date(value).getTime())) return 'Not recorded';
@@ -45,7 +46,7 @@ export const NominationFormViewerModal: React.FC<{
     .sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
 
   return createPortal(<div onClick={event => event.stopPropagation()}>
-    <NominationActionModal presentation="document" application={application} title="Nomination Form" task="Read-only nomination record" tabs={application ? FORM_TABS : []} tabIdPrefix={tabIdPrefix} activeTab={activeTab} onTabChange={tab => setTabSelection({ applicationId, tab })} onClose={onClose}>
+    <NominationActionModal presentation="document" application={application} title="Nomination Form" task="Read-only nomination record" tabs={application ? FORM_TABS : []} tabIdPrefix={tabIdPrefix} activeTab={activeTab} onTabChange={tab => setTabSelection({ applicationId, tab })} onClose={onClose} headerActions={application && <DownloadNominationButton key={applicationId} applicationId={applicationId} userRole={userRole} />}>
       {!record && !error && <p role="status" className="py-10 text-center text-sm text-slate-600">Loading nomination form…</p>}
       {error && <div role="alert" className="space-y-3 rounded-xl bg-red-50 p-5 text-sm text-red-800">
         <p>{error}</p>

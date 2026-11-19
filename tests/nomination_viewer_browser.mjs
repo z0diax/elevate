@@ -8,12 +8,13 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { build } from 'esbuild';
 import { jsPDF } from 'jspdf';
+import { PDFDocument } from 'pdf-lib';
 
 const root = resolve(import.meta.dirname, '..');
 const chrome = [process.env.CHROME_PATH, 'C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(path => path && existsSync(path));
 if (!chrome) throw Error('Set CHROME_PATH to a Chromium executable.');
 const temporary = mkdtempSync(join(tmpdir(), 'praise-viewer-browser-'));
-const javascript = (await build({ entryPoints: [join(root, 'tests/nomination_viewer_fixture.tsx')], bundle: true, write: false, format: 'iife', loader: { '.png': 'dataurl' } })).outputFiles[0].text;
+const javascript = (await build({ entryPoints: [join(root, 'tests/nomination_viewer_fixture.tsx')], bundle: true, minify: true, write: false, format: 'iife', loader: { '.png': 'dataurl' } })).outputFiles[0].text;
 const cssFile = readdirSync(join(root, 'dist/assets')).find(name => name.endsWith('.css'));
 const css = readFileSync(join(root, 'dist/assets', cssFile));
 const previewPdf = Buffer.from(new jsPDF().output('arraybuffer'));
@@ -44,11 +45,18 @@ try {
   await new Promise(ok => socket.addEventListener('open', ok, { once: true }));
   let sequence = 0;
   const pending = new Map();
+  const completedDownloads = new Set();
   socket.addEventListener('message', event => {
     const result = JSON.parse(event.data);
+    if (result.method === 'Browser.downloadProgress' && result.params.state === 'completed') completedDownloads.add(result.params.guid);
     if (result.id && pending.has(result.id)) { const { ok, fail } = pending.get(result.id); pending.delete(result.id); result.error ? fail(Error(result.error.message)) : ok(result.result); }
   });
-  const command = (method, params = {}) => new Promise((ok, fail) => { const id = ++sequence; pending.set(id, { ok, fail }); socket.send(JSON.stringify({ id, method, params })); });
+  const command = (method, params = {}) => new Promise((ok, fail) => {
+    const id = ++sequence;
+    const timeout = setTimeout(() => { pending.delete(id); fail(Error(`Browser did not respond to ${method}`)); }, 30000);
+    pending.set(id, { ok: result => { clearTimeout(timeout); ok(result); }, fail: error => { clearTimeout(timeout); fail(error); } });
+    socket.send(JSON.stringify({ id, method, params }));
+  });
   const evaluate = async expression => {
     const result = await command('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
     if (result.exceptionDetails) throw Error(JSON.stringify(result.exceptionDetails));
@@ -249,7 +257,39 @@ try {
   await evaluate(`document.querySelector('[aria-label="Close nomination"]').click()`);
   await delay(100);
   assert.equal(await evaluate('document.querySelectorAll("[role=dialog]").length'), 0, 'close button closes viewer');
-  console.log('PASS: shared form across all roles at 320/390/768/1100px; five tabs and panels; keyboard arrows/Home/End; fixed header and tabs; different nomination reset; keyboard/focus; single reference entry; passive names; corrections; workflows; image/PDF preview and downloads; nomination states; signatures; long text; legacy data; error/retry.');
+  await command('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: temporary, eventsEnabled: true });
+  const downloadButton = `document.querySelector('[role=dialog] button[aria-label="Download nomination PDF"]')`;
+  for (const role of ['ADMINISTRATOR', 'EVALUATOR', 'NOMINEE']) {
+    await command('Emulation.setDeviceMetricsOverride', { width: role === 'ADMINISTRATOR' ? 1100 : 390, height: 844, deviceScaleFactor: 1, mobile: role !== 'ADMINISTRATOR' });
+    await evaluate(`window.viewerTest.state.signed=true; window.viewerTest.render(${JSON.stringify(role)})`);
+    await delay(100); await open();
+    assert.ok(await evaluate(`!!${downloadButton}`), 'PDF download available from every tab');
+    writeFileSync(join(temporary, `download-${role}.png`), Buffer.from((await command('Page.captureScreenshot')).data, 'base64'));
+    const before = await evaluate('window.viewerTest.state.calls');
+    const signatureBefore = await evaluate('window.viewerTest.state.signatureCalls');
+    const downloadsBefore = completedDownloads.size;
+    await evaluate(`${downloadButton}.click()`);
+    await waitFor(`${downloadButton}.disabled`);
+    await waitFor(`!${downloadButton}.disabled`);
+    assert.equal(await evaluate('window.viewerTest.state.calls'), before + 1, 'download fetches current authorized record');
+    assert.equal(await evaluate('window.viewerTest.state.signatureCalls'), signatureBefore + (role === 'EVALUATOR' ? 0 : 1), 'evaluators never request signature');
+    assert.equal(await evaluate('!!document.querySelector("[role=dialog] [role=alert]")'), false);
+    const target = join(temporary, 'PRAISE-VIEWER_Nomination_Form.pdf');
+    for (let count = 0; count < 100 && completedDownloads.size === downloadsBefore; count++) await delay(100);
+    assert.equal(completedDownloads.size, downloadsBefore + 1, 'browser completed the PDF download');
+    const pdf = await PDFDocument.load(readFileSync(target));
+    assert.ok(pdf.getPageCount() > 3, 'download includes form and both attachment types');
+    writeFileSync(join(temporary, `nomination-${role}.pdf`), readFileSync(target));
+    rmSync(target);
+    await close();
+  }
+  await evaluate("window.viewerTest.render('NOMINEE'); window.viewerTest.state.signatureFail=true"); await delay(100); await open();
+  await evaluate(`${downloadButton}.click()`);
+  await waitFor('!!document.querySelector("[role=dialog] header [role=alert]")');
+  assert.match(await evaluate('document.querySelector("[role=dialog] header [role=alert]").textContent'), /signature could not be loaded/);
+  assert.equal(existsSync(join(temporary, 'PRAISE-VIEWER_Nomination_Form.pdf')), false, 'failed signature does not download incomplete PDF');
+  await close();
+  console.log('PASS: shared viewer across roles at 320/390/768/1100px; tabs, focus, workflows, previews, signatures, legacy/error handling; full PDF downloads with fresh retrieval, embedded attachments, loading state, evaluator privacy and signature failure.');
   console.log(`Review artifacts: ${temporary}`);
 } finally {
   socket?.close(); browser.kill(); await new Promise(ok => server.close(ok));

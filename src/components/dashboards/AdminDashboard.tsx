@@ -2,6 +2,7 @@ import { AdminMobileApplications, AdminMobileOffices, AdminMobileUsers } from '.
 import { OfficeAssignmentSelect } from '../common/OfficeAssignmentSelect';
 import { assignedOfficeIds, hasAssignedOffice } from '../../lib/userOffices';
 import { NominationReferenceButton } from '../nomination/NominationFormViewerModal';
+import { DownloadNominationButton } from '../nomination/DownloadNominationButton';
 import React, { useEffect, useState } from 'react';
 import { Application, Award, AwardEvaluationRoute, Office, UserProfile, UserRole } from '../../types';
 import { StatusBadge } from '../common/StatusBadge';
@@ -890,7 +891,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <AdminMobileApplications applications={filteredApplications} role={currentUser.role} isSaving={isSaving}
               onTrack={app => { setTrackingTab('status'); setTrackingDocId(null); setReassigningAssignmentId(null); setTrackingApp(app); }}
               onAudit={setAuditApp}
-              onDownload={app => pdfGenerator.generateApplicationSummary(app, awards.find(award => award.id === app.award_id))}
               onDelete={handleDeleteNomination} />
             <div className="mobile-scroll-table hidden overflow-x-auto xl:block">
               <table className="w-full min-w-[780px] text-left text-xs border-collapse">
@@ -970,13 +970,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             >
                               <History size={14} />
                             </button>
-                            <button
-                              onClick={() => pdfGenerator.generateApplicationSummary(app, awards.find(a => a.id === app.award_id))}
-                              title="Download PDF Dossier"
-                              className="inline-flex size-6 items-center justify-center text-slate-400 hover:text-blue-600 rounded cursor-pointer"
-                            >
-                              <Download size={14} />
-                            </button>
+                            <DownloadNominationButton applicationId={app.id} userRole={currentUser.role} appearance="icon" />
                             <button
                               onClick={() => handleDeleteNomination(app)}
                               disabled={isSaving}

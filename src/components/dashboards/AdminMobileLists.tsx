@@ -3,6 +3,7 @@ import { Application, Office, UserProfile } from '../../types';
 import { StatusBadge } from '../common/StatusBadge';
 import { NominationReferenceButton } from '../nomination/NominationFormViewerModal';
 import { getEvaluatorProgress } from '../../lib/evaluatorAssignments';
+import { DownloadNominationButton } from '../nomination/DownloadNominationButton';
 
 const actionClass = 'min-h-11 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200';
 const deleteClass = 'min-h-11 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 disabled:opacity-50';
@@ -17,10 +18,10 @@ function Details({ fields }: { fields: [string, React.ReactNode][] }) {
   </dl>;
 }
 
-export function AdminMobileApplications({ applications, role, isSaving, onTrack, onAudit, onDownload, onDelete }: {
+export function AdminMobileApplications({ applications, role, isSaving, onTrack, onAudit, onDelete }: {
   applications: Application[]; role: UserProfile['role']; isSaving: boolean;
   onTrack: (application: Application) => void; onAudit: (application: Application) => void;
-  onDownload: (application: Application) => void; onDelete: (application: Application) => void;
+  onDelete: (application: Application) => void;
 }) {
   return <div className={listClass} data-mobile-list="applications">
     {!applications.length && <p className="p-6 text-center text-sm text-slate-500">No applications matched your filter criteria.</p>}
@@ -40,7 +41,7 @@ export function AdminMobileApplications({ applications, role, isSaving, onTrack,
         <div className="grid grid-cols-2 gap-2">
           <button type="button" className={actionClass} onClick={() => onTrack(application)}>Track stage</button>
           <button type="button" className={actionClass} onClick={() => onAudit(application)}>Audit trail</button>
-          <button type="button" className={actionClass} onClick={() => onDownload(application)}>Download PDF</button>
+          <DownloadNominationButton applicationId={application.id} userRole={role} appearance="list" />
           <button type="button" className={deleteClass} disabled={isSaving} onClick={() => onDelete(application)}>Delete nomination</button>
         </div>
       </article>;

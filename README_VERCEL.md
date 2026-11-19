@@ -82,6 +82,8 @@ After checking the preview and database, publish production with `vercel deploy 
 
 All visitors use the same database, subject to their roles. Sessions work across container instances and restarts. API responses are not cached.
 
+Nominee API responses include nomination details, documents, correction instructions, and workflow status. Evaluation scores, evaluator assignments, and internal committee fields are filtered on the server, including confidential details embedded in history entries. This changes response visibility only; stored evaluations and history are retained.
+
 The Vercel frontend build enables `VITE_CLOUD_UPLOADS=1`. Attachments are sent in 512 KB requests and assembled on the server, preserving the 10 MB attachment and 8 MB certificate-image limits. Every part requires authentication and CSRF. Pending uploads expire after ten minutes, are limited per account, and are consumed atomically. Actual PDF, DOCX, and image contents are still validated. Downloads stream incrementally.
 
 Unsaved nomination drafts, pending files saved by the browser, and display preferences stay on that device. Submitted records and uploaded documents are shared. Screens may need refreshing to show another user's changes; this does not add live subscriptions.

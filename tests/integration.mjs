@@ -519,6 +519,30 @@ async function main() {
     assert.equal(app.final_weighted_score, 85);
     assert.equal(app.evaluations.length, 3);
   });
+  await test('nominees cannot retrieve scores through records, lists, forms, history or submission retries', async () => {
+    const paths = ['/api/applications.php', `/api/applications.php?id=${first.id}`, `/api/applications.php?action=form&id=${first.id}`];
+    for (const path of paths) {
+      const response = await request(path, { actor: 'filer' });
+      const data = expect(response, 200, 'private nominee view');
+      const app = Array.isArray(data) ? data.find(row => row.id === first.id) : data.application ?? data;
+      assert.equal(app.status, 'Evaluation Completed');
+      assert.equal(app.documents[0].id, firstDoc.id);
+      for (const field of ['evaluations', 'evaluator_assignments', 'final_weighted_score', 'deliberation_remarks', 'deliberation_decision', 'deliberation_date']) assert.ok(!(field in app), `${path} exposes ${field}`);
+      assert.ok(!response.raw.includes(Buffer.from('Synthetic test evaluation')));
+      assert.ok(!response.raw.includes(Buffer.from('Weighted score:')));
+      assert.ok(!response.raw.includes(Buffer.from('Final consolidated evaluator score:')));
+    }
+    const historyResponse = await request(`/api/audit_logs.php?application_id=${first.id}`, { actor: 'filer' });
+    const history = expect(historyResponse, 200, 'private nominee history');
+    assert.ok(history.some(log => log.action === 'Nomination Submitted'));
+    assert.ok(!historyResponse.raw.includes(Buffer.from('Weighted score:')));
+    assert.ok(!historyResponse.raw.includes(Buffer.from('Final consolidated evaluator score:')));
+    const retry = expect(await action(first.id, 'finalize_submission', 'filer'), 200, 'already submitted retry');
+    assert.ok(!('evaluations' in retry) && !('final_weighted_score' in retry));
+    const staff = expect(await request(`/api/applications.php?id=${first.id}`, { actor: 'secretary' }), 200, 'staff view remains complete');
+    assert.equal(staff.final_weighted_score, 85);
+    assert.equal(staff.evaluations.length, 3);
+  });
   await test('controlled revision preserves versions, completion, aggregate and deliberation lock', async () => {
     const view = async () => expect(await request(`/api/applications.php?id=${first.id}`, { actor: 'B' }), 200, 'B evaluation');
     const original = await view();
@@ -577,6 +601,15 @@ async function main() {
     expect(await action(first.id, 'deliberation', 'secretary', { decision: 'Approved' }), 409, 'duplicate decision');
     const awarded = expect(await action(first.id, 'deliberation', 'secretary', { decision: 'Approved', award_now: true }), 200, 'confer award');
     assert.equal(awarded.status, 'Awarded'); assert.equal(awarded.processing_stage, 'Awarded');
+    const nomineeFormResponse = await request(`/api/applications.php?action=form&id=${first.id}`, { actor: 'filer' });
+    const nomineeForm = expect(nomineeFormResponse, 200, 'nominee published outcome');
+    assert.equal(nomineeForm.application.status, 'Awarded');
+    assert.ok(!('deliberation_remarks' in nomineeForm.application));
+    assert.ok(!('deliberation_decision' in nomineeForm.application));
+    for (const privateText of ['Synthetic approval', 'Corrected low score', 'Corrected assessment', 'Weighted score:', 'Final consolidated evaluator score:']) assert.ok(!nomineeFormResponse.raw.includes(Buffer.from(privateText)), `Nominee form/history exposes ${privateText}`);
+    const nomineeHistory = await request(`/api/audit_logs.php?application_id=${first.id}`, { actor: 'filer' });
+    expect(nomineeHistory, 200, 'nominee committee history');
+    assert.ok(!nomineeHistory.raw.includes(Buffer.from('Synthetic approval')));
     expect(await request('/api/export.php?format=json', { actor: 'secretary' }), 403, 'non-admin export');
     const exported = await request('/api/export.php?format=json', { actor: 'admin' });
     assert.equal(exported.status, 200);

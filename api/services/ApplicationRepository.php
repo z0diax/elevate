@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/ApplicationPrivacy.php';
 
 function getFullApplication(PDO $db, string $appId): ?array {
     $stmt = $db->prepare("SELECT id, application_number, award_id, award_name, award_year,
@@ -114,7 +115,7 @@ function listApplications(PDO $db, array $actor): array {
     foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $id) {
         $application = getFullApplication($db, (string)$id);
         if ($application && canViewApplication($application, $actor)) {
-            $results[] = redact_nominator_for_evaluator($application, $actor);
+            $results[] = application_for_actor($application, $actor);
         }
     }
 

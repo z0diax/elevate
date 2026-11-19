@@ -55,19 +55,12 @@ if ($method === 'GET') {
             $stmt = $db->prepare('SELECT * FROM application_history WHERE application_id = ? ORDER BY created_at DESC');
             $stmt->execute([$application['id']]);
             $history = $stmt->fetchAll();
-            if ($actor['role'] === 'EVALUATOR') {
-                foreach ($history as &$log) {
-                    if ((string)$log['user_id'] === (string)$application['nominator_id']) {
-                        $log['user_id'] = null;
-                        $log['user_name'] = 'Nominator';
-                        $log['user_role'] = 'SYSTEM';
-                    }
-                }
-                unset($log);
-            }
-            sendResponse(200, ['application' => redact_nominator_for_evaluator($application, $actor), 'history' => $history]);
+            sendResponse(200, [
+                'application' => application_for_actor($application, $actor),
+                'history' => application_history_for_actor($history, $application, $actor),
+            ]);
         }
-        sendResponse(200, redact_nominator_for_evaluator($application, $actor));
+        sendResponse(200, application_for_actor($application, $actor));
     }
 
     sendResponse(200, listApplications($db, $actor));

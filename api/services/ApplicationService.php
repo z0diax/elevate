@@ -6,7 +6,7 @@ function handle_finalize_submission(PDO $db, array $actor, array $data, string $
         sendResponse(403, [], 'Only the original filer can complete this nomination.');
     }
     if ($current['status'] !== 'Draft') {
-        sendResponse(200, $current, 'Nomination was already submitted.');
+        sendResponse(200, application_for_actor($current, $actor), 'Nomination was already submitted.');
     }
 
     $expectedIds = $data['expected_requirement_ids'] ?? [];
@@ -27,7 +27,7 @@ function handle_finalize_submission(PDO $db, array $actor, array $data, string $
         }
         if ($locked['status'] !== 'Draft') {
             $db->commit();
-            sendResponse(200, getFullApplication($db, $appId), 'Nomination was already submitted.');
+            sendResponse(200, application_for_actor(getFullApplication($db, $appId), $actor), 'Nomination was already submitted.');
         }
 
         $requirementsStmt = $db->prepare('SELECT id, document_name, is_mandatory FROM award_document_requirements WHERE award_id = :award_id');
@@ -109,7 +109,7 @@ function handle_finalize_submission(PDO $db, array $actor, array $data, string $
         sendInternalError($e, 'applications.php:complete', 'Failed to complete nomination.');
     }
 
-    sendResponse(200, getFullApplication($db, $appId), 'Nomination submitted successfully.');
+    sendResponse(200, application_for_actor(getFullApplication($db, $appId), $actor), 'Nomination submitted successfully.');
 }
 
 function handle_resubmit(PDO $db, array $actor, array $data, string $appId, array $current): void {
@@ -177,7 +177,7 @@ function handle_resubmit(PDO $db, array $actor, array $data, string $appId, arra
         sendInternalError($e, 'applications.php:resubmit', 'Failed to resubmit nomination.');
     }
 
-    sendResponse(200, getFullApplication($db, $appId), 'Nomination resubmitted successfully.');
+    sendResponse(200, application_for_actor(getFullApplication($db, $appId), $actor), 'Nomination resubmitted successfully.');
 }
 
 function handle_return_for_revision(PDO $db, array $actor, array $data, string $appId, array $current): void {
@@ -233,7 +233,7 @@ function handle_return_for_revision(PDO $db, array $actor, array $data, string $
         sendInternalError($e, 'applications.php:return_for_revision', 'Failed to return application for revision.');
     }
 
-    sendResponse(200, redact_nominator_for_evaluator(getFullApplication($db, $appId), $actor), 'Application returned for revision.');
+    sendResponse(200, application_for_actor(getFullApplication($db, $appId), $actor), 'Application returned for revision.');
 }
 
 function validate_application_create_data(PDO $db, array $actor, array $data): array {
@@ -300,7 +300,7 @@ function handle_create_application(PDO $db, array $actor, array $data): void {
     if ($submissionId !== '') {
         $existing = findSubmittedNomination($db, $appId, $actor, $data);
         if ($existing) {
-            sendResponse(200, $existing, $existing['status'] === 'Draft'
+            sendResponse(200, application_for_actor($existing, $actor), $existing['status'] === 'Draft'
                 ? 'Nomination draft already exists. Continue uploading attachments.'
                 : 'Nomination was already submitted.');
         }
@@ -386,7 +386,7 @@ function handle_create_application(PDO $db, array $actor, array $data): void {
         if ($submissionId !== '') {
             $existing = findSubmittedNomination($db, $appId, $actor, $data);
             if ($existing) {
-                sendResponse(200, $existing, $existing['status'] === 'Draft'
+                sendResponse(200, application_for_actor($existing, $actor), $existing['status'] === 'Draft'
                     ? 'Nomination draft already exists. Continue uploading attachments.'
                     : 'Nomination was already submitted.');
             }
@@ -394,7 +394,7 @@ function handle_create_application(PDO $db, array $actor, array $data): void {
         sendInternalError($e, 'applications.php:create', 'Failed to create nomination.');
     }
 
-    sendResponse(201, getFullApplication($db, $appId), 'Nomination draft created. Upload attachments to complete submission.');
+    sendResponse(201, application_for_actor(getFullApplication($db, $appId), $actor), 'Nomination draft created. Upload attachments to complete submission.');
 }
 
 function handle_delete_application(PDO $db, string $appId): void {

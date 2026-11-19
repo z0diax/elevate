@@ -5,6 +5,7 @@
 require_once __DIR__ . '/config/cors.php';
 require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/config/session_auth.php';
+require_once __DIR__ . '/services/ApplicationPrivacy.php';
 
 $database = new Database();
 $db = $database->getConnection();
@@ -33,16 +34,6 @@ if ($method === 'GET') {
         }
     }
     $logs = $stmt->fetchAll();
-    if ($actor['role'] === 'EVALUATOR') {
-        foreach ($logs as &$log) {
-            if ((string)$log['user_id'] === (string)$application['nominator_id']) {
-                $log['user_id'] = null;
-                $log['user_name'] = 'Nominator';
-                $log['user_role'] = 'SYSTEM';
-            }
-        }
-        unset($log);
-    }
-    sendResponse(200, $logs);
+    sendResponse(200, application_history_for_actor($logs, $application ?? [], $actor));
 }
 sendResponse(405, [], 'Method not allowed.');

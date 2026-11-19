@@ -10,7 +10,7 @@ The React frontend and PHP API run together in a Vercel container. A MySQL-compa
 2. Add the [TiDB Cloud integration](https://vercel.com/marketplace/tidb-cloud). Choose **Cluster**, a MySQL-compatible **Starter** instance, and the **General** connection option. Select `tacloban-praise` as the Vercel project.
 3. Finish the integration. Vercel should have these server-only variables: `TIDB_HOST`, `TIDB_PORT`, `TIDB_USER`, `TIDB_PASSWORD`, and `TIDB_DATABASE`.
 
-The backend accepts these directly. Existing `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASS`, and `DB_NAME` variables take precedence. Keep secrets out of `VITE_*` variables and source control.
+The backend accepts these directly. Existing `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASS`, and `DB_NAME` variables take precedence. For production, use the restricted runtime account described below instead of an integration administrator. Keep secrets out of `VITE_*` variables and source control.
 
 If the integration points to `sys`, use `node scripts/cloud_database.mjs create-app-database` to create a dedicated `tacloban_praise_db` database. Set `DB_NAME=tacloban_praise_db` in the Vercel Production environment as a **Config** value, then pull the environment again before importing. Keep TiDB system schemas separate from application data. Set up separate application databases before enabling Preview or Development deployments.
 
@@ -18,11 +18,32 @@ The container sets `APP_ENV=production`, `FILE_STORAGE=database`, `SESSION_STORA
 
 The current deployment uses Tokyo (`hnd1`) to match the connected TiDB cluster's `ap-northeast-1` region. If the database moves, update `regions` in `vercel.json` to keep the backend close to it.
 
+## Production database permissions
+
+Production uses a dedicated SQL account with only `SELECT`, `INSERT`, `UPDATE`, and `DELETE` on `tacloban_praise_db`.*. It does not need schema changes, user administration, global privileges, or `GRANT OPTION`. This applies to records, database sessions, and database file storage.
+
+Set `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and `DB_PASS` for **Production** in Vercel. Store `DB_PASS` as a Secret/sensitive variable. Keep administrator `TIDB_USER` and `TIDB_PASSWORD` out of that environment, even when `DB_*` takes precedence: a compromised application must not have administrator credentials available in its process. Environment changes require a new deployment; old deployments retain their previous environment.
+
+Use a separate privileged account for CLI migrations/imports. To provision a runtime account from that maintenance connection, the SQL is:
+
+```sql
+CREATE USER '<instance-prefix>.praise_runtime'@'%'
+  IDENTIFIED BY '<securely-generated-password>' REQUIRE SSL;
+GRANT SELECT, INSERT, UPDATE, DELETE
+  ON `tacloban_praise_db`.* TO '<instance-prefix>.praise_runtime'@'%';
+```
+
+Use the instance's username prefix for TiDB Starter; dedicated MySQL-compatible servers can use an unprefixed name. Verify the account with `SHOW GRANTS`, connect with TLS and certificate verification, and test normal database reads and transactionally rolled-back writes before switching production. Never test denied DDL by attempting to drop an application table. Retain a protected maintenance connection and the previous deployment during verification; rolling back to an old deployment also restores its old credentials.
+
+Preview and Development must receive their own database/account before being used with real data. The initial integration may share administrator credentials across those environments; changing the production account does not fix those remaining scopes.
+
 ## Prepare the database
 
 Setup is a CLI maintenance operation, never a public HTTP endpoint or an automatic step on every deployment. Load the cloud connection settings into the PHP process first.
 
-With the linked Vercel CLI, download settings to the ignored `.env.cloud` file using `vercel env pull .env.cloud --environment=production`. The Node helper loads that file into PHP without displaying passwords and selects the local certificate bundle.
+Keep maintenance connection settings in an ignored `.env.maintenance` file, using the server-side `DB_*` fields from `.env.example` and a privileged maintenance account. Supply that file explicitly, for example `node scripts/cloud_database.mjs inspect --env-file=.env.maintenance`. The helper loads it into PHP without displaying passwords and selects the local certificate bundle. Apply the same `--env-file=.env.maintenance` option to the other Node maintenance commands below.
+
+The helper still supports `.env.cloud` by default for existing installations. Do not overwrite your only maintenance configuration with `vercel env pull`: Production now uses restricted credentials and a sensitive password may not be downloadable. Downloaded runtime settings are not a migration account. Keep all maintenance files out of source control and deployment inputs.
 
 To preserve the current XAMPP accounts and records in a **new empty cloud database**, run `node scripts/cloud_database.mjs import-local`. This reads the local `tacloban_praise_db`, copies its schema and records, and imports referenced attachment files. It refuses to overwrite cloud tables and does not change local data. `SOURCE_DB_HOST`, `SOURCE_DB_PORT`, `SOURCE_DB_NAME`, `SOURCE_DB_USER`, `SOURCE_DB_PASS`, and `SOURCE_PRIVATE_UPLOAD_DIR` can override the local XAMPP defaults. A missing referenced file stops the import before copying records.
 

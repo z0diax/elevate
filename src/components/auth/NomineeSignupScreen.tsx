@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { WrappingSelect } from '../common/WrappingSelect';
 import { AlertCircle, ArrowLeft, Building2, Mail, ShieldCheck, UserPlus, UserRound } from 'lucide-react';
 import { APP_LOGO_URL, APP_NAME } from '../../lib/branding';
 import { praiseService } from '../../lib/api';
@@ -78,7 +79,7 @@ export const NomineeSignupScreen: React.FC<NomineeSignupScreenProps> = ({
   };
 
   return (
-    <div className="min-h-dvh bg-slate-950 text-white flex items-start justify-center p-3 sm:p-6 lg:items-center">
+    <div className="auth-shell min-h-dvh bg-slate-950 text-white flex items-start justify-center px-3 sm:px-6 lg:items-center">
       <div className="w-full max-w-5xl grid lg:grid-cols-[1.15fr_0.85fr] overflow-hidden rounded-3xl border border-slate-800 bg-slate-900 shadow-2xl">
         <div className="relative hidden lg:block p-8 sm:p-10 lg:p-12 bg-linear-to-br from-slate-950 via-slate-900 to-blue-950">
           <div className="absolute inset-0 opacity-40 pointer-events-none bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.28),_transparent_36%),radial-gradient(circle_at_bottom_right,_rgba(14,165,233,0.2),_transparent_42%)]" />
@@ -133,20 +134,20 @@ export const NomineeSignupScreen: React.FC<NomineeSignupScreenProps> = ({
 
               <label className="block space-y-1.5">
                 <span className="text-xs font-semibold text-slate-700">Office</span>
-                <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 focus-within:border-blue-500 focus-within:bg-white">
+                <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 focus-within:border-blue-500 focus-within:bg-white">
                   <Building2 size={16} className="shrink-0 text-slate-400" />
-                  <select
+                  <WrappingSelect
                     name="office_id"
                     required
                     value={officeId}
+                    displayValue={offices.find(office => office.id === officeId)?.name || (isLoadingOffices ? 'Loading offices...' : 'Select your office')}
                     onChange={event => setOfficeId(event.target.value)}
                     disabled={isSubmitting || isLoadingOffices || !!officesError || !offices.length}
                     aria-describedby={officesError || (!isLoadingOffices && !offices.length) ? 'signup-office-status' : undefined}
-                    className="min-w-0 w-full bg-transparent text-sm outline-none disabled:opacity-70"
                   >
                     <option value="" disabled>{isLoadingOffices ? 'Loading offices...' : 'Select your office'}</option>
                     {offices.map(office => <option key={office.id} value={office.id}>{office.name}</option>)}
-                  </select>
+                  </WrappingSelect>
                 </div>
               </label>
               {officesError ? (

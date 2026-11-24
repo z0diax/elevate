@@ -196,7 +196,7 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
             </span>
           </div>
 
-          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
+          <div className="@container min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
             {workbenchApplications.length > 0 && <NominationQueueCards userRole={currentUser.role} applications={workbenchApplications} onOpen={application => { setActiveTab('documents'); setSelectedAppId(application.id); }} actionLabel={application => application.processing_stage === 'Document Verification' && WORKBENCH_STATUSES.has(application.status) ? 'Open review' : 'View nomination'} />}
             {workbenchApplications.length === 0 ? (
               <div className="p-12 text-center text-slate-400">
@@ -206,7 +206,7 @@ export const SecretariatDashboard: React.FC<SecretariatDashboardProps> = ({
                 </p>
               </div>
             ) : (
-              <div className="hidden overflow-x-auto sm:block">
+              <div className="mobile-scroll-table hidden overflow-x-auto @5xl:block">
                 <table className="w-full min-w-[760px] text-left text-sm">
                   <thead className="border-b border-slate-200 bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
                     <tr>

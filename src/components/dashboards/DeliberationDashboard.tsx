@@ -224,10 +224,10 @@ export const DeliberationDashboard: React.FC<DeliberationDashboardProps> = ({
             Ranked Nominees Matrix ({deliberationApps.length})
           </h3>
 
-          <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+          <div className="@container min-w-0 bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
             <NominationQueueCards userRole={currentUser.role} applications={deliberationApps} onOpen={application => { setSelectedAppId(application.id); setActiveTab('decision'); setIsDetailsModalOpen(true); }} actionLabel={application => application.processing_stage === 'Deliberation' ? 'Open committee review' : 'View results'} />
-            {deliberationApps.length === 0 && <p className="p-8 text-center text-sm text-slate-500 sm:hidden">No nominations are ready for evaluation monitoring.</p>}
-            <div className="hidden overflow-x-auto sm:block">
+            {deliberationApps.length === 0 && <p className="p-8 text-center text-sm text-slate-500 @5xl:hidden">No nominations are ready for evaluation monitoring.</p>}
+            <div className="mobile-scroll-table hidden overflow-x-auto @5xl:block">
               <table className="w-full min-w-[640px] text-left text-xs">
                 <thead className="bg-slate-50 text-slate-500 uppercase font-bold border-b border-slate-200">
                   <tr>

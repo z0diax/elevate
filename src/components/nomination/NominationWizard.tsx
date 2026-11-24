@@ -14,13 +14,15 @@ import {
   Building2, 
   FileCheck, 
   Sparkles,
-  Download
+  Download,
+  X,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { SignaturePad, SignatureStrokes } from './SignaturePad';
 import { pdfGenerator } from '../../lib/pdfGenerator';
 import { RevisionInstructions } from './NominationRevisionControls';
 import { RevisionAttachmentList } from './RevisionAttachmentList';
+import { WrappingSelect } from '../common/WrappingSelect';
 import {
   clearNominationDraft,
   clearNominationDraftFiles,
@@ -37,7 +39,7 @@ interface NominationWizardProps {
   currentUser: UserProfile;
   onNominationComplete: (appId: string) => void;
   onCancel: () => void;
-  onSubmissionStateChange?: (isSubmitting: boolean) => void;
+  modal?: boolean;
   revision?: { application: Application; draft: NominationRevisionDraft };
 }
 
@@ -65,13 +67,33 @@ function createSubmissionId(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+function awardOptionLabel(award: Award) {
+  const code = `(${award.code})`;
+  const name = award.name.endsWith(code) ? award.name : `${award.name} ${code}`;
+  return award.is_on_the_spot ? `[ON-THE-SPOT] ${name}` : name;
+}
+
+function officeOptionLabel(office: Office) {
+  return `${office.name} (${office.code})`;
+}
+
+function LocalAttachmentPreview({ file }: { file: File }) {
+  const [url, setUrl] = useState('');
+  React.useEffect(() => {
+    const previewUrl = URL.createObjectURL(file);
+    setUrl(previewUrl);
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [file]);
+  return url ? <a href={url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center px-2 text-xs font-semibold text-blue-700 underline">Preview file</a> : null;
+}
+
 export const NominationWizard: React.FC<NominationWizardProps> = ({
   awards,
   offices,
   currentUser,
   onNominationComplete,
   onCancel,
-  onSubmissionStateChange,
+  modal = false,
   revision,
 }) => {
   offices = offices.filter(office => office.is_active);
@@ -146,6 +168,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
   const [errorMessage, setErrorMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const [isRestoringFiles, setIsRestoringFiles] = useState(true);
   const [revisionRemarks, setRevisionRemarks] = useState(revision?.draft.remarks || '');
   const [savingRevision, setSavingRevision] = useState(false);
@@ -156,7 +179,9 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
   const uploadedDocumentKeys = useRef(new Set<string>());
 
   const selectedAward = awards.find(a => a.id === selectedAwardId) || (revision ? undefined : awards[0]);
-  const selectedOfficeObj = offices.find(o => o.id === officeId) || (revision ? undefined : offices[0]);
+  const selectedOffice = offices.find(office => office.id === officeId);
+  const selectedOfficeObj = selectedOffice || (revision ? undefined : offices[0]);
+  const nominatingOfficeObj = offices.find(office => office.id === nominatingOfficeId);
   const hasServerDraft = Boolean(createdApplicationRef.current)
     || praiseService.getApplications().some(application => application.id === `app-${submissionId}` && application.status === 'Draft');
 
@@ -394,26 +419,33 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
     onCancel();
   };
 
-  const closeRevision = useRef(handleCancel);
-  closeRevision.current = handleCancel;
+  const closeDialog = useRef(() => {});
+  closeDialog.current = () => {
+    if (revision) void handleCancel();
+    else if (!submissionInProgress.current) onCancel();
+  };
+  const isDialog = modal || Boolean(revision);
   React.useEffect(() => {
-    if (!revision) return;
+    if (!isDialog) return;
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    dialogRef.current?.focus();
+    dialogRef.current?.focus({ preventScroll: true });
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
-        void closeRevision.current();
+        closeDialog.current();
       }
       if (event.key !== 'Tab') return;
       const dialog = dialogRef.current;
       const controls = [...(dialog?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], summary') || [])]
         .filter(control => control.getClientRects().length);
       if (!controls.length) return;
-      const atBoundary = event.shiftKey ? document.activeElement === controls[0] : document.activeElement === controls.at(-1);
-      if (atBoundary || (event.shiftKey && document.activeElement === dialog)) {
+      const active = document.activeElement;
+      const atBoundary = event.shiftKey
+        ? active === controls[0] || active === dialog || active === headingRef.current
+        : active === controls.at(-1);
+      if (atBoundary || !dialog?.contains(active)) {
         event.preventDefault();
         (event.shiftKey ? controls.at(-1) : controls[0])?.focus();
       }
@@ -424,10 +456,20 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
       document.body.style.overflow = previousOverflow;
       previousFocus?.focus();
     };
-  }, [revision]);
+  }, [isDialog]);
 
-  const revisionDialog = revision ? { role: 'dialog', 'aria-modal': true, 'aria-labelledby': 'nomination-revision-title', tabIndex: -1 } as const : {};
-  React.useEffect(() => { if (revision && submittedApp) dialogRef.current?.focus(); }, [revision, submittedApp]);
+  const titleId = React.useId();
+  const dialogProps = isDialog ? { role: 'dialog', 'aria-modal': true, 'aria-labelledby': titleId, tabIndex: -1 } as const : {};
+  React.useEffect(() => {
+    if (isDialog) {
+      headingRef.current?.closest('#nomination-wizard-container, #nomination-success-card')?.scrollIntoView({ block: 'start', inline: 'nearest' });
+      headingRef.current?.focus({ preventScroll: true });
+    }
+  }, [isDialog, step, submittedApp]);
+  const errorRef = useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (errorMessage) errorRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [errorMessage]);
 
   // Validation
   const validateStep1 = () => {
@@ -515,7 +557,6 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
     submissionInProgress.current = true;
     setErrorMessage('');
     setIsSubmitting(true);
-    onSubmissionStateChange?.(true);
 
     try {
       if (revisionApplication && revisionDraft) {
@@ -599,41 +640,41 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
       setIsSubmitting(false);
       setUploadProgress('');
       submissionInProgress.current = false;
-      onSubmissionStateChange?.(false);
     }
   };
 
   // If submitted successfully
   if (submittedApp) {
     return (
-      <div ref={dialogRef} {...revisionDialog} id="nomination-success-card" className="max-w-3xl mx-auto bg-white rounded-xl p-8 border border-slate-200 shadow-xs text-center space-y-6">
+      <div ref={dialogRef} {...dialogProps} id="nomination-success-card" className="relative mx-auto max-w-3xl bg-white rounded-xl p-4 sm:p-8 border border-slate-200 shadow-xs text-center space-y-6 wrap-anywhere">
+        {modal && !revision && <button type="button" aria-label="Close nomination form" onClick={() => closeDialog.current()} className="absolute top-2 right-2 grid size-11 place-items-center rounded-lg text-slate-700 hover:bg-slate-100"><X size={18} /></button>}
         <div className="w-16 h-16 bg-green-50 text-green-700 rounded-full flex items-center justify-center mx-auto ring-8 ring-green-50">
           <Sparkles size={32} />
         </div>
 
         <div>
-          <h2 id={revision ? "nomination-revision-title" : undefined} className="text-2xl font-bold text-slate-900">{revision ? 'Revised Nomination Submitted' : 'Nomination Successfully Filed!'}</h2>
+          <h2 ref={headingRef} tabIndex={-1} id={titleId} className="text-2xl font-bold text-slate-900">{revision ? 'Revised Nomination Submitted' : 'Nomination Successfully Filed!'}</h2>
           <p className="text-sm text-slate-500 mt-1">
             Your nomination has been recorded in the City of Tacloban PRAISE System.
           </p>
         </div>
 
-        <div className="p-6 bg-slate-50 rounded-xl border border-slate-200 text-left max-w-lg mx-auto space-y-3">
-          <div className="flex justify-between items-center border-b border-slate-200 pb-2">
+        <div className="p-4 sm:p-6 bg-slate-50 rounded-xl border border-slate-200 text-left max-w-lg mx-auto space-y-3">
+          <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 border-b border-slate-200 pb-2">
             <span className="text-xs font-semibold text-slate-500">Official Reference No.</span>
             <span className="text-sm font-bold text-blue-700 font-mono">
               {submittedApp.application_number}
             </span>
           </div>
-          <div className="flex justify-between items-center">
+          <div className="flex flex-wrap justify-between gap-x-4 gap-y-1">
             <span className="text-xs font-semibold text-slate-500">Nominee Name:</span>
             <span className="text-xs font-bold text-slate-900">{submittedApp.nominee_name}</span>
           </div>
-          <div className="flex justify-between items-center">
+          <div className="flex flex-wrap justify-between gap-x-4 gap-y-1">
             <span className="text-xs font-semibold text-slate-500">Award Category:</span>
             <span className="text-xs font-bold text-slate-900">{submittedApp.award_name}</span>
           </div>
-          <div className="flex justify-between items-center">
+          <div className="flex flex-wrap justify-between gap-x-4 gap-y-1">
             <span className="text-xs font-semibold text-slate-500">Next Action:</span>
             <span className="text-xs font-medium text-amber-700">{submittedApp.required_action}</span>
           </div>
@@ -668,12 +709,12 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
   }
 
   return (
-    <div ref={dialogRef} {...revisionDialog} id="nomination-wizard-container" className="max-w-4xl mx-auto bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+    <div ref={dialogRef} {...dialogProps} id="nomination-wizard-container" className="@container mx-auto w-full min-w-0 max-w-4xl bg-white rounded-xl border border-slate-200 shadow-xs wrap-anywhere">
       {/* Wizard Header */}
-      <div className="px-6 py-5 bg-slate-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
+      <div className="flex items-start justify-between gap-3 rounded-t-[inherit] bg-slate-900 px-3 py-4 text-white sm:px-6 sm:py-5">
+        <div className="min-w-0 flex-1">
           <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">Official Form A-1</span>
-          <h2 id={revision ? "nomination-revision-title" : undefined} className="text-lg font-bold text-white">{revision ? 'Revise Nomination' : 'Tacloban PRAISE Nomination Portal'}</h2>
+          <h2 ref={headingRef} tabIndex={-1} id={titleId} className="text-lg font-bold text-white">{revision ? 'Revise Nomination' : 'Tacloban PRAISE Nomination Portal'}</h2>
           <p className="text-xs text-slate-300 mt-0.5">Step {step} of 4: {
             step === 1 ? 'Nominee Profile & Award' :
             step === 2 ? 'Justification & Accomplishments' :
@@ -682,7 +723,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
         </div>
 
         {/* Step Indicator Badges */}
-        <div className="flex items-center gap-2">
+        <div aria-hidden="true" className="hidden shrink-0 items-center gap-2 self-center @md:flex">
           {[1, 2, 3, 4].map(s => (
             <div
               key={s}
@@ -698,18 +739,20 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
             </div>
           ))}
         </div>
+        {modal && !revision && <button type="button" aria-label="Close nomination form" onClick={() => closeDialog.current()} disabled={isSubmitting} className="grid size-11 shrink-0 place-items-center rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white disabled:opacity-50"><X size={18} /></button>}
+        {revision && <button type="button" title="Save and close revision" aria-label="Save and close revision" onClick={() => closeDialog.current()} disabled={isSubmitting || savingRevision} className="grid size-11 shrink-0 place-items-center rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white disabled:opacity-50"><X size={18} /></button>}
       </div>
 
       {/* Error notification banner */}
       {errorMessage && (
-        <div className="m-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-center gap-3 text-xs text-red-700">
+        <div ref={errorRef} role="alert" className="mx-3 mt-4 p-3 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3 text-sm text-red-700 sm:mx-6">
           <AlertCircle size={18} className="shrink-0" />
           <span>{errorMessage}</span>
         </div>
       )}
 
       {restoredDraft && (
-        <div className="mx-6 mt-6 flex items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 p-4 text-xs text-blue-900">
+        <div className="mx-3 mt-4 flex items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900 sm:mx-6">
           <CheckCircle2 size={17} className="mt-0.5 shrink-0 text-blue-700" />
           <div>
             <p className="font-bold">Your saved nomination draft was restored.</p>
@@ -720,7 +763,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
         </div>
       )}
 
-      <div className="p-6 md:p-8 space-y-6">
+      <div className="space-y-5 p-3 @lg:p-6 @2xl:p-8">
         {revisionApplication && <RevisionInstructions application={revisionApplication} />}
         {revisionApplication && <p className="mb-4 mt-3 text-xs text-slate-600">Application {revisionApplication.application_number}. The original submitting account, nominee account link, and self-nomination classification are fixed. The official nomination stays on record until you sign and submit your changes.</p>}
 
@@ -731,27 +774,26 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
               <label htmlFor="award-category-select" className="block text-xs font-bold text-slate-900 uppercase tracking-wider mb-2">
                 1. Select Award Category *
               </label>
-              <div className="rounded-xl border border-slate-300 bg-slate-50 transition-colors focus-within:border-blue-600 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100">
-                <div className="flex items-center gap-3 px-3.5">
+              <div className="rounded-xl border border-slate-300 bg-slate-50 transition-colors focus-within:border-blue-600 focus-within:bg-white">
+                <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-1 px-2 py-1 font-semibold @lg:gap-2 @lg:px-3">
                   <AwardIcon size={17} className="shrink-0 text-blue-600" />
-                  <select
+                  <WrappingSelect
                     id="award-category-select"
                     required
                     value={selectedAwardId}
+                    displayValue={selectedAward ? awardOptionLabel(selectedAward) : awards.length ? 'Select an award' : 'No active awards available'}
+                    aria-describedby={selectedAward?.description?.trim() ? 'wizard-award-description' : undefined}
                     onChange={event => setSelectedAwardId(event.target.value)}
-                    className="min-w-0 flex-1 cursor-pointer bg-transparent py-3 text-sm font-semibold text-slate-900 outline-none"
                   >
                     {awards.length === 0 && <option value="">No active awards available</option>}
                     {awards.map(award => (
-                      <option key={award.id} value={award.id}>
-                        {award.is_on_the_spot ? '[ON-THE-SPOT] ' : ''}{award.name} ({award.code})
-                      </option>
+                      <option key={award.id} value={award.id}>{awardOptionLabel(award)}</option>
                     ))}
-                  </select>
+                  </WrappingSelect>
                 </div>
 
                 {selectedAward?.description?.trim() && (
-                  <div className="border-t border-slate-200 px-4 py-2 text-[11px] leading-relaxed text-slate-600">
+                  <div id="wizard-award-description" className="border-t border-slate-200 px-3 py-2.5 text-sm leading-relaxed text-slate-600">
                     {selectedAward.description}
                   </div>
                 )}
@@ -788,12 +830,12 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
             )}
 
             {selectedAward?.remarks?.trim() && (
-              <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
+              <div className="p-3 @lg:p-4 bg-amber-50 rounded-xl border border-amber-200">
                 <h4 className="text-xs font-bold text-amber-900 mb-1.5 flex items-center gap-2">
                   <FileText size={14} className="shrink-0" />
                   <span>Award Notes</span>
                 </h4>
-                <p className="text-xs leading-relaxed text-amber-900 whitespace-pre-wrap">
+                <p className="text-sm leading-relaxed text-amber-900 whitespace-pre-wrap">
                   {selectedAward.remarks}
                 </p>
               </div>
@@ -804,9 +846,26 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
               <section className="mb-6 space-y-3 border-b border-slate-200 pb-6">
                 <h3 className="text-sm font-bold text-slate-900">Nominator Information</h3>
                 <p className="text-xs text-slate-600">Account used: {currentUser.full_name} ({currentUser.role}). Correct your displayed name as needed; you must sign personally.</p>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="text-xs font-semibold">Full Name *<input required value={nominatorName} onChange={event => setNominatorName(event.target.value)} className="mt-1 w-full rounded-md border border-slate-300 bg-slate-50 p-2.5" /></label>
-                  {legacyDraft ? <label className="text-xs font-semibold">Office / Department<input readOnly value={nominatingOffice} className="mt-1 w-full rounded-md border border-slate-300 bg-slate-50 p-2.5" /></label> : <label className="text-xs font-semibold">Office / Department *<select required value={nominatingOfficeId} onChange={event => { setNominatingOfficeId(event.target.value); setNominatingOffice(offices.find(office => office.id === event.target.value)?.name || ''); }} className="mt-1 w-full rounded-md border border-slate-300 bg-slate-50 p-2.5"><option value="">Select office</option>{offices.map(office => <option key={office.id} value={office.id}>{office.name} ({office.code})</option>)}</select></label>}
+                <div className="grid grid-cols-1 gap-4 @lg:grid-cols-2">
+                  <div className="min-w-0">
+                    <label htmlFor="wizard-nominator-name" className="block text-xs font-semibold">Full Name *</label>
+                    <textarea id="wizard-nominator-name" required autoComplete="name" rows={2} value={nominatorName}
+                      onChange={event => setNominatorName(event.target.value.replace(/[\r\n]/g, ''))}
+                      className="mt-1 block min-h-11 w-full resize-y field-sizing-content rounded-md border border-slate-300 bg-slate-50 p-2.5 text-sm" />
+                  </div>
+                  {legacyDraft ? <div className="text-xs font-semibold">Office / Department
+                    <p className="mt-1 rounded-md border border-slate-300 bg-slate-100 p-2.5 text-sm">{nominatingOffice}</p>
+                  </div> : <label className="min-w-0 text-xs font-semibold">Office / Department *
+                    <span className="mt-1 block rounded-md border border-slate-300 bg-slate-50">
+                      <WrappingSelect required value={nominatingOfficeId}
+                        displayValue={nominatingOfficeObj ? officeOptionLabel(nominatingOfficeObj) : nominatingOffice || 'Select office'}
+                        onChange={event => { setNominatingOfficeId(event.target.value); setNominatingOffice(offices.find(office => office.id === event.target.value)?.name || ''); }}>
+                        <option value="">Select office</option>
+                        {nominatingOfficeId && !nominatingOfficeObj && <option value={nominatingOfficeId} disabled>{nominatingOffice}</option>}
+                        {offices.map(office => <option key={office.id} value={office.id}>{officeOptionLabel(office)}</option>)}
+                      </WrappingSelect>
+                    </span>
+                  </label>}
                   <label className="text-xs font-semibold">Position / Designation<input value={nominatorPosition} onChange={event => setNominatorPosition(event.target.value)} className="mt-1 w-full rounded-md border border-slate-300 bg-slate-50 p-2.5" /></label>
                 </div>
                 <label className="flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={selfNomination} disabled={Boolean(revision)} onChange={event => {
@@ -821,27 +880,29 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
                 <span>Nominee Information</span>
               </h3>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 @lg:grid-cols-2">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  <label htmlFor="wizard-nominee-name" className="block text-xs font-semibold text-slate-700 mb-1">
                     Full Name of Nominee *
                   </label>
-                  <input
-                    type="text"
+                  <textarea
+                    id="wizard-nominee-name"
+                    rows={2}
                     required
                     placeholder="e.g. Juan P. Dela Cruz"
                     disabled={selfNomination || Boolean(revisionApplication?.nominee_id)}
                     value={nomineeName}
-                    onChange={e => setNomineeName(e.target.value)}
-                    className="w-full text-xs p-2.5 rounded-md border border-slate-300 bg-slate-50 text-slate-900 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+                    onChange={event => setNomineeName(event.target.value.replace(/[\r\n]/g, ''))}
+                    className="block min-h-11 w-full resize-y field-sizing-content text-sm p-2.5 rounded-md border border-slate-300 bg-slate-50 text-slate-900 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  <label htmlFor="wizard-employee-id" className="block text-xs font-semibold text-slate-700 mb-1">
                     Employee / Personnel ID
                   </label>
                   <input
+                    id="wizard-employee-id"
                     type="text"
                     placeholder="e.g. TAC-2024-001 or N/A"
                     value={employeeId}
@@ -851,10 +912,11 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  <label htmlFor="wizard-position" className="block text-xs font-semibold text-slate-700 mb-1">
                     Position / Designation *
                   </label>
                   <input
+                    id="wizard-position"
                     type="text"
                     required
                     placeholder="e.g. Administrative Officer IV / BHW"
@@ -865,27 +927,26 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  <label htmlFor="wizard-nominee-office" className="block text-xs font-semibold text-slate-700 mb-1">
                     Department / Office *
                   </label>
-                  <select
-                    value={officeId}
-                    onChange={e => setOfficeId(e.target.value)}
-                    className="w-full text-xs p-2.5 rounded-md border border-slate-300 bg-slate-50 text-slate-900 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
-                  >
-                    <option value="">Select office</option>
-                    {revisionApplication && officeId === revisionApplication.office_id && !selectedOfficeObj && <option value={officeId} disabled>{revisionApplication.office_name}</option>}
-                    {offices.map(off => (
-                      <option key={off.id} value={off.id}>{off.name} ({off.code})</option>
-                    ))}
-                  </select>
+                  <div className="rounded-md border border-slate-300 bg-slate-50">
+                    <WrappingSelect id="wizard-nominee-office" required value={officeId}
+                      displayValue={selectedOffice ? officeOptionLabel(selectedOffice) : officeId && revisionApplication?.office_name || 'Select office'}
+                      onChange={event => setOfficeId(event.target.value)}>
+                      <option value="">Select office</option>
+                      {revisionApplication && officeId === revisionApplication.office_id && !selectedOfficeObj && <option value={officeId} disabled>{revisionApplication.office_name}</option>}
+                      {offices.map(office => <option key={office.id} value={office.id}>{officeOptionLabel(office)}</option>)}
+                    </WrappingSelect>
+                  </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  <label htmlFor="wizard-division" className="block text-xs font-semibold text-slate-700 mb-1">
                     Division / Section
                   </label>
                   <input
+                    id="wizard-division"
                     type="text"
                     placeholder="e.g. Primary Health Services Unit"
                     value={divisionSection}
@@ -895,10 +956,11 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  <label htmlFor="wizard-employment" className="block text-xs font-semibold text-slate-700 mb-1">
                     Employment Category *
                   </label>
                   <select
+                    id="wizard-employment"
                     value={employmentCategory}
                     onChange={e => setEmploymentCategory(e.target.value as any)}
                     className="w-full text-xs p-2.5 rounded-md border border-slate-300 bg-slate-50 text-slate-900 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
@@ -913,10 +975,11 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  <label htmlFor="wizard-phone" className="block text-xs font-semibold text-slate-700 mb-1">
                     Contact Mobile Number *
                   </label>
                   <input
+                    id="wizard-phone"
                     type="tel"
                     required
                     placeholder="+63 9XX XXX XXXX"
@@ -927,10 +990,11 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  <label htmlFor="wizard-email" className="block text-xs font-semibold text-slate-700 mb-1">
                     Email Address *
                   </label>
                   <input
+                    id="wizard-email"
                     type="email"
                     required
                     placeholder="nominee@tacloban.gov.ph"
@@ -940,11 +1004,12 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
                   />
                 </div>
 
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                <div className="@lg:col-span-2">
+                  <label htmlFor="wizard-barangay" className="block text-xs font-semibold text-slate-700 mb-1">
                     Barangay Jurisdiction (Tacloban City)
                   </label>
                   <input
+                    id="wizard-barangay"
                     type="text"
                     placeholder="e.g. Brgy. 88 San Jose"
                     value={barangay}
@@ -965,12 +1030,13 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
               <span>Nomination Justification & Merits</span>
             </h3>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 @lg:grid-cols-2">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                <label htmlFor="wizard-nomination-type" className="block text-xs font-semibold text-slate-700 mb-1">
                   Nomination Type
                 </label>
                 <select
+                  id="wizard-nomination-type"
                   value={nominationType}
                   onChange={e => setNominationType(e.target.value as any)}
                   className="w-full text-xs p-2.5 rounded-md border border-slate-300 bg-slate-50 text-slate-900 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
@@ -982,10 +1048,11 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-800 mb-1">
+              <label htmlFor="wizard-justification" className="block text-xs font-bold text-slate-800 mb-1">
                 Executive Justification for Nomination * (Why does this nominee deserve this award?)
               </label>
               <textarea
+                id="wizard-justification"
                 required
                 rows={3}
                 placeholder="State the reasons, devotion, and sustained excellence demonstrated by the nominee..."
@@ -996,10 +1063,11 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-800 mb-1">
+              <label htmlFor="wizard-accomplishments" className="block text-xs font-bold text-slate-800 mb-1">
                 Key Accomplishments & Concrete Impact to Tacloban City Operations *
               </label>
               <textarea
+                id="wizard-accomplishments"
                 required
                 rows={3}
                 placeholder="Cite specific targets exceeded, innovative systems introduced, or community outcomes achieved..."
@@ -1010,10 +1078,11 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-800 mb-1">
+              <label htmlFor="wizard-supporting-narrative" className="block text-xs font-bold text-slate-800 mb-1">
                 Supporting Narrative / Special Acts of Heroism or Integrity *
               </label>
               <textarea
+                id="wizard-supporting-narrative"
                 required
                 rows={3}
                 placeholder="Describe any extraordinary honesty, customer service commendations, or disaster responses..."
@@ -1042,10 +1111,10 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
               {uploadedDocs.map((doc, idx) => (
                 <div
                   key={doc.requirement_id || idx}
-                  className="p-4 rounded-xl border border-slate-200 bg-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                  className="p-3 @lg:p-4 rounded-xl border border-slate-200 bg-slate-50 flex flex-col @lg:flex-row @lg:items-center justify-between gap-3"
                 >
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <p className="text-xs font-bold text-slate-900">{doc.requirement_name}</p>
                       {doc.is_mandatory && (
                         <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
@@ -1055,7 +1124,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
                     </div>
                     {doc.is_uploaded ? (
                       <p className="text-[11px] text-green-700 font-semibold mt-1 flex items-center gap-1">
-                        <CheckCircle2 size={13} />
+                        <CheckCircle2 size={13} className="shrink-0" />
                         <span>{doc.file?.name || 'File attached'} ({((doc.file_size || 0) / 1024 / 1024).toFixed(2)} MB)</span>
                       </p>
                     ) : (
@@ -1063,8 +1132,9 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
                     )}
                   </div>
 
-                  <div className="shrink-0 flex items-center gap-2">
-                    <label className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-md inline-flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {doc.file && ['application/pdf', 'image/jpeg', 'image/png'].includes(doc.file.type) && <LocalAttachmentPreview file={doc.file} />}
+                    <label className="px-3.5 py-1.5 min-h-11 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-md inline-flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors focus-within:ring-2 focus-within:ring-blue-500 focus-within:ring-offset-2">
                       <Upload size={13} />
                       <span>{doc.is_uploaded ? 'Replace File' : 'Upload File'}</span>
                       <input
@@ -1072,7 +1142,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
                         accept=".pdf,.docx,.jpg,.jpeg,.png"
                         disabled={isSubmitting}
                         onChange={(e) => handleFileUpload(doc.requirement_id || '', doc.requirement_name, e)}
-                        className="hidden"
+                        className="sr-only"
                       />
                     </label>
                   </div>
@@ -1091,7 +1161,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
             </h3>
 
             <div className="bg-slate-50 rounded-xl p-5 border border-slate-200 space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+              <div className="grid grid-cols-1 gap-4 text-xs @lg:grid-cols-2">
                 <div>
                   <span className="text-slate-500">Nominee Name:</span>
                   <p className="font-bold text-slate-900 text-sm">{nomineeName}</p>
@@ -1126,7 +1196,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
             </div>
 
             {revisionApplication && revisionDraft && <>
-              <dl className="grid gap-3 rounded-xl border border-slate-200 p-4 text-sm sm:grid-cols-2">
+              <dl className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 p-3 text-sm @lg:grid-cols-2 @lg:p-4">
                 {Object.entries(revisionDetails).filter(([key]) => !['award_id', 'office_id', 'nominating_office_id'].includes(key)).map(([key, value]) => <div key={key}><dt className="font-semibold capitalize">{key.replaceAll('_', ' ')}</dt><dd className="whitespace-pre-wrap break-words">{value || 'Not recorded'}</dd></div>)}
               </dl>
               <RevisionAttachmentList application={revisionApplication} award={selectedAward} draft={revisionDraft} disabled />
@@ -1152,7 +1222,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
         )}
 
         {/* Wizard Controls Navigation */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-6 border-t border-slate-200">
+        <div className="flex flex-col gap-2 border-t border-slate-200 pt-4 [&>button]:min-h-11 [&>button]:justify-center @lg:flex-row @lg:flex-wrap @lg:items-center @lg:justify-between">
           {step > 1 ? (
             <button
               id="wizard-prev-btn"

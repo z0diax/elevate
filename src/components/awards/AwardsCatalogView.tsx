@@ -54,15 +54,15 @@ export const AwardsCatalogView: React.FC<AwardsCatalogViewProps> = ({
       </div>
 
       {/* Award Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-6">
         {filteredAwards.map(award => (
           <div
             key={award.id}
             id={`catalog-award-${award.id}`}
-            className="bg-white rounded-xl p-6 border border-slate-200 shadow-xs flex flex-col justify-between space-y-6"
+            className="flex min-w-0 flex-col justify-between space-y-6 rounded-xl border border-slate-200 bg-white p-4 shadow-xs wrap-anywhere sm:p-6"
           >
             <div>
-              <div className="flex items-center justify-between gap-2 mb-2">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <span className="px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200 font-mono text-xs font-bold">
                   {award.code}
                 </span>
@@ -87,8 +87,8 @@ export const AwardsCatalogView: React.FC<AwardsCatalogViewProps> = ({
                   {(award.criteria || []).map((crit, idx) => (
                     <div key={crit.id || idx} className="p-2.5 rounded-md bg-slate-50 border border-slate-100 text-xs flex items-center justify-between">
                       <div className="min-w-0 flex-1 pr-2">
-                        <p className="font-semibold text-slate-800 truncate">{crit.criterion_name}</p>
-                        <p className="text-[10px] text-slate-500 truncate">{crit.criterion_description}</p>
+                        <p className="font-semibold text-slate-800">{crit.criterion_name}</p>
+                        <p className="text-xs leading-relaxed text-slate-500">{crit.criterion_description}</p>
                       </div>
                       <span className="font-bold text-blue-600 shrink-0 font-mono">{crit.weight_percentage}%</span>
                     </div>

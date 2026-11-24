@@ -57,7 +57,7 @@ export const ChangePasswordScreen: React.FC<ChangePasswordScreenProps> = ({ onCh
     }
   }
 
-  return <div className="min-h-dvh bg-slate-950 p-3 sm:p-6 flex items-center justify-center">
+  return <div className="auth-shell min-h-dvh bg-slate-950 px-3 sm:px-6 flex items-center justify-center">
     <div className="w-full max-w-md rounded-2xl bg-white p-5 sm:p-8 shadow-2xl">
       <img src={APP_LOGO_URL} alt={`${APP_NAME} logo`} className="h-14 w-14 object-contain" />
       <h1 className="mt-5 text-2xl font-bold text-slate-900">Set your personal password</h1>

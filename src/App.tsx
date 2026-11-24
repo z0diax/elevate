@@ -422,7 +422,7 @@ export default function App() {
   }
 
   return (
-    <div id="praise-app-root" className="min-h-screen bg-slate-50 text-slate-900 flex font-sans">
+    <div id="praise-app-root" className="min-h-dvh bg-slate-50 text-slate-900 flex font-sans">
       <ToastHost />
       <Sidebar
         currentTab={currentTab}
@@ -468,7 +468,7 @@ export default function App() {
         />
 
         {notificationViewerId && <NominationFormViewerModal applicationId={notificationViewerId} userRole={currentUser.role} onClose={() => setNotificationViewerId(undefined)} />}
-        <main className="flex-1 p-3 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
+        <main className="min-w-0 flex-1 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:p-6 lg:p-8 max-w-7xl w-full mx-auto wrap-anywhere">
           {(currentTab === 'dashboard' || currentTab === 'all-applications' || currentTab === 'awards-management' || currentTab === 'offices-management' || currentTab === 'users-management') && (
             <AdminDashboard
               applications={applications}

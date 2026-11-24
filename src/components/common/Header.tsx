@@ -85,7 +85,7 @@ export const Header: React.FC<HeaderProps> = ({
   const breadcrumbs = getBreadcrumbTitle(currentTab);
 
   return (
-    <header className="sticky top-0 z-40 h-14 sm:h-16 bg-white border-b border-slate-200 flex items-center justify-between gap-2 px-3 sm:px-8">
+    <header className="app-header sticky top-0 z-40 bg-white border-b border-slate-200 flex items-center justify-between gap-2 px-2 sm:px-8">
       <div className="flex min-w-0 items-center gap-2 sm:gap-4 text-xs sm:text-sm">
         <button
           id="mobile-sidebar-toggle-btn"
@@ -102,7 +102,7 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex min-w-0 items-center gap-2">
           <span className="hidden text-slate-400 font-normal sm:inline">{breadcrumbs.section}</span>
           <span className="hidden text-slate-300 sm:inline">/</span>
-          <span className="max-w-[132px] truncate font-semibold text-slate-800 sm:max-w-none">{breadcrumbs.page}</span>
+          <span className="wrap-anywhere font-semibold leading-tight text-slate-800">{breadcrumbs.page}</span>
         </div>
       </div>
 
@@ -176,12 +176,12 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           {isUserMenuOpen && (
-            <div className="fixed inset-x-3 top-16 max-h-[calc(100dvh-5rem)] overflow-y-auto sm:absolute sm:inset-x-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-72 bg-white rounded-xl shadow-xl border border-slate-200 z-50 py-1">
+            <div className="fixed left-[max(0.75rem,env(safe-area-inset-left))] right-[max(0.75rem,env(safe-area-inset-right))] top-[calc(var(--header-height)+0.5rem)] max-h-[calc(100dvh-var(--header-height)-1rem-env(safe-area-inset-bottom))] overflow-y-auto overscroll-contain sm:absolute sm:left-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-72 bg-white rounded-xl shadow-xl border border-slate-200 z-50 py-1">
               <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold text-slate-900 truncate">{currentUser.full_name}</p>
-                    <p className="text-xs text-slate-500 truncate">{currentUser.email}</p>
+                    <p className="safe-long-text text-sm font-semibold text-slate-900">{currentUser.full_name}</p>
+                    <p className="safe-long-text text-xs text-slate-500">{currentUser.email}</p>
                   </div>
                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${roleStyles[currentUser.role]}`}>
                     {currentUser.role.replace(/_/g, ' ')}
@@ -191,7 +191,7 @@ export const Header: React.FC<HeaderProps> = ({
                 {(currentUser.position_title || currentUser.office_name) && (
                   <div className="mt-2 text-[11px] text-slate-500 flex items-center gap-1.5">
                     <ShieldCheck size={12} className="text-blue-600 shrink-0" />
-                    <span className="truncate">
+                    <span className="safe-long-text">
                       {[currentUser.position_title, currentUser.office_name].filter(Boolean).join(' • ')}
                     </span>
                   </div>

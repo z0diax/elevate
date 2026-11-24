@@ -26,7 +26,7 @@ export const NotificationDropdown: React.FC<NotificationDropdownProps> = ({
   return (
     <div
       id="notification-dropdown"
-      className="fixed inset-x-3 top-16 sm:absolute sm:inset-x-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-96 bg-white dark:bg-slate-900 rounded-xl shadow-xl border border-slate-200 dark:border-slate-800 z-50 overflow-hidden"
+      className="fixed left-[max(0.75rem,env(safe-area-inset-left))] right-[max(0.75rem,env(safe-area-inset-right))] top-[calc(var(--header-height)+0.5rem)] max-h-[min(32rem,calc(100dvh-var(--header-height)-1rem-env(safe-area-inset-bottom)))] overflow-y-auto overscroll-contain md:absolute md:left-auto md:right-0 md:top-auto md:mt-2 md:w-96 bg-white dark:bg-slate-900 rounded-xl shadow-xl border border-slate-200 dark:border-slate-800 z-50 wrap-anywhere"
     >
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800">
         <div className="flex items-center gap-2">
@@ -50,7 +50,7 @@ export const NotificationDropdown: React.FC<NotificationDropdownProps> = ({
         )}
       </div>
 
-      <div className="max-h-[calc(100dvh-10rem)] sm:max-h-96 overflow-y-auto overscroll-contain divide-y divide-slate-100 dark:divide-slate-800">
+      <div className="divide-y divide-slate-100 dark:divide-slate-800">
         {notifications.length === 0 ? (
           <div className="p-8 text-center text-slate-500 dark:text-slate-400">
             <Bell size={28} className="mx-auto mb-2 opacity-40" />
@@ -74,7 +74,7 @@ export const NotificationDropdown: React.FC<NotificationDropdownProps> = ({
                   <button
                     onClick={() => onMarkAsRead(notif.id)}
                     title="Mark as read"
-                    className="text-slate-400 hover:text-blue-600 text-xs p-1"
+                    className="shrink-0 text-slate-400 hover:text-blue-600 text-xs p-1"
                   >
                     <span className="w-2 h-2 rounded-full bg-blue-600 inline-block"></span>
                   </button>
@@ -83,7 +83,7 @@ export const NotificationDropdown: React.FC<NotificationDropdownProps> = ({
               <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-relaxed">
                 {notif.message}
               </p>
-              <div className="flex items-center justify-between mt-2 pt-1">
+              <div className="flex flex-wrap items-center justify-between gap-2 mt-2 pt-1">
                 <span className="text-[11px] text-slate-400">
                   {new Date(notif.created_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                 </span>

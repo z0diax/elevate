@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { WrappingSelect } from '../common/WrappingSelect';
 import {
   DEFAULT_CERTIFICATE_TEMPLATE_SETTINGS,
   normalizeCertificateTemplateSettings,
@@ -495,10 +496,10 @@ export const CertificateTemplateView: React.FC<CertificateTemplateViewProps> = (
 
       <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.04fr)_minmax(0,1fr)] xl:items-start">
         <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" aria-label="Template settings">
-          <div className="border-b border-slate-200 px-5 pt-5 sm:px-6">
+          <div className="border-b border-slate-200 px-3 pt-4 sm:px-6 sm:pt-5">
             <h2 className="text-base font-bold text-slate-900">Template settings</h2>
             <p className="mt-1 text-xs leading-5 text-slate-500">Choose a section, make your changes, and check the PDF preview alongside it.</p>
-            <div className="mt-5 flex gap-1 overflow-x-auto" role="tablist" aria-label="Certificate settings">
+            <div className="mt-4 flex flex-wrap gap-1" role="tablist" aria-label="Certificate settings">
               {WORKSPACE_TABS.map(tab => {
                 const Icon = tab.icon;
                 const selected = activeWorkspaceTab === tab.id;
@@ -511,11 +512,11 @@ export const CertificateTemplateView: React.FC<CertificateTemplateViewProps> = (
                     aria-selected={selected}
                     aria-controls="certificate-editor-panel"
                     onClick={() => setActiveWorkspaceTab(tab.id)}
-                    className={`inline-flex shrink-0 items-center gap-2 border-b-2 px-4 py-3 text-sm font-semibold ${
+                    className={`inline-flex min-h-11 max-w-full items-center gap-1.5 border-b-2 px-2 py-2 text-sm font-semibold sm:gap-2 sm:px-4 ${
                       selected ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'
                     }`}
                   >
-                    <Icon size={15} />
+                    <Icon size={15} className="shrink-0" />
                     {tab.label}
                   </button>
                 );
@@ -523,7 +524,7 @@ export const CertificateTemplateView: React.FC<CertificateTemplateViewProps> = (
             </div>
           </div>
 
-          <div id="certificate-editor-panel" role="tabpanel" aria-labelledby={`certificate-tab-${activeWorkspaceTab}`} tabIndex={0} className="min-h-[520px] space-y-5 p-5 sm:p-6">
+          <div id="certificate-editor-panel" role="tabpanel" aria-labelledby={`certificate-tab-${activeWorkspaceTab}`} tabIndex={0} className="space-y-5 p-3 sm:p-6 lg:min-h-[520px]">
             {activeWorkspaceTab === 'content' && (
               <>
                 <div>
@@ -703,12 +704,13 @@ export const CertificateTemplateView: React.FC<CertificateTemplateViewProps> = (
 
           <div className="mt-4">
             <label htmlFor="certificate-preview-record" className="block text-xs font-bold text-slate-700">Preview with nomination</label>
-            <select
+            <div className="mt-1.5 rounded-lg border border-slate-300 bg-white text-slate-900">
+            <WrappingSelect
               id="certificate-preview-record"
               value={selectedPreviewApplicationId}
+              displayValue={applications.length ? `${previewApplication.nominee_name} - ${previewApplication.award_name || 'Tacloban PRAISE Award'}` : 'Sample certificate (preview only)'}
               onChange={event => setSelectedPreviewApplicationId(event.target.value)}
               disabled={!applications.length}
-              className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
             >
               {!applications.length && <option value="">Sample certificate (preview only)</option>}
               {applications.map(application => (
@@ -716,7 +718,8 @@ export const CertificateTemplateView: React.FC<CertificateTemplateViewProps> = (
                   {application.nominee_name} - {application.award_name || 'Tacloban PRAISE Award'}
                 </option>
               ))}
-            </select>
+            </WrappingSelect>
+            </div>
           </div>
 
           <div className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white p-2 shadow-sm sm:p-3">

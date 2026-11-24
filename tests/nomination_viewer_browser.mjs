@@ -77,13 +77,58 @@ try {
     throw Error(`Timed out: ${expression}`);
   };
   await waitFor('!!window.viewerTest');
+  await evaluate('window.viewerTest.revisionState.enabled = true; window.viewerTest.openResponsiveRevision()');
+  await waitFor('!!Array.from(document.querySelectorAll("button")).find(button => button.textContent.trim() === "Edit Nomination")');
+  await evaluate('Array.from(document.querySelectorAll("button")).find(button => button.textContent.trim() === "Edit Nomination").click()');
+  await waitFor('!!document.querySelector("#award-category-select")');
+  const revisionText = await evaluate('document.querySelector("#nomination-wizard-container").textContent');
+  for (const detail of ['Best Administrative Staff (BAS)', 'Recognizes an administrative staff member', 'Award Notes', 'Nominator Information', 'Full Name', 'HUMAN RESOURCE MANAGEMENT AND DEVELOPMENT OFFICE', 'Update the office designation']) {
+    assert.ok(revisionText.includes(detail), `${detail} appears in the revision wizard`);
+  }
+  const wizardOverflow = [];
+  const screenshotWidths = [320, 375, 390, 430, 768, 1280, 1440];
+  for (const [width, height] of [320, 360, 375, 390, 393, 414, 430, 480, 640, 768, 820, 1024, 1280, 1440, 1920, 2560].map(width => [width, 900]).concat([[667, 375], [844, 390]])) {
+    await command('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: width < 768 });
+    await delay(70);
+    const result = await evaluate(`(() => {
+      const wizard = document.querySelector('#nomination-wizard-container');
+      const bounds = wizard.getBoundingClientRect();
+      const overflows = [...wizard.querySelectorAll('fieldset, select, input, textarea, button, p, #wizard-award-description')]
+        .filter(element => element.getClientRects().length)
+        .filter(element => {
+          const rect = element.getBoundingClientRect();
+          const intended = element.matches('fieldset') ? element.parentElement.getBoundingClientRect() : bounds;
+          return rect.left < intended.left - 1 || rect.right > intended.right + 1 ||
+            (element.matches('p, fieldset, #wizard-award-description') && element.scrollWidth > element.clientWidth + 1);
+        })
+        .map(element => [element.tagName, element.id || element.textContent.trim().slice(0, 45), Math.round(element.getBoundingClientRect().right)]);
+      return { page: document.documentElement.scrollWidth - document.documentElement.clientWidth, overflows };
+    })()`);
+    if (result.page > 1 || result.overflows.length) wizardOverflow.push({ width, height, ...result });
+    if (screenshotWidths.includes(width)) {
+      writeFileSync(join(temporary, `revision-details-${width}.png`), Buffer.from((await command('Page.captureScreenshot')).data, 'base64'));
+    }
+    if ([320, 390].includes(width)) {
+      await evaluate(`(() => {
+        const overlay = document.querySelector('#nomination-wizard-container').parentElement.parentElement;
+        overlay.scrollTop += document.querySelector('#award-category-select').getBoundingClientRect().top - 12;
+      })()`);
+      writeFileSync(join(temporary, `revision-fields-${width}.png`), Buffer.from((await command('Page.captureScreenshot')).data, 'base64'));
+      await evaluate('document.querySelector("#nomination-wizard-container").parentElement.parentElement.scrollTop = 0');
+    }
+  }
+  console.log(`Revision details screenshots: ${temporary}`);
+  assert.deepEqual(wizardOverflow, [], 'revision details fit their actual container at every viewport');
+  console.log('PASS: revision details at all 16 requested widths and 667 × 375 / 844 × 390 landscape.');
+  await evaluate('window.viewerTest.revisionState.enabled = false; window.viewerTest.resetRevision(); window.viewerTest.render("NOMINEE")');
   const open = async () => {
     await waitFor(`!!(${visibleFormButton})`);
+    await evaluate('window.viewerTest.pauseFormLoad()');
     await evaluate(`(${visibleFormButton}).focus()`);
     await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r', unmodifiedText: '\r' });
     await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
-    await delay(30);
-    assert.match(await evaluate('document.querySelector("[role=dialog]").textContent'), /Loading nomination form/);
+    await waitFor('document.querySelector("[role=dialog]")?.textContent.includes("Loading nomination form")');
+    await evaluate('window.viewerTest.resumeFormLoad()');
     await waitFor('!!document.querySelector("[role=dialog]")?.textContent.includes("Latest Nominee Record")');
   };
   const selectTab = async label => {
@@ -104,6 +149,7 @@ try {
       await command('Emulation.setDeviceMetricsOverride', { width, height: 844, deviceScaleFactor: 1, mobile: width < 640 });
       await evaluate(`window.viewerTest.render(${JSON.stringify(role)}, ${JSON.stringify(screen)})`);
       await delay(100);
+      assert.ok(await evaluate('document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1'), `${role} ${screen} page fits at ${width}px`);
       assert.equal(await evaluate('Array.from(document.querySelectorAll("button")).some(button => button.textContent === "View Nomination Form")'), false, 'no redundant viewer buttons');
       const rows = await evaluate('Array.from(document.querySelectorAll("tbody, article")).map(row => row.textContent).join(" ")');
       for (const detail of ['Original Nominator', 'Nominated by Others', 'Filing Account']) assert.ok(!rows.includes(detail), `${detail} stays inside viewer`);
@@ -293,14 +339,22 @@ try {
   const clickLabel = async label => { const expression = visibleButton(label); await waitFor(`!!(${expression})`); await evaluate(`(${expression}).click()`); };
   const positionInput = 'input[placeholder="e.g. Administrative Officer IV / BHW"]';
   const positionValue = `document.querySelector(${JSON.stringify(positionInput)}).value`;
-  for (const [width, scope] of [[1360, 'both'], [390, 'attachments']]) {
-    await command('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: width < 640 });
+  for (const [width, height, scope] of [[1360, 900, 'both'], [390, 900, 'attachments'], [667, 375, 'both']]) {
+    await command('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: width < 768 });
     await evaluate("window.viewerTest.revisionState.enabled=true; window.viewerTest.resetRevision(); window.viewerTest.render('ADMINISTRATOR')");
     const revisionButton = visibleButton('Require Nomination Revision');
     await waitFor(`!!(${revisionButton})`);
     assert.equal(await evaluate(`(${revisionButton}).textContent.trim()`), '', 'revision action is icon-only');
     await clickLabel('Require Nomination Revision');
     await waitFor('!!document.querySelector("[role=dialog] select")');
+    if (height < 400) {
+      assert.ok(await evaluate(`(() => {
+        const dialog = document.querySelector('[role=dialog]');
+        dialog.querySelector('textarea').focus();
+        const box = dialog.querySelector('textarea').getBoundingClientRect();
+        return box.top >= 0 && box.bottom <= innerHeight;
+      })()`), 'short dialog scrolls to the focused instructions');
+    }
     assert.ok(await evaluate(`(() => {
       const notice = Array.from(document.querySelectorAll('[role=dialog] p')).find(p => p.textContent.includes('Requiring a revision will return'));
       const bounds = notice.getBoundingClientRect();
@@ -320,8 +374,14 @@ try {
     assert.equal(await evaluate(`(${cancelButton}).textContent.trim()`), '', 'cancellation action is icon-only');
     await clickLabel('Cancel Revision Request');
     await waitFor('document.querySelector("[role=dialog]")?.textContent.includes("Cancellation Reason")');
-    await clickLabel('Close nomination');
-    await waitFor('!document.querySelector("[role=dialog]")');
+    await set('[role=dialog] textarea', 'The request was issued against the wrong document.');
+    await clickLabel('Confirm Cancellation');
+    await waitFor(`!!(${revisionButton}) && !document.querySelector("[role=dialog]")`);
+    await clickLabel('Require Nomination Revision');
+    await set('[role=dialog] select', scope);
+    await set('[role=dialog] textarea', 'Correct the position and supporting evidence.');
+    await clickLabel('Require Revision');
+    await waitFor('!document.querySelector("[role=dialog]") && document.body.textContent.includes("Revision Required")');
     writeFileSync(join(temporary, `revision-admin-${width}.png`), Buffer.from((await command('Page.captureScreenshot')).data, 'base64'));
     await evaluate("window.viewerTest.render('SECRETARIAT')");
     assert.equal(await evaluate(`!!(${visibleButton('Require Nomination Revision')})`), false);
@@ -349,10 +409,14 @@ try {
     await waitFor('document.querySelector("#nomination-wizard-container").textContent.includes("Existing attachment")');
     await evaluate(`(() => {
       const input = document.querySelector('#nomination-wizard-container input[type=file]');
-      const data = new DataTransfer(); data.items.add(new File(['fixture'], 'revised.png', { type: 'image/png' }));
+      const data = new DataTransfer(); data.items.add(new File(['fixture'], 'RevisedAdministrativeServiceEvidenceQuarterlyRecordsAndOfficePerformanceDocumentation.png', { type: 'image/png' }));
       input.files = data.files; input.dispatchEvent(new Event('change', { bubbles: true }));
     })()`);
     await waitFor('document.querySelector("#nomination-wizard-container").textContent.includes("Replacement staged")');
+    assert.ok(await evaluate(`(() => {
+      const card = document.querySelector('#nomination-wizard-container article');
+      return card.scrollWidth <= card.clientWidth + 1 && card.querySelector('input').getBoundingClientRect().right <= card.getBoundingClientRect().right;
+    })()`), 'long revision attachment and controls fit the card');
     await click('#wizard-next-btn');
     await waitFor('!!document.querySelector("#wizard-submit-btn")');
     assert.match(await evaluate('document.querySelector("#wizard-submit-btn").textContent'), /Submit Revised Nomination/);

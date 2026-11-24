@@ -120,7 +120,7 @@ export const AuditLogsView: React.FC<AuditLogsViewProps> = ({ logs }) => {
           <p className="text-xs text-slate-400">20 items per page</p>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="mobile-scroll-table overflow-x-auto" tabIndex={0} role="region" aria-label="Audit records table">
           <table className="w-full min-w-[760px] text-left text-xs">
             <thead className="bg-slate-50 text-slate-500 uppercase font-bold border-b border-slate-200">
               <tr>
@@ -168,7 +168,7 @@ export const AuditLogsView: React.FC<AuditLogsViewProps> = ({ logs }) => {
                         <span className="text-slate-400">-</span>
                       )}
                     </td>
-                    <td className="px-4 py-3.5 text-slate-600 max-w-xs truncate">
+                    <td className="px-4 py-3.5 text-slate-600 max-w-xs whitespace-pre-wrap wrap-anywhere">
                       {log.remarks || '-'}
                     </td>
                   </tr>
@@ -189,7 +189,7 @@ export const AuditLogsView: React.FC<AuditLogsViewProps> = ({ logs }) => {
             Page {safeCurrentPage} of {totalPages}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => setCurrentPage(page => Math.max(1, page - 1))}
@@ -199,7 +199,7 @@ export const AuditLogsView: React.FC<AuditLogsViewProps> = ({ logs }) => {
               Previous
             </button>
 
-            <div className="flex items-center gap-1">
+            <div className="flex max-w-full flex-wrap items-center gap-1">
               {pageNumbers.map(pageNumber => (
                 <button
                   key={pageNumber}

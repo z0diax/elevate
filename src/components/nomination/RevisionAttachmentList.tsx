@@ -13,13 +13,13 @@ export function RevisionAttachmentList({ application, award, draft, disabled, on
   const byRequirement = new Map((application.documents || []).map(document => [document.requirement_id, document]));
   const canEdit = draft.request.scope !== 'details';
   const otherDocuments = application.documents?.filter(document => !requirements.some(requirement => requirement.id === document.requirement_id));
-  const documentInfo = (document: ApplicationDocument) => <div className="space-y-1 text-xs text-slate-600">
+  const documentInfo = (document: ApplicationDocument) => <div className="safe-long-text space-y-1 text-xs leading-relaxed text-slate-600">
     <p className="break-words">{document.file_name || document.document_name} · {document.file_type || 'File'} · {((document.file_size || 0) / (1024 * 1024)).toFixed(2)} MB</p>
     <p>{document.status} · Uploaded {new Date(document.uploaded_at).toLocaleDateString('en-PH')}</p>
     {document.verification_remarks && <p className="whitespace-pre-wrap">{document.verification_remarks}</p>}
-    {document.file_url && <div className="flex gap-4">
-      {['application/pdf', 'image/jpeg', 'image/png'].includes(document.file_type || '') && <a href={`${document.file_url}${document.file_url.includes('?') ? '&' : '?'}preview=1`} target="_blank" rel="noreferrer" className="font-semibold text-blue-700 underline">Preview</a>}
-      <a href={document.file_url} className="font-semibold text-blue-700 underline">Download</a>
+    {document.file_url && <div className="flex flex-wrap gap-x-4">
+      {['application/pdf', 'image/jpeg', 'image/png'].includes(document.file_type || '') && <a href={`${document.file_url}${document.file_url.includes('?') ? '&' : '?'}preview=1`} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center font-semibold text-blue-700 underline">Preview</a>}
+      <a href={document.file_url} className="inline-flex min-h-11 items-center font-semibold text-blue-700 underline">Download</a>
     </div>}
   </div>;
   return <div className="space-y-3">
@@ -30,15 +30,15 @@ export function RevisionAttachmentList({ application, award, draft, disabled, on
       const document = staged === undefined ? original : staged;
       const state = staged === null ? 'Marked for removal' : staged ? original ? 'Replacement staged' : 'New attachment staged'
         : document?.file_url ? 'Existing attachment' : requirement.is_mandatory ? 'Missing required attachment' : 'Optional attachment';
-      return <article key={requirement.id} className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
+      return <article key={requirement.id} className="min-w-0 space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:p-4">
         <h4 className="text-sm font-semibold text-slate-900">{requirement.document_name}{requirement.is_mandatory && ' (required)'}</h4>
         <p className="text-xs font-semibold text-amber-900">{state}</p>
         {document && documentInfo(document)}
-        {canEdit && onUpload && <div className="flex flex-wrap items-center gap-3 pt-1">
-          <label className="text-xs font-semibold text-slate-800">
+        {canEdit && onUpload && <div className="flex flex-col items-start gap-2 pt-1 @lg:flex-row @lg:flex-wrap @lg:items-end">
+          <label className="block w-full min-w-0 text-xs font-semibold text-slate-800 @lg:w-auto">
             {document?.file_url ? 'Replace Attachment' : 'Upload Attachment'}
             <input type="file" disabled={disabled} accept=".pdf,.docx,.jpg,.jpeg,.png"
-              className="mt-1 block max-w-full text-xs file:mr-2 file:rounded-md file:border-0 file:bg-blue-700 file:px-3 file:py-2 file:font-semibold file:text-white"
+              className="mt-1 block w-full text-xs file:mr-2 file:min-h-11 file:rounded-md file:border-0 file:bg-blue-700 file:px-3 file:font-semibold file:text-white"
               onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) onUpload(requirement.id, file); }} />
           </label>
           {!requirement.is_mandatory && onRemove && document?.file_url && <button type="button" disabled={disabled}

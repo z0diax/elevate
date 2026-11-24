@@ -46,7 +46,8 @@ export const SignaturePad: React.FC<{ value: SignatureStrokes; onChange: (value:
   };
   return <div className="space-y-3">
     <p className="text-xs text-slate-600">Draw your own signature with a mouse, touchscreen, or stylus.</p>
-    <canvas ref={canvas} width={800} height={240} aria-label="Draw your electronic signature" className="w-full touch-none rounded-lg border border-slate-300 bg-white" style={{ aspectRatio: '10 / 3' }}
+    <div className="rounded-lg border border-slate-300 bg-white">
+    <canvas ref={canvas} width={800} height={240} aria-label="Draw your electronic signature" className="block h-auto w-full touch-none rounded-[inherit]"
       onPointerDown={event => {
         if (disabled || pointer.current !== null || pending.current.length >= 100) return;
         event.preventDefault(); pointer.current = event.pointerId;
@@ -59,6 +60,7 @@ export const SignaturePad: React.FC<{ value: SignatureStrokes; onChange: (value:
         const last = pending.current[pending.current.length - 1];
         last.push(point(event)); drawSignature(event.currentTarget, pending.current);
       }} onPointerUp={finish} onPointerCancel={finish} onLostPointerCapture={finish} />
+    </div>
     <button type="button" disabled={disabled} onClick={() => { pointer.current = null; onChange([]); }} className="rounded-md border border-slate-300 px-3 py-2 text-xs font-semibold">Clear signature</button>
     {value.length > 0 && <><p className="text-xs font-semibold">Signature preview</p><SignaturePreview strokes={value} /></>}
   </div>;

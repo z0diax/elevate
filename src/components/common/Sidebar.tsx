@@ -46,12 +46,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const sidebarRef = useRef<HTMLElement>(null);
   useEffect(() => {
-    if (!isOpen || window.matchMedia('(min-width: 1024px)').matches) return;
+    if (!isOpen) return;
+    const desktop = window.matchMedia('(min-width: 1024px)');
     const previousFocus = document.activeElement as HTMLElement | null;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    sidebarRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    let previousOverflow: string | undefined;
+    const restoreScroll = () => {
+      if (previousOverflow === undefined) return;
+      document.body.style.overflow = previousOverflow;
+      previousOverflow = undefined;
+    };
+    const updateScroll = () => {
+      if (desktop.matches) restoreScroll();
+      else if (previousOverflow === undefined) {
+        previousOverflow = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        sidebarRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
+      }
+    };
+    updateScroll();
+    desktop.addEventListener('change', updateScroll);
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (desktop.matches) return;
       if (event.key === 'Escape') { event.preventDefault(); onClose(); }
       if (event.key !== 'Tab') return;
       const buttons = Array.from(sidebarRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []);
@@ -62,9 +77,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => {
-      document.body.style.overflow = previousOverflow;
+      if (previousOverflow !== undefined) previousFocus?.focus();
+      restoreScroll();
+      desktop.removeEventListener('change', updateScroll);
       document.removeEventListener('keydown', handleKeyDown);
-      previousFocus?.focus();
     };
   }, [isOpen, onClose]);
   interface NavItem {
@@ -218,7 +234,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         id="app-sidebar"
         inert={!isOpen}
         aria-label="Main navigation"
-        className={`fixed top-0 bottom-0 left-0 z-50 w-72 max-w-[calc(100vw-2rem)] lg:w-64 bg-slate-900 border-r border-slate-800 text-slate-300 transition-transform duration-300 ${
+        className={`fixed inset-y-0 left-0 z-50 w-72 max-w-[calc(100%-2rem)] lg:w-64 bg-slate-900 border-r border-slate-800 text-slate-300 transition-transform duration-300 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] ${
           isOpen ? 'translate-x-0 lg:translate-x-0' : '-translate-x-full lg:-translate-x-full'
         } flex flex-col justify-between`}
       >
@@ -235,7 +251,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Navigation list */}
-        <nav className="flex-1 py-4 px-3 space-y-4 overflow-y-auto">
+        <nav className="min-h-0 flex-1 py-4 px-3 space-y-4 overflow-y-auto overscroll-contain">
           {sections.map(section => {
             const sectionItems = visibleItems.filter(i => (i.section || 'Main Menu') === section);
             if (sectionItems.length === 0) return null;
@@ -265,8 +281,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         }`}
                       >
                         <div className="flex items-center gap-3 min-w-0">
-                          <Icon size={16} className={isActive ? 'text-white' : 'text-slate-400'} />
-                          <span className="truncate">{item.label}</span>
+                          <Icon size={16} className={isActive ? 'shrink-0 text-white' : 'shrink-0 text-slate-400'} />
+                          <span className="safe-long-text text-left">{item.label}</span>
                         </div>
                         {item.badge !== undefined && item.badge > 0 && (
                           <span

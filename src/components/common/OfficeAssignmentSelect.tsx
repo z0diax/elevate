@@ -29,7 +29,7 @@ export function OfficeAssignmentSelect({ offices, value, onChange }: {
           <label key={office.id} className="flex min-h-11 items-center gap-3 text-sm text-slate-900 dark:text-slate-100 cursor-pointer sm:min-h-0 sm:gap-2 sm:text-xs">
             <input type="checkbox" checked={value.includes(office.id)}
               onChange={event => onChange(event.target.checked ? [...value, office.id] : value.filter(selected => selected !== office.id))} />
-            <span>{office.name}{value[0] === office.id ? ' (Default)' : ''}</span>
+            <span className="safe-long-text">{office.name}{value[0] === office.id ? ' (Default)' : ''}</span>
           </label>
         ))}
         {!offices.length && <p className="text-slate-500">No offices available.</p>}

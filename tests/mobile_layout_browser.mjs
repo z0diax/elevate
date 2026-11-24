@@ -18,7 +18,7 @@ const css = readFileSync(join(root, 'dist/assets', cssFile));
 const server = createServer((request, response) => {
   if (request.url === '/fixture.js') { response.setHeader('Content-Type', 'text/javascript'); response.end(javascript); }
   else if (request.url === '/fixture.css') { response.setHeader('Content-Type', 'text/css'); response.end(css); }
-  else response.end('<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/fixture.css"></head><body><div id="root"></div><script src="/fixture.js"></script></body></html>');
+  else response.end('<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content"><link rel="stylesheet" href="/fixture.css"></head><body><div id="root"></div><script src="/fixture.js"></script></body></html>');
 });
 await new Promise(ok => server.listen(0, '127.0.0.1', ok));
 const browser = spawn(chrome, ['--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--remote-debugging-port=0', `--user-data-dir=${join(temporary, 'profile')}`, 'about:blank'], { windowsHide: true, stdio: 'ignore' });
@@ -64,7 +64,7 @@ try {
     await delay(150);
   };
   const fits = async label => {
-    assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth'), true, label + ' page overflow');
+    assert.equal(await evaluate('document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1'), true, label + ' page overflow');
     const overflow = await evaluate(`Array.from(document.querySelectorAll('button, input:not([type=checkbox]), select, [data-mobile-list] article')).filter(el => el.getClientRects().length && !el.closest('[inert]')).filter(el => { const r = el.getBoundingClientRect(); return r.left < -1 || r.right > innerWidth + 1; }).map(el => el.textContent?.trim().slice(0, 60) || el.tagName)`);
     assert.deepEqual(overflow, [], label + ' clipped controls');
   };
@@ -72,8 +72,9 @@ try {
     await evaluate(`Array.from(document.querySelectorAll('button')).find(el => el.getClientRects().length && el.textContent.trim() === ${JSON.stringify(text)}).click()`);
     await delay(100);
   };
-  for (const width of [320, 390, 768, 1280]) {
-    for (const view of ['login', 'signup', 'password', 'overview', 'awards', 'offices', 'users', 'reports']) {
+  for (const width of [320, 360, 375, 390, 393, 414, 430, 480, 640, 768, 820, 1024, 1280, 1440, 1920, 2560]) {
+    const interactive = [320, 390, 768, 1280].includes(width);
+    for (const view of ['login', 'signup', 'password', 'overview', 'awards', 'offices', 'users', 'reports', 'audit', 'catalog', 'certificate']) {
       await navigate(view, width);
       await fits(`${view} at ${width}`);
       if (width < 1280 && ['overview', 'offices', 'users', 'reports'].includes(view)) {
@@ -81,7 +82,13 @@ try {
         assert.equal(await evaluate(`Array.from(document.querySelectorAll('table')).some(el => el.getClientRects().length)`), false, 'wide tables hidden');
       }
       if (width < 768 && view === 'login') assert.ok(await evaluate('document.querySelector("input[type=email]").getBoundingClientRect().bottom < innerHeight'), 'login input visible without scrolling');
-      if (view === 'signup') {
+      if (view === 'login' && interactive) {
+        await set('input[type=email]', 'synthetic@example.invalid');
+        await set('input[type=password]', 'synthetic-password');
+        await click('button[type=submit]');
+        assert.equal(await evaluate('window.didLogin'), true, 'login form submits');
+      }
+      if (view === 'signup' && interactive) {
         assert.equal(await evaluate('document.querySelector("select[name=office_id]").options.length'), 13, 'office dropdown loads available offices');
         await set('input[type=text]', 'Test Nominee');
         await set('input[type=email]', 'nominee@example.invalid');
@@ -91,16 +98,17 @@ try {
         assert.equal(await evaluate('window.signupPayload'), undefined, 'office is required before registration');
         await evaluate(`(() => { const select = document.querySelector('select[name=office_id]'); select.value = 'office-0'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
         await fits(`signup with long office name at ${width}`);
+        assert.match(await evaluate('document.querySelector("select[name=office_id]").previousElementSibling.previousElementSibling.textContent'), /Department of Community Development and Public Services/);
         await click('button[type=submit]');
         assert.deepEqual(await evaluate('window.signupPayload'), ['Test Nominee', 'nominee@example.invalid', 'nominee-password', 'office-0'], 'registration includes selected office');
       }
-      if (view === 'password') {
+      if (view === 'password' && interactive) {
         await click('button[aria-label="Show current password"]');
         assert.equal(await evaluate('document.querySelector("input").type'), 'text');
         await click('button[aria-label="Hide current password"]');
         assert.equal(await evaluate('document.querySelector("input").type'), 'password');
       }
-      if (view === 'users' && width < 768) {
+      if (view === 'users' && interactive && width < 768) {
         await clickText('Change role');
         await fits('role dialog');
         await set('input[type=search]', 'OFF1');
@@ -110,28 +118,44 @@ try {
         await fits('create user dialog');
         await clickText('Cancel');
       }
-      if (view === 'offices' && width < 768) {
+      if (view === 'offices' && interactive && width < 768) {
         await clickText('Add Department');
         await fits('office dialog');
         await clickText('Cancel');
         await clickText('Next');
         assert.equal(await evaluate('document.querySelectorAll("[data-mobile-list=offices] article").length'), 2, 'pagination applies to cards');
       }
-      if (view === 'reports' && width < 768) {
+      if (view === 'reports' && interactive && width < 768) {
         await click('#mobile-sidebar-toggle-btn');
         assert.equal(await evaluate('document.body.style.overflow'), 'hidden');
         await click('[aria-label="Close navigation"]');
+        await click('#mobile-sidebar-toggle-btn');
+        await click('#nav-tab-all-applications');
+        assert.equal(await evaluate('window.navigation'), 'all-applications');
         await click('#header-notification-bell-btn');
         await fits('notifications');
+        await clickText('View Task');
+        assert.equal(await evaluate('window.navigation'), 'all-applications');
         await click('#user-account-menu-btn');
         await fits('account menu');
         await click('#user-account-menu-btn');
       }
+      if (view === 'audit' && width === 320) {
+        await clickText('Next');
+        assert.match(await evaluate('document.querySelector("main").textContent'), /Page 2 of 6/);
+        assert.ok(await evaluate(`document.querySelector('[aria-label="Audit records table"]').scrollWidth > 320`));
+        await fits('audit pagination');
+      }
+      if (view === 'certificate' && width === 320) {
+        await click('#certificate-tab-signatories');
+        assert.equal(await evaluate('document.querySelector("#certificate-tab-signatories").getAttribute("aria-selected")'), 'true');
+        await fits('certificate signatories');
+      }
       if ([320, 390, 1280].includes(width) && ['login', 'signup', 'users', 'reports'].includes(view)) {
         writeFileSync(join(temporary, `${view}-${width}.png`), Buffer.from((await command('Page.captureScreenshot', { captureBeyondViewport: true })).data, 'base64'));
       }
-      console.log(`PASS: ${view} at ${width}px`);
     }
+    console.log(`PASS: 11 screens at ${width}px`);
   }
   await navigate('users', 390, 400);
   await clickText('Create User');

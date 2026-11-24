@@ -33,8 +33,11 @@ const app: Application = {
   documents: [{ id: 'doc', application_id: 'viewer-record', document_name: 'Evidence image', file_url: '/preview.png', file_type: 'image/png', status: 'Verified', uploaded_at: '2026-10-08' }, { id: 'pdf-doc', application_id: 'viewer-record', document_name: 'Evidence PDF', file_url: '/preview.pdf', file_type: 'application/pdf', status: 'Submitted', uploaded_at: '2026-10-08' }],
 };
 const history = [{ id: 'history', application_id: app.id, user_id: 'user', user_name: 'Filing Account', user_role: 'NOMINEE' as const, action: 'Nomination Submitted', new_status: 'Submitted' as const, created_at: '2026-10-08 10:30:00' }];
+let pendingFormLoad: Promise<void> | undefined;
+let releaseFormLoad: (() => void) | undefined;
 praiseService.getNominationForm = async (id, version) => {
   state.calls++;
+  await pendingFormLoad;
   await new Promise(ok => setTimeout(ok, 150));
   if (state.fail) throw Error('Access denied for this nomination.');
   if (![app.id, 'viewer-other'].includes(id)) throw Error('Wrong nomination ID');
@@ -56,10 +59,21 @@ praiseService.getNominationSignature = async () => {
   if (state.signatureFail) throw Error('Recorded signature could not be loaded.');
   return { strokes: [[[0.1, 0.2], [0.4, 0.7], [0.7, 0.3]]], signed_at: '2026-10-08 10:30:00', sha256: 'synthetic-test-digest', signed_snapshot: app };
 };
-const revisionOffice = { id: 'office', name: 'Test Office', code: 'TEST', head_name: 'Department Head', head_title: 'Head', is_active: true };
+const revisionOffice = { id: 'office', name: 'HUMAN RESOURCE MANAGEMENT AND DEVELOPMENT OFFICE', code: 'HRMDO', head_name: 'Department Head', head_title: 'Head', is_active: true };
+const revisionAward = {
+  id: 'award', name: 'Best Administrative Staff (BAS)', code: 'BAS',
+  description: 'Recognizes an administrative staff member who demonstrates exemplary efficiency, accuracy, professionalism, and dedication in supporting office operations. It honors effective records management, timely completion of administrative tasks, organizational skills, responsiveness, and consistent contribution to the smooth and efficient functioning of the office.',
+  remarks: 'All documents must be submitted in ten (10) copies in individual folders to the PRAISE Secretariat. Soft copies of these documents shall be submitted to the Secretariat at the email address provided.',
+  award_year: 2026, is_active: true, min_qualifying_score: 85,
+  document_requirements: [{ id: 'requirement', award_id: 'award', document_name: 'Evidence image', description: '', is_mandatory: true }],
+};
 function revisionApplication(): Application {
   return {
     ...app,
+    award_name: revisionAward.name,
+    office_name: revisionOffice.name,
+    nominating_office: revisionOffice.name,
+    nominator_name: 'Maria Alexandra del Rosario Villanueva',
     ...(!activeRevision ? draft.details : {}),
     nominator_id: revisionState.otherFiler ? 'another-filer' : app.nominator_id,
     nominating_office_id: 'office',
@@ -71,7 +85,7 @@ function revisionApplication(): Application {
     revision_request: activeRevision || draft.request.status === 'Completed' ? draft.request : undefined,
     nomination_version: revisionState.version,
     accomplishments: 'Public impact and substantial accomplishments.',
-    documents: [{ ...app.documents![0], requirement_id: 'requirement', file_name: 'existing.png', file_size: 1024 }],
+    documents: [{ ...app.documents![0], requirement_id: 'requirement', file_name: 'AdministrativeServiceEvidenceQuarterlyRecordsAndOfficePerformanceDocumentation.png', file_size: 1024, verification_remarks: 'Please replace the evidence with a clear copy showing the full records management certification and the verification reference.' }],
   };
 }
 praiseService.nominationRevision = async (_id, action, data) => {
@@ -108,7 +122,7 @@ praiseService.getNominationRevisionHistory = async () => ({ requests: [draft.req
 const render = (role: UserRole, screen = '') => {
   state.role = role;
   const currentUser = { id: 'user', full_name: 'Account', email: 'account@example.invalid', role, office_id: 'office', office_name: 'Test Office' };
-  const shared = { applications: [revisionState.enabled ? revisionApplication() : { ...app, status: state.status, processing_stage: state.stage, can_correct: ['Returned for Revision', 'Incomplete'].includes(state.status) }], currentUser, awards: [{ id: 'award', name: 'Service Award', code: 'TEST', description: '', award_year: 2026, is_active: true, min_qualifying_score: 85, document_requirements: revisionState.enabled ? [{ id: 'requirement', award_id: 'award', document_name: 'Evidence image', description: '', is_mandatory: true }] : undefined }], onRefreshData: () => render(role, screen), onNavigateToNomination: () => {} };
+  const shared = { applications: [revisionState.enabled ? revisionApplication() : { ...app, status: state.status, processing_stage: state.stage, can_correct: ['Returned for Revision', 'Incomplete'].includes(state.status) }], currentUser, awards: [revisionState.enabled ? revisionAward : { id: 'award', name: 'Service Award', code: 'TEST', description: '', award_year: 2026, is_active: true, min_qualifying_score: 85 }], onRefreshData: () => render(role, screen), onNavigateToNomination: () => {} };
   const component = screen === 'deliberation' ? <DeliberationDashboard {...shared} users={[]} />
     : screen === 'submission' ? <SubmitNominationView {...shared} offices={revisionState.enabled ? [revisionOffice] : []} />
     : role === 'ADMINISTRATOR' ? <AdminDashboard {...shared} users={[]} offices={[]} initialSubTab="overview" onSelectAdminSection={() => {}} />
@@ -120,7 +134,14 @@ const render = (role: UserRole, screen = '') => {
 };
 (window as any).viewerTest = {
   state, render, revisionState,
+  pauseFormLoad: () => { pendingFormLoad = new Promise(resolve => { releaseFormLoad = resolve; }); },
+  resumeFormLoad: () => { releaseFormLoad?.(); pendingFormLoad = undefined; releaseFormLoad = undefined; },
   resetRevision: () => { activeRevision = false; draft = { request: revisionRequest, details: {}, attachments: {}, generation: 0 }; },
+  openResponsiveRevision: () => {
+    activeRevision = true;
+    draft = { request: { ...revisionRequest, instructions: 'Update the office designation and include the signed supporting records. Keep original dates and identify the relevant entries.\nReference: ' + 'AdministrativeRecords2026'.repeat(4) }, details: {}, attachments: {}, generation: 0 };
+    render('NOMINEE', 'submission');
+  },
   mountViewer: (applicationId: string) => root.render(<NominationFormViewerModal applicationId={applicationId} userRole="NOMINEE" onClose={() => render('NOMINEE')} />),
 };
 render('NOMINEE');

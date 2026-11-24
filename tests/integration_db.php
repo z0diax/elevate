@@ -120,6 +120,7 @@ try {
     $apps = $appIds->fetchAll(PDO::FETCH_COLUMN);
     foreach ($apps as $app) {
         $db->prepare('DELETE FROM notifications WHERE application_id = ?')->execute([$app]);
+        $db->prepare('DELETE FROM nomination_revision_requests WHERE application_id = ?')->execute([$app]);
         $db->prepare('DELETE FROM applications WHERE id = ?')->execute([$app]);
     }
     foreach (['awards', 'profiles', 'offices'] as $table) $db->prepare("DELETE FROM {$table} WHERE id LIKE ?")->execute([$like]);

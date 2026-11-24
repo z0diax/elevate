@@ -23,11 +23,12 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
   return (
     <div
       id="audit-trail-modal-backdrop"
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs"
     >
       <div
         id="audit-trail-modal-dialog"
-        className="bg-white rounded-xl max-w-3xl w-full max-h-[calc(100dvh-1.5rem)] overflow-y-auto shadow-2xl border border-slate-200 my-auto"
+        role="dialog" aria-modal="true" aria-labelledby="audit-trail-title"
+        className="bg-white rounded-xl max-w-3xl w-full min-w-0 max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain wrap-anywhere shadow-2xl border border-slate-200"
       >
         {/* Header */}
         <div className="flex items-center justify-between gap-2 px-4 py-4 sm:px-6 bg-slate-900 text-white">
@@ -36,7 +37,7 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
               <History size={18} className="text-white" />
             </div>
             <div className="min-w-0 break-words">
-              <h3 className="text-sm font-bold">PRAISE Official Audit Trail & History Log</h3>
+              <h3 id="audit-trail-title" className="text-sm font-bold">PRAISE Official Audit Trail & History Log</h3>
               <p className="text-xs text-slate-300">
                 {applicationNumber
                   ? `Immutable activity timeline for ${applicationNumber} (${nomineeName || ''})`
@@ -46,15 +47,16 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
           </div>
           <button
             id="close-audit-modal-btn"
+            aria-label="Close audit history"
             onClick={onClose}
-            className="p-1.5 rounded-md text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+            className="size-11 shrink-0 grid place-items-center rounded-md text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
           >
             <X size={18} />
           </button>
         </div>
 
         {/* Timeline Body */}
-        <div className="p-6 max-h-[70vh] overflow-y-auto">
+        <div className="p-3 sm:p-6">
           {historyLogs.length === 0 ? (
             <div className="text-center py-12 text-slate-500">
               <History size={36} className="mx-auto mb-2 opacity-30" />
@@ -68,9 +70,9 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
                   <div className="absolute -left-[9px] top-1.5 w-4 h-4 rounded-full bg-blue-600 border-2 border-white shadow-xs" />
 
                   {/* Log Content Card */}
-                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-2xs">
+                  <div className="bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-200 shadow-2xs">
                     <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <span className="text-xs font-bold text-slate-900">
                           {log.action}
                         </span>
@@ -102,7 +104,7 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
 
                     {/* Status transition if present */}
                     {log.new_status && (
-                      <div className="flex items-center gap-2 text-xs my-2 pt-2 border-t border-slate-200">
+                      <div className="flex flex-wrap items-center gap-2 text-xs my-2 pt-2 border-t border-slate-200">
                         {log.previous_status && (
                           <>
                             <span className="text-slate-500">From:</span>

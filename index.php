@@ -34,7 +34,7 @@ header('Content-Type: text/html; charset=UTF-8');
 <html lang="en">
   <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
     <title>HRMDO PRAISE MANAGEMENT - XAMPP Setup</title>
     <style>
       body {

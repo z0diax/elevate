@@ -1,6 +1,7 @@
 import { NominationReferenceButton } from './NominationFormViewerModal';
 import React, { useEffect, useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, FileText, Plus, RefreshCw, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { ChevronLeft, ChevronRight, FileText, Plus, RefreshCw } from 'lucide-react';
 import { Application, Award, NominationRevisionDraft, Office, UserProfile } from '../../types';
 import { praiseService } from '../../lib/api';
 import { showToast } from '../../lib/toast';
@@ -43,7 +44,6 @@ export const SubmitNominationView: React.FC<SubmitNominationViewProps> = ({
   const [trackingApp, setTrackingApp] = useState<Application | null>(null);
   const [openingRevision, setOpeningRevision] = useState(false);
   const [isWizardOpen, setIsWizardOpen] = useState(false);
-  const [isWizardSubmitting, setIsWizardSubmitting] = useState(false);
   const [resubmitApp, setResubmitApp] = useState<Application | null>(null);
   const [replacementFiles, setReplacementFiles] = useState<Record<string, File>>({});
   const [resubmissionNote, setResubmissionNote] = useState('');
@@ -177,10 +177,10 @@ export const SubmitNominationView: React.FC<SubmitNominationViewProps> = ({
         </button>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
+      <div className="@container min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
         <NominationQueueCards userRole={currentUser.role} applications={visibleApplications} canRevise={canRevise} onRevise={application => void openRevision(application)} onOpen={application => canRevise(application) ? void openRevision(application) : openResubmission(application)} actionLabel={application => canRevise(application) ? 'Edit Nomination' : canCorrect(application) ? 'Correct & Resubmit' : null} />
-        {visibleApplications.length === 0 && <p className="p-8 text-center text-sm text-slate-500 sm:hidden">{currentUser.role === 'NOMINEE' ? 'No nominations yet.' : 'No nominations filed from this account.'}</p>}
-        <div className="hidden overflow-x-auto sm:block">
+        {visibleApplications.length === 0 && <p className="p-8 text-center text-sm text-slate-500 @5xl:hidden">{currentUser.role === 'NOMINEE' ? 'No nominations yet.' : 'No nominations filed from this account.'}</p>}
+        <div className="mobile-scroll-table hidden overflow-x-auto @5xl:block">
           <table className="w-full min-w-[680px] text-left">
             <thead className="border-b border-slate-200 bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
               <tr>
@@ -268,19 +268,11 @@ export const SubmitNominationView: React.FC<SubmitNominationViewProps> = ({
         onRevise={canRevise(trackingApp) ? () => void openRevision(trackingApp) : undefined}
         userRole={currentUser.role}
         onCorrect={canCorrect(trackingApp) ? () => { openResubmission(trackingApp); setTrackingApp(null); } : undefined} />}
-      {isWizardOpen && (
-        <div className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-slate-950/70 p-3 backdrop-blur-sm sm:p-6">
-          <div className="relative my-auto w-full max-w-5xl">
-            {!revision && <button
-              type="button"
-              aria-label="Close nomination form"
-              onClick={() => setIsWizardOpen(false)}
-              disabled={isWizardSubmitting}
-              className="absolute right-3 top-3 z-10 rounded-full bg-slate-800 p-2 text-slate-300 hover:bg-slate-700 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <X size={17} />
-            </button>}
+      {isWizardOpen && createPortal(
+        <div className="nomination-overlay fixed inset-0 z-[60] overflow-auto overscroll-contain bg-slate-950/70 backdrop-blur-sm">
+          <div className="mx-auto w-full min-w-0 max-w-5xl">
             <NominationWizard
+              modal
               revision={revision}
               awards={revisionAward && !awards.some(award => award.id === revisionAward.id) ? [...awards, revisionAward] : awards}
               offices={offices}
@@ -290,10 +282,9 @@ export const SubmitNominationView: React.FC<SubmitNominationViewProps> = ({
                 closeWizard();
               }}
               onCancel={() => { closeWizard(); if (revision) void onRefreshData(); }}
-              onSubmissionStateChange={setIsWizardSubmitting}
             />
           </div>
-        </div>
+        </div>, document.body
       )}
 
 

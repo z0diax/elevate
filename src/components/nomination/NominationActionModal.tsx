@@ -49,7 +49,10 @@ export const NominationActionModal: React.FC<NominationActionModalProps> = ({
   onCloseRef.current = onClose;
   const [showWorkflow, setShowWorkflow] = useState(false);
   const stageNumber = application ? Math.max(1, STAGE_ORDER.indexOf(application.processing_stage) + 1) : 1;
-  useEffect(() => { if (contentRef.current) contentRef.current.scrollTop = 0; }, [activeTab]);
+  useEffect(() => {
+    if (contentRef.current) contentRef.current.scrollTop = 0;
+    if (dialogRef.current) dialogRef.current.scrollTop = 0;
+  }, [activeTab]);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -83,9 +86,9 @@ export const NominationActionModal: React.FC<NominationActionModalProps> = ({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`flex h-dvh max-h-dvh w-screen min-w-0 flex-col overflow-hidden bg-white shadow-2xl sm:max-h-[90dvh] sm:w-full sm:max-w-5xl sm:rounded-2xl ${presentation === 'document' ? 'sm:h-[85dvh]' : 'sm:h-auto'}`}
+        className={`app-dialog flex h-dvh max-h-dvh w-full min-w-0 flex-col bg-white shadow-2xl sm:max-h-[90dvh] sm:max-w-5xl sm:rounded-2xl ${presentation === 'document' ? 'sm:h-[85dvh]' : 'sm:h-auto'}`}
       >
-        <header className={`z-10 shrink-0 px-4 py-4 sm:px-6 sm:py-5 ${presentation === 'document' ? 'border-b-2 border-amber-400/80 bg-slate-900 text-white' : 'border-b border-slate-200 bg-white'}`}>
+        <header className={`z-10 shrink-0 rounded-t-[inherit] px-4 py-4 sm:px-6 sm:py-5 ${presentation === 'document' ? 'border-b-2 border-amber-400/80 bg-slate-900 text-white' : 'border-b border-slate-200 bg-white'}`}>
           <div className="flex min-w-0 items-start justify-between gap-4">
             {presentation === 'document' ? <div className="flex min-w-0 items-start gap-3 sm:gap-4">
               <img src={APP_LOGO_URL} alt="PRAISE" className="hidden size-12 shrink-0 rounded-lg bg-white object-contain p-1 sm:block" />
@@ -109,7 +112,7 @@ export const NominationActionModal: React.FC<NominationActionModalProps> = ({
               <X size={19} />
             </button>
           </div>
-          {headerActions && <div className="mt-3 flex justify-end">{headerActions}</div>}
+          {headerActions && <div className="mt-3 flex flex-wrap justify-end gap-2">{headerActions}</div>}
         </header>
 
         {application && presentation === 'workflow' && <div className="shrink-0 border-b border-slate-200 bg-slate-50 px-4 py-3 sm:px-6">
@@ -147,14 +150,14 @@ export const NominationActionModal: React.FC<NominationActionModalProps> = ({
           </div>
         </nav>}
 
-        <main ref={contentRef} id={presentation === 'workflow' ? `${tabPrefix}-panel` : undefined} role={tabs.length && presentation === 'workflow' ? 'tabpanel' : undefined} aria-labelledby={tabs.length && presentation === 'workflow' ? `${tabPrefix}-tab-${activeTab}` : undefined} className={`min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-4 py-5 pb-8 sm:px-6 sm:py-6 ${presentation === 'document' ? 'bg-slate-100' : 'bg-white'}`}>
+        <main ref={contentRef} id={presentation === 'workflow' ? `${tabPrefix}-panel` : undefined} role={tabs.length && presentation === 'workflow' ? 'tabpanel' : undefined} aria-labelledby={tabs.length && presentation === 'workflow' ? `${tabPrefix}-tab-${activeTab}` : undefined} className={`app-dialog-body min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-3 py-4 sm:px-6 sm:py-6 ${presentation === 'document' ? 'bg-slate-100' : 'bg-white'}`}>
           <div className="mx-auto w-full min-w-0 max-w-4xl space-y-5">
             {showWorkflow && application && <StageProgressTracker currentStage={application.processing_stage} currentStatus={application.status} />}
             {children}
           </div>
         </main>
 
-        {footer && <footer className="z-10 shrink-0 border-t border-slate-200 bg-white px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-4px_18px_rgba(15,23,42,0.06)] sm:px-6">
+        {footer && <footer className="z-10 shrink-0 rounded-b-[inherit] border-t border-slate-200 bg-white px-3 py-3 shadow-[0_-4px_18px_rgba(15,23,42,0.06)] sm:px-6">
           <div className="mx-auto flex w-full max-w-4xl flex-wrap items-center justify-end gap-2 sm:gap-3">{footer}</div>
         </footer>}
       </div>

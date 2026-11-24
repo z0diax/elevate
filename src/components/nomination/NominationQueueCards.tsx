@@ -13,9 +13,9 @@ interface NominationQueueCardsProps {
 }
 
 export const NominationQueueCards: React.FC<NominationQueueCardsProps> = ({ applications, userRole, onOpen, actionLabel, onRevise, canRevise }) => (
-  <div className="divide-y divide-slate-100 sm:hidden">
+  <div className="divide-y divide-slate-100 @5xl:hidden" data-nomination-cards>
     {applications.map(application => (
-      <article key={application.id} className="min-w-0 space-y-2 p-4">
+      <article key={application.id} className="min-w-0 space-y-2 p-4 wrap-anywhere">
         <p className="break-words font-mono text-xs font-semibold text-blue-700"><NominationReferenceButton applicationId={application.id} referenceNumber={application.application_number} userRole={userRole} onRevise={onRevise && canRevise?.(application) ? () => onRevise(application) : undefined} /></p>
         <h3 className="break-words text-sm font-bold text-slate-950">{application.nominee_name}</h3>
         <p className="text-xs text-slate-500">{application.office_name}</p>

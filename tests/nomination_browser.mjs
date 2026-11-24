@@ -52,26 +52,87 @@ try {
     await delay(50);
   };
   await command('Page.enable');
-  await command('Emulation.setDeviceMetricsOverride', { width: 1100, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await command('Emulation.setDeviceMetricsOverride', { width: 320, height: 844, deviceScaleFactor: 2, mobile: true });
   await command('Page.navigate', { url: `http://127.0.0.1:${server.address().port}` });
+  for (let count = 0; count < 100 && !await evaluate('!!document.querySelector("#open-nomination-modal-btn")'); count++) await delay(100);
+  await evaluate('document.querySelector("#open-nomination-modal-btn").focus()');
+  await click('#open-nomination-modal-btn');
+  assert.equal(await evaluate('document.querySelector("#nomination-wizard-container").getAttribute("role")'), 'dialog');
+  assert.equal(await evaluate('document.body.style.overflow'), 'hidden');
+  await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await delay(100);
+  assert.equal(await evaluate('document.activeElement.id'), 'open-nomination-modal-btn', 'closing the wizard restores focus to its trigger');
+  await click('#open-nomination-modal-btn');
   for (let count = 0; count < 100 && !await evaluate('!!document.querySelector("#wizard-next-btn")'); count++) await delay(100);
-  assert.equal(await evaluate('document.querySelector("section input").value'), 'Jack Doe');
+  assert.equal(await evaluate('document.querySelector("#wizard-nominator-name").value'), 'Jack Doe');
   assert.equal(await evaluate('Array.from(document.querySelectorAll("option")).some(option => option.textContent.includes("Inactive Office"))'), false);
-  await set('input[placeholder="e.g. Juan P. Dela Cruz"]', 'Jane Doe');
+  const fits = async step => {
+    const status = await evaluate(`(() => {
+      const root = document.documentElement;
+      const wizard = document.querySelector('#nomination-wizard-container');
+      const bounds = wizard.getBoundingClientRect();
+      const clipped = [...wizard.querySelectorAll('button, input, select, textarea, canvas, fieldset, p')]
+        .filter(node => node.getClientRects().length)
+        .filter(node => { const box = node.getBoundingClientRect(); return box.left < bounds.left - 1 || box.right > bounds.right + 1; })
+        .map(node => node.id || node.tagName);
+      return { page: root.scrollWidth - root.clientWidth, clipped };
+    })()`);
+    assert.ok(status.page <= 1, `${step} page fits`);
+    assert.deepEqual(status.clipped, [], `${step} controls fit`);
+  };
+  await set('#award-category-select', 'award');
+  assert.match(await evaluate('document.querySelector("#wizard-award-description").textContent'), /exemplary accuracy/);
+  assert.match(await evaluate('document.querySelector("#nomination-wizard-container").textContent'), /Submit ten copies/);
+  await fits('create profile at 320px');
+  await set('#wizard-nominee-name', 'Jane Doe');
   await set('input[placeholder="e.g. Administrative Officer IV / BHW"]', 'Officer');
   await set('section select', 'hr'); // nominator office remains distinct from nominee
   await set('input[type="tel"]', '09000000000');
   await set('input[type="email"]', 'jane@example.invalid');
-  await evaluate('document.querySelectorAll("select")[2].id = "nominee-office-test"');
-  await set('#nominee-office-test', 'cad');
+  await set('#wizard-nominee-office', 'cad');
   await click('#wizard-next-btn');
-  await set('textarea:nth-of-type(1)', 'A thorough nomination justification with concrete evidence.');
-  await evaluate('document.querySelectorAll("textarea")[1].id = "accomplishments-test"; document.querySelectorAll("textarea")[2].id = "narrative-test"');
-  await set('#accomplishments-test', 'Meaningful accomplishments and measurable public impact.');
-  await set('#narrative-test', 'Supporting evidence and background.');
-  await click('#wizard-next-btn'); await click('#wizard-next-btn');
+  await set('#wizard-justification', 'A thorough nomination justification with concrete evidence.');
+  await set('#wizard-accomplishments', 'Meaningful accomplishments and measurable public impact.');
+  await set('#wizard-supporting-narrative', 'Supporting evidence and background.');
+  await fits('create details at 320px');
+  await click('#wizard-next-btn');
+  const filename = 'QuarterlyAdministrativeRecordsAndContinuousImprovementProgramCertifiedSupportingEvidence.png';
+  await evaluate(`(() => {
+    const bytes = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZlV8AAAAASUVORK5CYII='), character => character.charCodeAt(0));
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([bytes], ${JSON.stringify(filename)}, { type: 'image/png' }));
+    const input = document.querySelector('input[type=file]');
+    input.files = transfer.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  })()`);
+  await delay(100);
+  assert.ok(await evaluate(`document.querySelector('#nomination-wizard-container').textContent.includes(${JSON.stringify(filename)})`));
+  const preview = await evaluate('document.querySelector("a[href^=blob]").href');
+  assert.equal(await evaluate(`fetch(${JSON.stringify(preview)}).then(response => response.blob()).then(blob => blob.type)`), 'image/png');
+  const previewPoint = await evaluate(`(() => {
+    const link = document.querySelector('a[href^=blob]');
+    link.scrollIntoView({block: 'center'});
+    const rect = link.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  })()`);
+  await command('Input.dispatchMouseEvent', { type: 'mousePressed', ...previewPoint, button: 'left', clickCount: 1 });
+  await command('Input.dispatchMouseEvent', { type: 'mouseReleased', ...previewPoint, button: 'left', clickCount: 1 });
+  let previewTarget;
+  for (let attempt = 0; attempt < 20 && !previewTarget; attempt++) {
+    previewTarget = (await command('Target.getTargets')).targetInfos.find(target => target.url === preview);
+    if (!previewTarget) await delay(50);
+  }
+  assert.ok(previewTarget, 'the attachment preview opens');
+  await command('Target.closeTarget', { targetId: previewTarget.targetId });
+  await command('Page.bringToFront');
+  await fits('create attachments at 320px');
+  await click('#wizard-next-btn');
+  for (let attempt = 0; attempt < 30 && !await evaluate('!!document.querySelector("#wizard-submit-btn")'); attempt++) await delay(50);
+  assert.ok(await evaluate('document.querySelector("#wizard-submit-btn") !== null'), await evaluate('document.querySelector("[role=alert]")?.textContent || "review did not open"'));
+  await fits('create review at 320px');
   await click('#wizard-submit-btn');
   assert.equal(await evaluate('window.nominationBrowser.submissions'), 0, 'unsigned submission blocked');
+  await command('Emulation.setDeviceMetricsOverride', { width: 1100, height: 1000, deviceScaleFactor: 1, mobile: false });
   await evaluate('document.querySelector("canvas").scrollIntoView({block:"center"})');
   const rect = await evaluate('(() => { const r = document.querySelector("canvas").getBoundingClientRect(); return {x:r.x,y:r.y,width:r.width,height:r.height}; })()');
   const draw = async (pointerType = 'mouse') => {
@@ -85,9 +146,13 @@ try {
   assert.equal(await evaluate('!!document.querySelector("svg[aria-label]")'), false);
   await draw('pen');
   await click('input[type="checkbox"]');
-  await command('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  const penStrokes = await evaluate('document.querySelector("svg[aria-label] polyline").getAttribute("points")');
+  await command('Emulation.setDeviceMetricsOverride', { width: 667, height: 375, deviceScaleFactor: 3, mobile: true });
+  await fits('create review in landscape');
+  await command('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 3, mobile: true });
   await delay(100);
   assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth'), true, 'mobile form fits viewport');
+  assert.equal(await evaluate('document.querySelector("svg[aria-label] polyline").getAttribute("points")'), penStrokes, 'orientation and DPR changes preserve strokes');
   await command('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
   await evaluate('document.querySelector("canvas").scrollIntoView({block:"center"})');
   const touchRect = await evaluate('(() => { const r = document.querySelector("canvas").getBoundingClientRect(); return {x:r.x,y:r.y}; })()');
@@ -102,6 +167,8 @@ try {
   writeFileSync(join(temporary, 'review-mobile.png'), Buffer.from((await command('Page.captureScreenshot', { captureBeyondViewport: true })).data, 'base64'));
   await click('#wizard-submit-btn');
   assert.equal(await evaluate('window.nominationBrowser.finalized'), 1);
+  assert.deepEqual(await evaluate('window.nominationBrowser.uploads'), [filename]);
+  assert.equal(await evaluate('window.nominationBrowser.strokes.length'), 2, 'pen and touch strokes reached submission');
   await command('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: temporary });
   await evaluate('window.generateNominationPdf()');
   for (let count = 0; count < 100 && !existsSync(join(temporary, 'PRAISE-2026-BROWSER_Summary_Dossier.pdf')); count++) await delay(100);
@@ -109,7 +176,7 @@ try {
   assert.match(pdf, /NOMINATOR ELECTRONIC SIGNATURE/);
   assert.match(pdf, /Jack Doe/); assert.match(pdf, /Jane Doe/);
   assert.match(pdf, /2026-10-08 10:30:00/); assert.match(pdf, /\/Subtype \/Image/);
-  console.log('PASS: mouse/touch/stylus signatures, clear/redraw, unsigned blocking, distinct offices, responsive review and signed Form A1 PDF.');
+  console.log('PASS: 320px create flow, award and office selection, long file upload and preview, landscape review, mouse/touch/stylus signatures, and signed Form A1 PDF.');
   console.log(`Review artifacts: ${temporary}`);
 } finally {
   socket?.close(); browser.kill(); await new Promise(ok => server.close(ok));

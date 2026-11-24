@@ -284,7 +284,7 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
             Assigned Nominees ({assignedApplications.length})
           </h3>
 
-          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
+          <div className="@container min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
             {assignedApplications.length > 0 && <NominationQueueCards userRole={currentUser.role} applications={assignedApplications} onOpen={application => void openAssessment(application)} actionLabel={application => application.processing_stage === 'Evaluation' ? 'Open assessment' : 'View assessment'} />}
             {assignedApplications.length === 0 ? (
               <div className="p-12 text-center text-slate-400">
@@ -293,7 +293,7 @@ export const EvaluatorDashboard: React.FC<EvaluatorDashboardProps> = ({
               </div>
             ) : (
               assignedApplications.length > 0 && (
-                <div className="hidden overflow-x-auto sm:block">
+                <div className="mobile-scroll-table hidden overflow-x-auto @5xl:block">
                   <table className="w-full min-w-[820px] text-left text-sm">
                     <thead className="border-b border-slate-200 bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
                       <tr>

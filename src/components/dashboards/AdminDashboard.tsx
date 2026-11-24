@@ -720,9 +720,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   return (
-    <div id="admin-dashboard-container" className="space-y-6">
+    <div id="admin-dashboard-container" className="@container min-w-0 space-y-6 wrap-anywhere">
       {/* Top Metric Cards */}
-      <div className={`${activeSubTab === 'overview' || activeSubTab === 'applications' ? 'grid' : 'hidden xl:grid'} grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4`}>
+      <div className={`${activeSubTab === 'overview' || activeSubTab === 'applications' ? 'grid' : 'hidden xl:grid'} grid-cols-2 gap-3 @xl:grid-cols-3 @5xl:grid-cols-6 sm:gap-4 [&>div]:p-3 @xl:[&>div]:p-5 [&>div>div]:flex-wrap [&>div>div]:gap-x-2`}>
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
           <p className="text-[10px] uppercase font-bold text-slate-500 mb-1">Total Filings</p>
           <div className="flex items-end justify-between">
@@ -774,7 +774,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       {/* Sub-Navigation Tabs */}
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-3">
-        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:max-w-full sm:items-center sm:overflow-x-auto sm:pb-1">
+        <div className="grid w-full grid-cols-2 gap-2 @xl:flex @xl:w-auto @xl:flex-wrap @xl:items-center">
           {[
             { id: 'overview', label: 'All Applications', icon: FileText },
             { id: 'awards', label: 'Awards & Criteria', icon: AwardIcon },
@@ -804,7 +804,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           })}
         </div>
 
-        <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-start">
+        <div className="flex w-full flex-wrap items-center justify-between gap-2 @xl:w-auto @xl:justify-start">
           <button
             onClick={() => pdfGenerator.generateEvaluationMatrixReport(applications)}
             className="px-3.5 py-2 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-xs font-semibold rounded-md inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"

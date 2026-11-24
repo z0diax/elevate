@@ -114,9 +114,9 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
         role="dialog"
         aria-modal="true"
         aria-labelledby="document-viewer-title"
-        className="flex h-dvh max-h-dvh w-screen min-w-0 flex-col overflow-hidden bg-white shadow-2xl sm:h-auto sm:max-h-[90dvh] sm:w-full sm:max-w-4xl sm:rounded-xl"
+        className="app-dialog flex h-dvh max-h-dvh w-full min-w-0 flex-col bg-white shadow-2xl sm:h-auto sm:max-h-[90dvh] sm:max-w-4xl sm:rounded-xl"
       >
-        <div className="flex shrink-0 items-center justify-between gap-3 bg-slate-900 px-4 py-3 text-white sm:px-6 sm:py-4">
+        <div className="flex shrink-0 items-center justify-between gap-3 rounded-t-[inherit] bg-slate-900 px-4 py-3 text-white sm:px-6 sm:py-4">
           <div className="flex items-center gap-3 min-w-0">
             <div className="p-2 bg-blue-600 rounded-md">
               <FileText size={18} className="text-white" />
@@ -140,7 +140,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
           </button>
         </div>
 
-        <div className="min-h-0 min-w-0 flex-1 space-y-5 overflow-x-hidden overflow-y-auto p-4 sm:p-6">
+        <div className="app-dialog-body min-h-0 min-w-0 flex-1 space-y-5 overflow-y-auto overscroll-contain p-3 sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl bg-slate-50 border border-slate-200">
             <div className="flex items-center gap-3">
               <div className={`p-2 rounded-lg ${
@@ -224,7 +224,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
                 <img
                   src={previewUrl}
                   alt={document.document_name}
-                  className="max-h-[42dvh] w-full bg-white object-contain sm:max-h-[60vh]"
+                  className="max-h-[42dvh] w-full bg-white object-contain sm:max-h-[60dvh]"
                 />
               </div>
             )}
@@ -234,7 +234,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
                 <iframe
                   src={previewUrl}
                   title={document.document_name}
-                  className="h-[42dvh] w-full sm:h-[60vh]"
+                  className="h-[42dvh] w-full sm:h-[60dvh]"
                 />
               </div>
             )}
@@ -302,7 +302,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
           )}
         </div>
 
-        <div className="flex shrink-0 justify-end border-t border-slate-200 bg-slate-50 px-4 py-3 sm:px-6">
+        <div className="flex shrink-0 justify-end rounded-b-[inherit] border-t border-slate-200 bg-slate-50 px-4 py-3 sm:px-6">
           <button
             onClick={onClose}
             className="min-h-11 rounded-md bg-slate-900 px-4 text-sm font-semibold text-white shadow-xs transition-colors hover:bg-slate-800"

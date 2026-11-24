@@ -6,6 +6,7 @@ import { praiseService } from '../../lib/api';
 import { showToast } from '../../lib/toast';
 import { NominationActionModal } from './NominationActionModal';
 import { NominationFieldGrid } from './NominationFormPresentation';
+import { WrappingSelect } from '../common/WrappingSelect';
 
 export const revisionScopes: Record<NominationRevisionScope, string> = {
   details: 'Nomination Details Only',
@@ -24,7 +25,7 @@ export function RevisionIndicator({ application }: { application: Application })
 export function RevisionInstructions({ application }: { application: Application }) {
   const request = application.revision_request;
   if (!application.revision_active || !request) return null;
-  return <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+  return <div className="safe-long-text rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm leading-relaxed text-amber-950 sm:p-4">
     <p className="font-semibold">Administrator-required revision</p>
     <p className="mt-1">{revisionScopes[request.scope]} · {new Date(request.requested_at).toLocaleString('en-PH')}</p>
     <p className="mt-2 whitespace-pre-wrap break-words">{request.instructions}</p>
@@ -77,9 +78,11 @@ export function ManageNominationRevision({ application, onRefresh }: { applicati
           ['Current status', application.status], ['Processing stage', application.processing_stage], ['Assigned office', application.office_name],
         ]} />
         {!cancel && <label className="block text-sm font-semibold text-slate-800">Revision scope
-          <select value={scope} onChange={event => setScope(event.target.value as NominationRevisionScope)} disabled={pending} className="mt-1 block w-full min-w-0 rounded-lg border border-slate-300 p-2">
-            {Object.entries(revisionScopes).map(([value, text]) => <option key={value} value={value}>{text}</option>)}
-          </select>
+          <span className="mt-1 block rounded-lg border border-slate-300">
+            <WrappingSelect value={scope} displayValue={revisionScopes[scope]} onChange={event => setScope(event.target.value as NominationRevisionScope)} disabled={pending}>
+              {Object.entries(revisionScopes).map(([value, text]) => <option key={value} value={value}>{text}</option>)}
+            </WrappingSelect>
+          </span>
         </label>}
         <label className="block text-sm font-semibold text-slate-800">{cancel ? 'Cancellation Reason' : 'Revision Instructions'}
           <textarea autoFocus required rows={4} maxLength={4000} disabled={pending} value={instructions} onChange={event => setInstructions(event.target.value)}

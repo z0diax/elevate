@@ -390,6 +390,35 @@ function handle_create_application(PDO $db, array $actor, array $data): void {
     sendResponse(201, application_for_actor(getFullApplication($db, $appId), $actor), 'Nomination draft created. Upload attachments to complete submission.');
 }
 
+function handle_nomination_archive(PDO $db, array $actor, string $appId, bool $archive): void {
+    if ($actor['role'] !== 'ADMINISTRATOR') {
+        sendResponse(403, [], 'Only an Administrator can archive or restore nominations.');
+    }
+
+    $db->beginTransaction();
+    try {
+        $application = lock_nomination($db, $appId);
+        if ($archive && $application['status'] === 'Draft') {
+            reject_nomination_change($db, 409, 'Draft nominations cannot be archived.');
+        }
+        if ($archive && nomination_revision($db, $appId)) {
+            reject_nomination_change($db, 409, 'Complete or cancel the active revision request before archiving this nomination.');
+        }
+        if ($archive !== ($application['archived_at'] !== null)) {
+            $archivedAt = $archive ? 'CURRENT_TIMESTAMP' : 'NULL';
+            $db->prepare("UPDATE applications SET archived_at = $archivedAt, updated_at = updated_at WHERE id = ?")
+                ->execute([$appId]);
+            addHistory($db, $appId, $actor, $archive ? 'Nomination Archived' : 'Nomination Restored', $application['status'], $application['status']);
+        }
+        $db->commit();
+    } catch (Throwable $e) {
+        if ($db->inTransaction()) $db->rollBack();
+        sendInternalError($e, 'applications.php:archive', 'Unable to update the nomination archive.');
+    }
+
+    sendResponse(200, ['id' => $appId], $archive ? 'Nomination archived.' : 'Nomination restored.');
+}
+
 function handle_delete_application(PDO $db, string $appId): void {
     if ($appId === '') {
         sendResponse(400, [], 'Application ID is required.');
@@ -403,6 +432,9 @@ function handle_delete_application(PDO $db, string $appId): void {
     $db->beginTransaction();
     try {
         $locked = lock_nomination($db, $appId);
+        if ($locked['archived_at'] !== null) {
+            reject_nomination_change($db, 409, 'Restore this nomination before trying to delete it.');
+        }
         guard_nomination_processing($db, $locked);
         if (nomination_revision($db, $appId, false)) {
             reject_nomination_change($db, 409, 'This nomination has archived records and cannot be deleted.');

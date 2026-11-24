@@ -77,6 +77,29 @@ try {
     for (const view of ['login', 'signup', 'password', 'overview', 'awards', 'offices', 'users', 'reports', 'audit', 'catalog', 'certificate']) {
       await navigate(view, width);
       await fits(`${view} at ${width}`);
+      if (view === 'overview' && [320, 1280].includes(width)) {
+        const reference = 'PRAISE-2026-0001';
+        const archive = `button[aria-label="Archive nomination ${reference}"]`;
+        const restore = `button[aria-label="Restore nomination ${reference}"]`;
+        const clickVisible = async selector => {
+          await evaluate(`[...document.querySelectorAll(${JSON.stringify(selector)})].find(button => button.getClientRects().length).click()`);
+          await delay(100);
+        };
+        await clickVisible(archive);
+        await fits('archive confirmation');
+        await clickText('Cancel');
+        assert.ok(await evaluate(`!!document.querySelector(${JSON.stringify(archive)})`));
+        await clickVisible(archive);
+        await clickVisible('[role="alertdialog"] button:last-child');
+        assert.equal(await evaluate(`!!document.querySelector(${JSON.stringify(archive)})`), false);
+        await clickText('Archived (1)');
+        await fits('archived nominations');
+        await clickVisible(restore);
+        await clickVisible('[role="alertdialog"] button:last-child');
+        assert.equal(await evaluate(`!!document.querySelector(${JSON.stringify(restore)})`), false);
+        await clickText('Active (1)');
+        assert.ok(await evaluate(`!!document.querySelector(${JSON.stringify(archive)})`));
+      }
       if (width < 1280 && ['overview', 'offices', 'users', 'reports'].includes(view)) {
         assert.equal(await evaluate(`!!Array.from(document.querySelectorAll('[data-mobile-list]')).find(el => el.getClientRects().length)`), true, 'mobile cards visible');
         assert.equal(await evaluate(`Array.from(document.querySelectorAll('table')).some(el => el.getClientRects().length)`), false, 'wide tables hidden');

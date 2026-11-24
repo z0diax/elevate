@@ -6,7 +6,7 @@ require_once __DIR__ . '/NominationSignature.php';
 function application_for_actor(array $application, array $actor): array {
     $isFiler = ($application['nominator_id'] ?? null) === ($actor['id'] ?? null);
     if (!$isFiler && ($actor['role'] ?? '') !== 'ADMINISTRATOR') unset($application['revision_request']);
-    if (($actor['role'] ?? '') !== 'ADMINISTRATOR') unset($application['can_require_revision'], $application['has_archived_attachments']);
+    if (($actor['role'] ?? '') !== 'ADMINISTRATOR') unset($application['can_require_revision'], $application['has_archived_attachments'], $application['archived_at']);
     if (!$isFiler) unset($application['can_correct']);
     if (($actor['role'] ?? '') !== 'NOMINEE') {
         return redact_nominator_for_evaluator($application, $actor);

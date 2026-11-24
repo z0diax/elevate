@@ -11,7 +11,7 @@ function getFullApplication(PDO $db, string $appId): ?array {
         nominating_office, nominating_office_id, nomination_origin, submission_account_name, submission_account_role, justification, accomplishments, supporting_narrative,
         date_of_nomination, status, processing_stage, required_action, remarks,
         final_weighted_score, deliberation_remarks, deliberation_decision,
-        deliberation_date, award_date, created_at, updated_at
+        deliberation_date, award_date, archived_at, created_at, updated_at
         FROM applications WHERE id = :id");
     $stmt->execute([':id' => $appId]);
     $app = $stmt->fetch();
@@ -40,7 +40,7 @@ function getFullApplication(PDO $db, string $appId): ?array {
     $active = $revision && $revision['active_application_id'] !== null;
     $app['revision_request'] = $revision ? revision_request_summary($revision) : null;
     $app['revision_active'] = $active;
-    $app['can_require_revision'] = !$active && $app['nominator_id'] && nomination_revision_eligible($app);
+    $app['can_require_revision'] = !$app['archived_at'] && !$active && $app['nominator_id'] && nomination_revision_eligible($app);
     $app['can_correct'] = !$active && ordinary_correction_eligible($app);
     $archive = $db->prepare('SELECT 1 FROM nomination_document_history WHERE application_id = ? LIMIT 1');
     $archive->execute([$appId]);

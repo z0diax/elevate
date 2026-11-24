@@ -5,6 +5,7 @@ import { NominationReferenceButton } from '../nomination/NominationFormViewerMod
 import { getEvaluatorProgress } from '../../lib/evaluatorAssignments';
 import { ManageNominationRevision, RevisionIndicator } from '../nomination/NominationRevisionControls';
 import { DownloadNominationButton } from '../nomination/DownloadNominationButton';
+import { NominationArchiveButton } from './NominationArchiveButton';
 
 const actionClass = 'min-h-11 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200';
 const deleteClass = 'min-h-11 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 disabled:opacity-50';
@@ -19,10 +20,11 @@ function Details({ fields }: { fields: [string, React.ReactNode][] }) {
   </dl>;
 }
 
-export function AdminMobileApplications({ applications, role, isSaving, onTrack, onAudit, onDelete, onRefresh }:  {
+export function AdminMobileApplications({ applications, role, isSaving, onTrack, onAudit, onDelete, onToggleArchive, onRefresh }:  {
   applications: Application[]; role: UserProfile['role']; isSaving: boolean;
   onTrack: (application: Application) => void; onAudit: (application: Application) => void;
   onDelete: (application: Application) => void; onRefresh?: () => void | Promise<void>;
+  onToggleArchive: (application: Application) => void;
 }) {
   return <div className={listClass} data-mobile-list="applications">
     {!applications.length && <p className="p-6 text-center text-sm text-slate-500">No applications matched your filter criteria.</p>}
@@ -42,9 +44,10 @@ export function AdminMobileApplications({ applications, role, isSaving, onTrack,
         <div className="grid grid-cols-2 gap-2">
           <button type="button" className={actionClass} onClick={() => onTrack(application)}>Track stage</button>
           <button type="button" className={actionClass} onClick={() => onAudit(application)}>Audit trail</button>
-          {role === 'ADMINISTRATOR' && onRefresh && <ManageNominationRevision application={application} onRefresh={onRefresh} />}
+          {role === 'ADMINISTRATOR' && !application.archived_at && onRefresh && <ManageNominationRevision application={application} onRefresh={onRefresh} />}
           <DownloadNominationButton applicationId={application.id} userRole={role} appearance="list" />
-          <button type="button" className={deleteClass} disabled={isSaving || Boolean(application.revision_request)} onClick={() => onDelete(application)}>Delete nomination</button>
+          {role === 'ADMINISTRATOR' && <NominationArchiveButton application={application} busy={isSaving} onToggle={onToggleArchive} />}
+          {!application.archived_at && <button type="button" className={deleteClass} disabled={isSaving || Boolean(application.revision_request)} onClick={() => onDelete(application)}>Delete nomination</button>}
         </div>
       </article>;
     })}

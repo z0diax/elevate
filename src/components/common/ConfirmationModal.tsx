@@ -1,11 +1,12 @@
 import React, { useEffect, useRef } from 'react';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Archive } from 'lucide-react';
 
 interface ConfirmationModalProps {
   isOpen: boolean;
   title: string;
   message: string;
   confirmLabel: string;
+  tone?: 'neutral';
   isConfirming?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
@@ -16,6 +17,7 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
   title,
   message,
   confirmLabel,
+  tone,
   isConfirming = false,
   onConfirm,
   onCancel,
@@ -41,6 +43,7 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
   if (!isOpen) {
     return null;
   }
+  const neutral = tone === 'neutral';
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" role="presentation">
@@ -59,8 +62,8 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
         className="relative w-full min-w-0 max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain wrap-anywhere rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl sm:p-6"
       >
         <div className="flex items-start gap-3">
-          <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-red-50 text-red-600">
-            <AlertTriangle size={20} />
+          <div className={`flex size-10 shrink-0 items-center justify-center rounded-full ${neutral ? 'bg-blue-50 text-blue-700' : 'bg-red-50 text-red-600'}`}>
+            {neutral ? <Archive size={20} /> : <AlertTriangle size={20} />}
           </div>
           <div className="min-w-0 break-words">
             <h2 id="confirmation-modal-title" className="text-base font-bold text-slate-900">{title}</h2>
@@ -82,9 +85,9 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
             type="button"
             onClick={onConfirm}
             disabled={isConfirming}
-            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg shadow-xs transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-70"
+            className={`px-4 py-2 text-white text-xs font-bold rounded-lg shadow-xs transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-70 ${neutral ? 'bg-blue-700 hover:bg-blue-800' : 'bg-red-600 hover:bg-red-700'}`}
           >
-            {isConfirming ? 'Deleting...' : confirmLabel}
+            {isConfirming ? (neutral ? 'Saving...' : 'Deleting...') : confirmLabel}
           </button>
         </div>
       </section>

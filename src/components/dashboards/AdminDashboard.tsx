@@ -1,4 +1,5 @@
 import { AdminMobileApplications, AdminMobileOffices, AdminMobileUsers } from './AdminMobileLists';
+import { NominationArchiveButton } from './NominationArchiveButton';
 import { OfficeAssignmentSelect } from '../common/OfficeAssignmentSelect';
 import { assignedOfficeIds, hasAssignedOffice } from '../../lib/userOffices';
 import { NominationReferenceButton } from '../nomination/NominationFormViewerModal';
@@ -39,6 +40,7 @@ type ConfirmationRequest = {
   title: string;
   message: string;
   confirmLabel: string;
+  tone?: 'neutral';
   errorMessage: string;
   onConfirm: () => Promise<void>;
 };
@@ -80,6 +82,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onSelectAdminSection
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'overview' | 'applications' | 'awards' | 'offices' | 'users'>(initialSubTab);
+  const [showArchived, setShowArchived] = useState(false);
   
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
@@ -254,16 +257,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     && ['For Evaluation', 'Under Evaluation'].includes(trackingApp.status);
 
   // Statistics Calculations
-  const totalApps = applications.length;
-  const pendingVerification = applications.filter(a => a.status === 'For Verification' || a.status === 'Submitted').length;
-  const pendingEvaluation = applications.filter(a => a.status === 'For Evaluation' || a.status === 'Under Evaluation').length;
-  const forDeliberation = applications.filter(a => a.status === 'For Deliberation' || a.status === 'Evaluation Completed').length;
-  const approved = applications.filter(a => a.status === 'Approved').length;
-  const awarded = applications.filter(a => a.status === 'Awarded').length;
-  const notApproved = applications.filter(a => a.status === 'Not Approved').length;
+  const activeApplications = applications.filter(application => !application.archived_at);
+  const totalApps = activeApplications.length;
+  const pendingVerification = activeApplications.filter(a => a.status === 'For Verification' || a.status === 'Submitted').length;
+  const pendingEvaluation = activeApplications.filter(a => a.status === 'For Evaluation' || a.status === 'Under Evaluation').length;
+  const forDeliberation = activeApplications.filter(a => a.status === 'For Deliberation' || a.status === 'Evaluation Completed').length;
+  const approved = activeApplications.filter(a => a.status === 'Approved').length;
+  const awarded = activeApplications.filter(a => a.status === 'Awarded').length;
 
   // Filtered Applications
   const filteredApplications = applications.filter(app => {
+    if (Boolean(app.archived_at) !== showArchived) return false;
     const matchesSearch = 
       app.nominee_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       app.application_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -612,6 +616,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     });
   };
 
+  const handleToggleNominationArchive = (application: Application) => {
+    const archive = !application.archived_at;
+    const verb = archive ? 'Archive' : 'Restore';
+    setConfirmationRequest({
+      title: `${verb} nomination?`,
+      message: archive
+        ? `Move ${application.application_number} to Archived? Its reference, documents, and revision history will remain available.`
+        : `Return ${application.application_number} to the default All Applications list?`,
+      confirmLabel: `${verb} nomination`,
+      tone: 'neutral',
+      errorMessage: `Unable to ${verb.toLowerCase()} the nomination.`,
+      onConfirm: async () => {
+        await praiseService.setNominationArchived(application.id, archive);
+        await onRefreshData();
+        showToast(`${application.application_number} ${archive ? 'archived' : 'restored'}.`);
+      },
+    });
+  };
+
   const openUserRoleModal = (user: UserProfile) => {
     setEditingUser(user);
     setNewUserRole(user.role);
@@ -826,6 +849,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {/* SUB-TAB 1: ALL APPLICATIONS */}
       {activeSubTab === 'overview' && (
         <div className="space-y-4">
+          {currentUser.role === 'ADMINISTRATOR' && <div role="group" aria-label="Nomination list" className="flex flex-wrap gap-2">
+            {[false, true].map(archived => (
+              <button key={String(archived)} type="button" aria-pressed={showArchived === archived}
+                onClick={() => setShowArchived(archived)}
+                className={`min-h-11 rounded-lg border px-4 text-xs font-semibold ${showArchived === archived ? 'border-blue-200 bg-blue-50 text-blue-800' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>
+                {archived ? 'Archived' : 'Active'} ({archived ? applications.length - totalApps : totalApps})
+              </button>
+            ))}
+          </div>}
           {/* Search and Filters Bar */}
           <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
             <div className="relative lg:col-span-2">
@@ -892,7 +924,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <AdminMobileApplications applications={filteredApplications} role={currentUser.role} isSaving={isSaving}
               onTrack={app => { setTrackingTab('status'); setTrackingDocId(null); setReassigningAssignmentId(null); setTrackingApp(app); }}
               onAudit={setAuditApp}
-              onDelete={handleDeleteNomination} onRefresh={onRefreshData} />
+              onDelete={handleDeleteNomination} onToggleArchive={handleToggleNominationArchive} onRefresh={onRefreshData} />
             <div className="mobile-scroll-table hidden overflow-x-auto xl:block">
               <table className="w-full min-w-[780px] text-left text-xs border-collapse">
                 <thead className="bg-slate-50 text-slate-500 uppercase text-[10px] font-bold border-b border-slate-200">
@@ -971,16 +1003,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             >
                               <History size={14} />
                             </button>
-                            {currentUser.role === 'ADMINISTRATOR' && <ManageNominationRevision application={app} onRefresh={onRefreshData} />}
+                            {currentUser.role === 'ADMINISTRATOR' && !app.archived_at && <ManageNominationRevision application={app} onRefresh={onRefreshData} />}
                             <DownloadNominationButton applicationId={app.id} userRole={currentUser.role} appearance="icon" />
-                            <button
+                            {currentUser.role === 'ADMINISTRATOR' && <NominationArchiveButton application={app} busy={isSaving} onToggle={handleToggleNominationArchive} />}
+                            {!app.archived_at && <button
                               onClick={() => handleDeleteNomination(app)}
                               disabled={isSaving || Boolean(app.revision_request)}
                               title={`Delete nomination ${app.application_number}`}
                               className="inline-flex size-6 items-center justify-center text-slate-400 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 rounded cursor-pointer"
                             >
                               <Trash2 size={14} />
-                            </button>
+                            </button>}
                           </div>
                         </td>
                       </tr>
@@ -1982,6 +2015,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         title={confirmationRequest?.title || ''}
         message={confirmationRequest?.message || ''}
         confirmLabel={confirmationRequest?.confirmLabel || 'Confirm'}
+        tone={confirmationRequest?.tone}
         isConfirming={isSaving}
         onConfirm={() => void handleConfirmAction()}
         onCancel={() => setConfirmationRequest(null)}

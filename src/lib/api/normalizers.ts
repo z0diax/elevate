@@ -148,6 +148,7 @@ export function normalizeApplication(application: any): Application {
   const normalized: Application = {
     id: String(application.id),
     application_number: String(application.application_number || ''),
+    archived_at: application.archived_at || undefined,
     award_id: String(application.award_id),
     award_name: application.award_name || undefined,
     award_year: Number(application.award_year || 0),

@@ -67,6 +67,8 @@ This adds only the cloud storage tables. It does not automatically import local 
 
 The migration `database_migrations/20261117_cloud_storage.sql` creates `praise_sessions`, `praise_files`, and `praise_file_chunks`. Binary chunks stay below common database packet limits. Files are reassembled only in request-local temporary storage for content validation, signatures, and downloads. The database holds the durable copy; include these tables in backups.
 
+For an existing database, apply `database_migrations/20261124_nomination_archive.sql` with migration credentials before deploying the Administrator archive feature. Fresh databases created from `database.sql` already include the archive column.
+
 ## Login rate limiting
 
 Before deploying the rate-limited login API to an existing installation, create its counter table with the maintenance account:

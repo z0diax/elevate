@@ -40,6 +40,8 @@ For an existing installation, back up the database and apply any pending SQL fil
 
 The controlled evaluator revision feature requires `20260929_evaluation_revisions.sql`. Apply it before deploying the matching PHP and frontend code. Existing submitted evaluations remain version 1; the migration does not rewrite their scores.
 
+Apply `20261124_nomination_archive.sql` before upgrading to the Administrator's Archived view in All Applications. Existing nominations start in the Active list. Archive and restore events are recorded in the nomination's audit trail.
+
 ```powershell
 Get-Content -Raw database_migrations/20260929_remove_runtime_schema_repair.sql | C:\xampp\mysql\bin\mysql.exe -u root tacloban_praise_db
 ```

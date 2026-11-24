@@ -170,6 +170,15 @@ export const applicationsApi = {
     return application;
   },
 
+  async setNominationArchived(id: string, archived: boolean): Promise<void> {
+    const action = archived ? 'archive_nomination' : 'restore_nomination';
+    await apiRequest(`applications.php?action=${action}&id=${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({}),
+    });
+    await Promise.all([loadApplications(), loadAuditLogs()]);
+  },
+
   async deleteNomination(id: string): Promise<void> {
     await apiRequest('applications.php', {
       method: 'DELETE',

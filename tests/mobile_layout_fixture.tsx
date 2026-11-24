@@ -35,6 +35,10 @@ function Fixture() {
   const view = new URLSearchParams(location.search).get('view') || 'login';
   const [section, setSection] = useState<'overview' | 'awards' | 'offices' | 'users'>(view === 'offices' || view === 'users' || view === 'awards' ? view : 'overview');
   const [menuOpen, setMenuOpen] = useState(window.matchMedia('(min-width: 1024px)').matches);
+  const [applicationRows, setApplicationRows] = useState(applications);
+  praiseService.setNominationArchived = async (id, archived) => {
+    setApplicationRows(rows => rows.map(row => row.id === id ? { ...row, archived_at: archived ? '2026-11-24 09:00:00' : undefined } : row));
+  };
   if (view === 'login') return <LoginScreen isSubmitting={false} onLogin={async () => { Object.assign(window, { didLogin: true }); }} onNavigateToSignup={() => {}} />;
   if (view === 'signup') return <NomineeSignupScreen isSubmitting={false} onSignup={async (...payload) => { Object.assign(window, { signupPayload: payload }); }} onNavigateToLogin={() => {}} />;
   if (view === 'password') return <ChangePasswordScreen onChangePassword={noop} onLogout={noop} />;
@@ -47,7 +51,7 @@ function Fixture() {
         view === 'audit' ? <AuditLogsView logs={auditRecords} /> :
         view === 'catalog' ? <AwardsCatalogView awards={awards} onSelectAwardForNomination={() => {}} /> :
         view === 'certificate' ? <CertificateTemplateView applications={applications} awards={awards} certificateTemplateSettings={DEFAULT_CERTIFICATE_TEMPLATE_SETTINGS} onSaveCertificateTemplate={noop} onNavigateBack={() => {}} /> :
-        <AdminDashboard applications={applications} awards={awards} offices={offices} users={users} currentUser={currentUser} initialSubTab={section} onRefreshData={noop} onNavigateToNomination={() => {}} onSelectAdminSection={setSection} />}
+        <AdminDashboard applications={applicationRows} awards={awards} offices={offices} users={users} currentUser={currentUser} initialSubTab={section} onRefreshData={noop} onNavigateToNomination={() => {}} onSelectAdminSection={setSection} />}
     </main>
     </div>
   </div>;

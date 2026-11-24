@@ -259,6 +259,9 @@ function handle_nomination_revision(PDO $db, array $actor, array $data, string $
         $application = lock_nomination($db, $appId);
         $reference = $application['application_number'];
         if ($action === 'require_nomination_revision') {
+            if ($application['archived_at'] !== null) {
+                reject_nomination_change($db, 409, 'Restore this nomination before requesting a revision.');
+            }
             guard_nomination_processing($db, $application);
             $application['endorsement'] = current_nomination_endorsement($db, $appId);
             if (!$application['nominator_id'] || !nomination_revision_eligible($application)) {

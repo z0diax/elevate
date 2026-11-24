@@ -172,6 +172,7 @@ export interface ApplicationDocument {
 
 export interface Application {
   id: string;
+  archived_at?: string;
   application_number: string; // e.g. PRAISE-2026-00001
   award_id: string;
   award_name?: string;

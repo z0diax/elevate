@@ -129,6 +129,8 @@ if ($method === 'PUT') {
         'return_for_revision' => ['remarks'],
         'deliberation' => ['decision', 'remarks', 'award_now'],
         'begin_deliberation' => [],
+        'archive_nomination' => [],
+        'restore_nomination' => [],
         'require_nomination_revision' => ['scope', 'instructions'],
         'cancel_nomination_revision' => ['revision_id', 'reason'],
         'start_nomination_revision' => ['revision_id'],
@@ -146,6 +148,10 @@ if ($method === 'PUT') {
 
     if ($action === 'reassign_evaluator' && $actor['role'] !== 'ADMINISTRATOR') {
         sendResponse(403, [], 'Only an Administrator can reassign evaluators.');
+    }
+
+    if ($action === 'archive_nomination' || $action === 'restore_nomination') {
+        handle_nomination_archive($db, $actor, $appId, $action === 'archive_nomination');
     }
 
     if (str_contains($action, 'nomination_revision') || $action === 'remove_revision_attachment') {

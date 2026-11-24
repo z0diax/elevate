@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { FilePenLine } from 'lucide-react';
+import { FilePenLine, FileX } from 'lucide-react';
 import { Application, NominationRevisionScope } from '../../types';
 import { praiseService } from '../../lib/api';
 import { showToast } from '../../lib/toast';
@@ -40,6 +40,7 @@ export function ManageNominationRevision({ application, onRefresh }: { applicati
   if (!application.can_require_revision && !application.revision_active) return null;
   const cancel = Boolean(application.revision_active);
   const label = cancel ? 'Cancel Revision Request' : 'Require Nomination Revision';
+  const ActionIcon = cancel ? FileX : FilePenLine;
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (pending) return;
@@ -66,8 +67,8 @@ export function ManageNominationRevision({ application, onRefresh }: { applicati
   return <>
     <button type="button" aria-label={label} title={label} aria-haspopup="dialog"
       onClick={() => { setOpen(true); setInstructions(''); setError(''); setScope('both'); }}
-      className={`inline-flex shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-800 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 ${cancel ? 'min-h-10 gap-1.5 px-2.5 py-2 text-xs font-semibold' : 'size-11 xl:size-8'}`}>
-      <FilePenLine size={16} aria-hidden="true" />{cancel && label}
+      className="inline-flex size-11 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-800 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 xl:size-8">
+      <ActionIcon size={16} aria-hidden="true" />
     </button>
     {open && createPortal(<NominationActionModal application={application} title={label} onClose={() => { if (!pending) setOpen(false); }}>
       <form onSubmit={submit} className="min-w-0 space-y-4 whitespace-normal">

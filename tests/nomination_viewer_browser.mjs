@@ -315,6 +315,13 @@ try {
     await set('[role=dialog] textarea', 'Correct the position and supporting evidence.');
     await clickLabel('Require Revision');
     await waitFor('!document.querySelector("[role=dialog]") && document.body.textContent.includes("Revision Required")');
+    const cancelButton = visibleButton('Cancel Revision Request');
+    await waitFor(`!!(${cancelButton})`);
+    assert.equal(await evaluate(`(${cancelButton}).textContent.trim()`), '', 'cancellation action is icon-only');
+    await clickLabel('Cancel Revision Request');
+    await waitFor('document.querySelector("[role=dialog]")?.textContent.includes("Cancellation Reason")');
+    await clickLabel('Close nomination');
+    await waitFor('!document.querySelector("[role=dialog]")');
     writeFileSync(join(temporary, `revision-admin-${width}.png`), Buffer.from((await command('Page.captureScreenshot')).data, 'base64'));
     await evaluate("window.viewerTest.render('SECRETARIAT')");
     assert.equal(await evaluate(`!!(${visibleButton('Require Nomination Revision')})`), false);

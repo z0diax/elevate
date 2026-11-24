@@ -289,15 +289,26 @@ try {
   assert.match(await evaluate('document.querySelector("[role=dialog] header [role=alert]").textContent'), /signature could not be loaded/);
   assert.equal(existsSync(join(temporary, 'PRAISE-VIEWER_Nomination_Form.pdf')), false, 'failed signature does not download incomplete PDF');
   await close();
-  const visibleButton = label => `Array.from(document.querySelectorAll('button')).find(button => button.textContent.trim() === ${JSON.stringify(label)} && button.getBoundingClientRect().height > 0)`;
+  const visibleButton = label => `Array.from(document.querySelectorAll('button')).find(button => (button.getAttribute('aria-label') || button.textContent.trim()) === ${JSON.stringify(label)} && button.getBoundingClientRect().height > 0)`;
   const clickLabel = async label => { const expression = visibleButton(label); await waitFor(`!!(${expression})`); await evaluate(`(${expression}).click()`); };
   const positionInput = 'input[placeholder="e.g. Administrative Officer IV / BHW"]';
   const positionValue = `document.querySelector(${JSON.stringify(positionInput)}).value`;
   for (const [width, scope] of [[1360, 'both'], [390, 'attachments']]) {
     await command('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: width < 640 });
     await evaluate("window.viewerTest.revisionState.enabled=true; window.viewerTest.resetRevision(); window.viewerTest.render('ADMINISTRATOR')");
+    const revisionButton = visibleButton('Require Nomination Revision');
+    await waitFor(`!!(${revisionButton})`);
+    assert.equal(await evaluate(`(${revisionButton}).textContent.trim()`), '', 'revision action is icon-only');
     await clickLabel('Require Nomination Revision');
     await waitFor('!!document.querySelector("[role=dialog] select")');
+    assert.ok(await evaluate(`(() => {
+      const notice = Array.from(document.querySelectorAll('[role=dialog] p')).find(p => p.textContent.includes('Requiring a revision will return'));
+      const bounds = notice.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(notice);
+      const lines = Array.from(range.getClientRects());
+      return lines.length > 1 && lines.every(line => line.left >= bounds.left - 1 && line.right <= bounds.right + 1);
+    })()`), 'revision warning wraps within its container');
     assert.equal(await evaluate('document.querySelector("[role=dialog] select").value'), 'both');
     assert.match(await evaluate('document.querySelector("[role=dialog]").textContent'), /Filing Account/);
     await set('[role=dialog] select', scope);

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { FilePenLine } from 'lucide-react';
 import { Application, NominationRevisionScope } from '../../types';
 import { praiseService } from '../../lib/api';
@@ -63,18 +64,19 @@ export function ManageNominationRevision({ application, onRefresh }: { applicati
     await onRefresh();
   };
   return <>
-    <button type="button" onClick={() => { setOpen(true); setInstructions(''); setError(''); setScope('both'); }}
-      className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50">
-      <FilePenLine size={15} aria-hidden="true" />{label}
+    <button type="button" aria-label={label} title={label} aria-haspopup="dialog"
+      onClick={() => { setOpen(true); setInstructions(''); setError(''); setScope('both'); }}
+      className={`inline-flex shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-800 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 ${cancel ? 'min-h-10 gap-1.5 px-2.5 py-2 text-xs font-semibold' : 'size-11 xl:size-8'}`}>
+      <FilePenLine size={16} aria-hidden="true" />{cancel && label}
     </button>
-    {open && <NominationActionModal application={application} title={label} onClose={() => { if (!pending) setOpen(false); }}>
-      <form onSubmit={submit} className="space-y-4">
+    {open && createPortal(<NominationActionModal application={application} title={label} onClose={() => { if (!pending) setOpen(false); }}>
+      <form onSubmit={submit} className="min-w-0 space-y-4 whitespace-normal">
         <NominationFieldGrid fields={[
           ['Original submitting user', application.submission_account_name || application.nominator_name],
           ['Current status', application.status], ['Processing stage', application.processing_stage], ['Assigned office', application.office_name],
         ]} />
         {!cancel && <label className="block text-sm font-semibold text-slate-800">Revision scope
-          <select value={scope} onChange={event => setScope(event.target.value as NominationRevisionScope)} disabled={pending} className="mt-1 block w-full rounded-lg border border-slate-300 p-2">
+          <select value={scope} onChange={event => setScope(event.target.value as NominationRevisionScope)} disabled={pending} className="mt-1 block w-full min-w-0 rounded-lg border border-slate-300 p-2">
             {Object.entries(revisionScopes).map(([value, text]) => <option key={value} value={value}>{text}</option>)}
           </select>
         </label>}
@@ -83,7 +85,7 @@ export function ManageNominationRevision({ application, onRefresh }: { applicati
             placeholder={cancel ? 'Explain why the revision is being cancelled.' : 'Specify the nomination information or supporting documents that need to be corrected.'}
             className="mt-1 block w-full rounded-lg border border-slate-300 p-2" />
         </label>
-        <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-950">
+        <p className="rounded-lg bg-amber-50 p-3 text-sm leading-relaxed break-words text-amber-950">
           {cancel
             ? 'Cancelling this request discards the revision draft and restores the previous workflow state.'
             : 'Requiring a revision will return this nomination to the original submitting user for correction. Its current processing will be suspended until the revised nomination has been submitted. Previous approvals, document verifications, and evaluations may require revalidation.'}
@@ -96,6 +98,6 @@ export function ManageNominationRevision({ application, onRefresh }: { applicati
           </button>
         </div>
       </form>
-    </NominationActionModal>}
+    </NominationActionModal>, document.body)}
   </>;
 }

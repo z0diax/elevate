@@ -9,10 +9,18 @@ import { DeliberationDashboard } from '../src/components/dashboards/Deliberation
 import { SubmitNominationView } from '../src/components/nomination/SubmitNominationView';
 import { praiseService } from '../src/lib/api';
 import { NominationFormViewerModal } from '../src/components/nomination/NominationFormViewerModal';
-import { Application, UserRole } from '../src/types';
+import { Application, NominationRevisionDraft, NominationRevisionRequest, UserRole } from '../src/types';
 
 const state = { calls: 0, signatureCalls: 0, corrections: 0, fail: false, legacy: false, signed: false, signatureFail: false, longIdentity: false, status: 'For Evaluation' as Application['status'], stage: 'Evaluation' as Application['processing_stage'], role: 'NOMINEE' as UserRole };
 const root = createRoot(document.getElementById('root')!);
+const revisionState = { enabled: false, otherFiler: false, submissions: 0, scope: 'both' as NominationRevisionRequest['scope'], version: 1 };
+const revisionRequest: NominationRevisionRequest = {
+  id: 'revision-fixture', revision_number: 1, requested_by_name: 'Test Administrator', requested_by_role: 'ADMINISTRATOR',
+  requested_at: '2026-11-24 09:00:00', instructions: 'Correct the position and update the supporting evidence.',
+  scope: 'both', previous_status: 'For Endorsement', previous_stage: 'Endorsement', status: 'Pending',
+};
+let draft: NominationRevisionDraft = { request: revisionRequest, details: {}, attachments: {}, generation: 0 };
+let activeRevision = false;
 const app: Application = {
   id: 'viewer-record', application_number: 'PRAISE-VIEWER', award_id: 'award', award_name: 'Service Award', award_year: 2026,
   nominee_id: 'user', nominee_name: 'Nominee Record', employee_id: 'EMP-42', position_title: 'Officer', office_id: 'office', office_name: 'Test Office',
@@ -25,12 +33,18 @@ const app: Application = {
   documents: [{ id: 'doc', application_id: 'viewer-record', document_name: 'Evidence image', file_url: '/preview.png', file_type: 'image/png', status: 'Verified', uploaded_at: '2026-10-08' }, { id: 'pdf-doc', application_id: 'viewer-record', document_name: 'Evidence PDF', file_url: '/preview.pdf', file_type: 'application/pdf', status: 'Submitted', uploaded_at: '2026-10-08' }],
 };
 const history = [{ id: 'history', application_id: app.id, user_id: 'user', user_name: 'Filing Account', user_role: 'NOMINEE' as const, action: 'Nomination Submitted', new_status: 'Submitted' as const, created_at: '2026-10-08 10:30:00' }];
-praiseService.getNominationForm = async id => {
+praiseService.getNominationForm = async (id, version) => {
   state.calls++;
   await new Promise(ok => setTimeout(ok, 150));
   if (state.fail) throw Error('Access denied for this nomination.');
   if (![app.id, 'viewer-other'].includes(id)) throw Error('Wrong nomination ID');
   const latest = { ...app, id, application_number: id === app.id ? app.application_number : 'PRAISE-OTHER', remarks: 'Latest authorized record', nominee_name: id === app.id ? 'Latest Nominee Record' : 'Other Nominee Record', status: state.status, processing_stage: state.stage, signature_signed_at: state.signed ? '2026-10-08 10:30:00' : undefined };
+  if (revisionState.enabled) Object.assign(latest, revisionApplication(), {
+    nominee_name: version === 1 ? 'Original Nominee Record' : 'Latest Nominee Record',
+    nomination_version: version || revisionState.version,
+    revision_request: version ? undefined : draft.request,
+    signature_signed_at: '2026-11-24 09:00:00',
+  });
   if (state.longIdentity) Object.assign(latest, { office_name: 'GovernmentOffice'.repeat(40), nominator_name: 'LongNominatorName'.repeat(40), nominating_office: 'NominatingDepartment'.repeat(40) });
   if (state.legacy) Object.assign(latest, { nominator_name: '', justification: '', accomplishments: '', supporting_narrative: '', employee_id: undefined, created_at: '', updated_at: '', documents: [] });
   if (state.role === 'EVALUATOR') Object.assign(latest, { nominator_name: '', nominator_id: '', nominator_position: '', nominating_office: '', submission_account_name: undefined, submission_account_role: undefined, signature_signed_at: undefined });
@@ -42,13 +56,61 @@ praiseService.getNominationSignature = async () => {
   if (state.signatureFail) throw Error('Recorded signature could not be loaded.');
   return { strokes: [[[0.1, 0.2], [0.4, 0.7], [0.7, 0.3]]], signed_at: '2026-10-08 10:30:00', sha256: 'synthetic-test-digest', signed_snapshot: app };
 };
+const revisionOffice = { id: 'office', name: 'Test Office', code: 'TEST', head_name: 'Department Head', head_title: 'Head', is_active: true };
+function revisionApplication(): Application {
+  return {
+    ...app,
+    ...(!activeRevision ? draft.details : {}),
+    nominator_id: revisionState.otherFiler ? 'another-filer' : app.nominator_id,
+    nominating_office_id: 'office',
+    status: activeRevision ? 'Returned for Revision' : 'For Endorsement',
+    processing_stage: 'Endorsement',
+    can_correct: false,
+    can_require_revision: !activeRevision && state.role === 'ADMINISTRATOR',
+    revision_active: activeRevision,
+    revision_request: activeRevision || draft.request.status === 'Completed' ? draft.request : undefined,
+    nomination_version: revisionState.version,
+    accomplishments: 'Public impact and substantial accomplishments.',
+    documents: [{ ...app.documents![0], requirement_id: 'requirement', file_name: 'existing.png', file_size: 1024 }],
+  };
+}
+praiseService.nominationRevision = async (_id, action, data) => {
+  const input = data as { scope: NominationRevisionRequest['scope']; instructions: string; details?: Record<string, string>; remarks?: string; signature_confirmed: boolean };
+  if (action === 'require_nomination_revision') {
+    activeRevision = true;
+    draft = { request: { ...revisionRequest, instructions: input.instructions, scope: input.scope }, details: {}, attachments: {}, generation: 0 };
+  } else if (action === 'start_nomination_revision') {
+    draft = { ...draft, request: { ...draft.request, status: 'In Progress' } };
+  } else if (action === 'save_nomination_revision') {
+    draft = { ...draft, details: input.details || draft.details, remarks: input.remarks, generation: draft.generation + 1 };
+  } else if (action === 'finalize_nomination_revision') {
+    if (!input.signature_confirmed) throw Error('New signature required.');
+    revisionState.submissions++;
+    revisionState.version++;
+    activeRevision = false;
+    draft = { ...draft, request: { ...draft.request, status: 'Completed' } };
+  } else if (action === 'cancel_nomination_revision') {
+    activeRevision = false;
+    draft = { ...draft, request: { ...draft.request, status: 'Cancelled' } };
+  }
+  return { application: revisionApplication(), draft: activeRevision ? draft : null };
+};
+praiseService.stageNominationRevisionFile = async (_applicationId, _draft, requirementId, file) => {
+  draft = {
+    ...draft,
+    generation: draft.generation + 1,
+    attachments: { ...draft.attachments, [requirementId]: { ...revisionApplication().documents![0], file_name: file.name } },
+  };
+  return draft;
+};
+praiseService.getNominationRevisionHistory = async () => ({ requests: [draft.request], versions: revisionState.version > 1 ? [1] : [], archived_attachments: [] });
 
 const render = (role: UserRole, screen = '') => {
   state.role = role;
   const currentUser = { id: 'user', full_name: 'Account', email: 'account@example.invalid', role, office_id: 'office', office_name: 'Test Office' };
-  const shared = { applications: [{ ...app, status: state.status, processing_stage: state.stage }], currentUser, awards: [{ id: 'award', name: 'Service Award', code: 'TEST', description: '', award_year: 2026, is_active: true, min_qualifying_score: 85 }], onRefreshData: () => {}, onNavigateToNomination: () => {} };
+  const shared = { applications: [revisionState.enabled ? revisionApplication() : { ...app, status: state.status, processing_stage: state.stage, can_correct: ['Returned for Revision', 'Incomplete'].includes(state.status) }], currentUser, awards: [{ id: 'award', name: 'Service Award', code: 'TEST', description: '', award_year: 2026, is_active: true, min_qualifying_score: 85, document_requirements: revisionState.enabled ? [{ id: 'requirement', award_id: 'award', document_name: 'Evidence image', description: '', is_mandatory: true }] : undefined }], onRefreshData: () => render(role, screen), onNavigateToNomination: () => {} };
   const component = screen === 'deliberation' ? <DeliberationDashboard {...shared} users={[]} />
-    : screen === 'submission' ? <SubmitNominationView {...shared} offices={[]} />
+    : screen === 'submission' ? <SubmitNominationView {...shared} offices={revisionState.enabled ? [revisionOffice] : []} />
     : role === 'ADMINISTRATOR' ? <AdminDashboard {...shared} users={[]} offices={[]} initialSubTab="overview" onSelectAdminSection={() => {}} />
     : role === 'SECRETARIAT' ? <SecretariatDashboard {...shared} evaluators={[]} />
     : role === 'HEAD_OF_OFFICE' ? <HeadOfOfficeDashboard {...shared} />
@@ -56,5 +118,9 @@ const render = (role: UserRole, screen = '') => {
     : <NomineeDashboard {...shared} onNavigateToCorrections={() => { state.corrections++; }} />;
   root.render(<React.Fragment key={role + screen}>{component}</React.Fragment>);
 };
-(window as any).viewerTest = { state, render, mountViewer: (applicationId: string) => root.render(<NominationFormViewerModal applicationId={applicationId} userRole="NOMINEE" onClose={() => render('NOMINEE')} />) };
+(window as any).viewerTest = {
+  state, render, revisionState,
+  resetRevision: () => { activeRevision = false; draft = { request: revisionRequest, details: {}, attachments: {}, generation: 0 }; },
+  mountViewer: (applicationId: string) => root.render(<NominationFormViewerModal applicationId={applicationId} userRole="NOMINEE" onClose={() => render('NOMINEE')} />),
+};
 render('NOMINEE');

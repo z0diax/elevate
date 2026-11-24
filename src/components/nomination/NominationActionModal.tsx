@@ -14,9 +14,9 @@ interface NominationActionModalProps {
   application?: Application;
   title: string;
   task?: string;
-  tabs: NominationTab[];
-  activeTab: string;
-  onTabChange: (tab: string) => void;
+  tabs?: NominationTab[];
+  activeTab?: string;
+  onTabChange?: (tab: string) => void;
   onClose: () => void;
   footer?: React.ReactNode;
   headerActions?: React.ReactNode;
@@ -38,7 +38,7 @@ const STAGE_LABELS: Record<Application['processing_stage'], string> = {
 const STAGE_ORDER = Object.keys(STAGE_LABELS) as Application['processing_stage'][];
 
 export const NominationActionModal: React.FC<NominationActionModalProps> = ({
-  application, title, task, tabs, activeTab, onTabChange, onClose, footer, headerActions, children, presentation = 'workflow', tabIdPrefix,
+  application, title, task, tabs = [], activeTab, onTabChange = () => {}, onClose, footer, headerActions, children, presentation = 'workflow', tabIdPrefix,
 }) => {
   const titleId = useId();
   const tabPrefix = tabIdPrefix || titleId;
@@ -123,6 +123,10 @@ export const NominationActionModal: React.FC<NominationActionModalProps> = ({
             </button>
           </div>
         </div>}
+
+        {application?.revision_active && <p className="shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-950 sm:px-6">
+          This nomination is currently undergoing an Administrator-required revision. Processing will resume after the revised nomination has been submitted.
+        </p>}
 
         {tabs.length > 0 && <nav aria-label="Nomination sections" className="shrink-0 overflow-x-auto border-b border-slate-200 bg-white px-4 sm:px-6">
           <div role="tablist" className="flex min-w-max gap-5">

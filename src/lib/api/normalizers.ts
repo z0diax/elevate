@@ -86,8 +86,12 @@ export function normalizeDocument(document: any): ApplicationDocument {
     id: String(document.id),
     application_id: String(document.application_id),
     requirement_id: document.requirement_id || undefined,
+    file_name: document.file_name || undefined,
     document_name: String(document.document_name),
-    file_url: document.file_url ? resolveProjectUrl(`api/documents.php?action=download&id=${encodeURIComponent(String(document.id))}`) : '',
+    file_url: document.file_url ? resolveProjectUrl(
+      /^api\/documents\.php\?action=download&id=[A-Za-z0-9_-]+&source=(history|revision)$/.test(document.file_url)
+        ? document.file_url : `api/documents.php?action=download&id=${encodeURIComponent(String(document.id))}`
+    ) : '',
     file_size: document.file_size !== null && document.file_size !== undefined ? Number(document.file_size) : undefined,
     file_type: document.file_type || undefined,
     status: document.status,
@@ -168,6 +172,13 @@ export function normalizeApplication(application: any): Application {
     submission_account_name: application.submission_account_name || undefined,
     submission_account_role: application.submission_account_role || undefined,
     signature_signed_at: application.signature_signed_at || undefined,
+    nomination_version: application.nomination_version == null ? undefined : Number(application.nomination_version),
+    revision_request: application.revision_request || undefined,
+    revision_active: Boolean(application.revision_active),
+    has_archived_attachments: Boolean(application.has_archived_attachments),
+    can_require_revision: Boolean(application.can_require_revision),
+    can_correct: application.can_correct == null ? undefined : Boolean(application.can_correct),
+    historical_workflow: application.historical_workflow || undefined,
     justification: String(application.justification || ''),
     accomplishments: String(application.accomplishments || ''),
     supporting_narrative: String(application.supporting_narrative || ''),

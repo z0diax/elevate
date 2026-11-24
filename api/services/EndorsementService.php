@@ -37,11 +37,10 @@ function handle_endorse(PDO $db, array $actor, array $data, string $appId, array
         if ($missingRequirement !== false) {
             sendResponse(409, [], 'Required attachment is missing: ' . $missingRequirement);
         }
-        $headReviewStmt = $db->prepare("SELECT status FROM application_documents WHERE application_id = :id");
+        $headReviewStmt = $db->prepare("SELECT status FROM application_documents WHERE application_id = :id AND file_url <> ''");
         $headReviewStmt->execute([':id' => $appId]);
         $headReviewStatuses = $headReviewStmt->fetchAll(PDO::FETCH_COLUMN);
-        $allDocumentsApproved = !empty($headReviewStatuses)
-            && count(array_filter(
+        $allDocumentsApproved = count(array_filter(
                 $headReviewStatuses,
                 static fn($status): bool => strcasecmp(trim((string)$status), 'Head Approved') === 0
             )) === count($headReviewStatuses);
@@ -69,6 +68,7 @@ function handle_endorse(PDO $db, array $actor, array $data, string $appId, array
 
     $db->beginTransaction();
     try {
+        guard_nomination_processing($db, lock_nomination($db, $appId), $current);
         $db->prepare("
             UPDATE applications
             SET status = :status, processing_stage = :stage, required_action = :required_action, remarks = :remarks, updated_at = NOW()
@@ -93,6 +93,10 @@ function handle_endorse(PDO $db, array $actor, array $data, string $appId, array
             ':remarks' => $remarks !== '' ? $remarks : $decision,
         ]);
 
+        if ($decision !== 'Endorsed') {
+            $db->prepare("UPDATE application_documents SET status = 'Rejected' WHERE application_id = ? AND status = 'Head Rejected'")
+                ->execute([$appId]);
+        }
         addHistory($db, $appId, $actor, "Head of Office: {$decision}", $current['status'], $newStatus, $remarks);
         $db->commit();
     } catch (Throwable $e) {
@@ -100,7 +104,7 @@ function handle_endorse(PDO $db, array $actor, array $data, string $appId, array
         sendInternalError($e, 'applications.php:endorse', 'Failed to process endorsement.');
     }
 
-    sendResponse(200, getFullApplication($db, $appId), 'Endorsement processed.');
+    sendResponse(200, application_for_actor(getFullApplication($db, $appId), $actor), 'Endorsement processed.');
 }
 
 function handle_inspect_document(PDO $db, array $actor, array $data, string $appId, array $current): void {
@@ -136,6 +140,7 @@ function handle_inspect_document(PDO $db, array $actor, array $data, string $app
 
     $db->beginTransaction();
     try {
+        guard_nomination_processing($db, lock_nomination($db, $appId), $current);
         $reviewStmt = $db->prepare("
             UPDATE application_documents
             SET status = :status,
@@ -163,5 +168,5 @@ function handle_inspect_document(PDO $db, array $actor, array $data, string $app
         sendInternalError($e, 'applications.php:inspect_document', 'Failed to record document inspection.');
     }
 
-    sendResponse(200, getFullApplication($db, $appId), 'Document inspection recorded.');
+    sendResponse(200, application_for_actor(getFullApplication($db, $appId), $actor), 'Document inspection recorded.');
 }

@@ -8,6 +8,8 @@ import { NominationDetails, NominationDocuments, NominationHistory } from './Nom
 import { NominationIdentityDetails } from './NominationIdentity';
 import { NominationFieldGrid, NominationFormSection, NominationTabPanel } from './NominationFormPresentation';
 import { StageProgressTracker } from '../common/StageProgressTracker';
+import { RevisionInstructions } from './NominationRevisionControls';
+import { HistoricalWorkflow, NominationVersionHistory, VersionComparison } from './NominationVersionHistory';
 import { DownloadNominationButton } from './DownloadNominationButton';
 
 const recordedDate = (value?: string, dateOnly = false) => {
@@ -21,32 +23,46 @@ export const NominationFormViewerModal: React.FC<{
   applicationId: string;
   userRole: UserRole;
   onClose: () => void;
-}> = ({ applicationId, userRole, onClose }) => {
+  onRevise?: () => void;
+}> = ({ applicationId, userRole, onClose, onRevise }) => {
   const tabIdPrefix = useId();
   const [tabSelection, setTabSelection] = useState({ applicationId, tab: 'overview' });
   const activeTab = tabSelection.applicationId === applicationId ? tabSelection.tab : 'overview';
   const [record, setRecord] = useState<{ application: Application; history: ApplicationHistory[] } | null>(null);
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
+  const [versionSelection, setVersionSelection] = useState<{ applicationId: string; version?: number }>();
+  const version = versionSelection?.applicationId === applicationId ? versionSelection.version : undefined;
+  const [currentApplication, setCurrentApplication] = useState<Application>();
+  const [signature, setSignature] = useState<Awaited<ReturnType<typeof praiseService.getNominationSignature>>>();
+  const [signatureError, setSignatureError] = useState('');
   const [documentId, setDocumentId] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
-    setRecord(null); setError(''); setDocumentId(null);
+    setRecord(null); setError(''); setDocumentId(null); setSignature(undefined); setSignatureError('');
     setTabSelection({ applicationId, tab: 'overview' });
-    void praiseService.getNominationForm(applicationId).then(result => {
-      if (!cancelled) setRecord(result);
+    void praiseService.getNominationForm(applicationId, version).then(result => {
+      if (cancelled) return;
+      setRecord(result);
+      if (!version) setCurrentApplication(result.application);
+      if (userRole !== 'EVALUATOR' && result.application.signature_signed_at) {
+        void praiseService.getNominationSignature(applicationId, version ?? result.application.nomination_version)
+          .then(value => { if (!cancelled) setSignature(value); })
+          .catch(reason => { if (!cancelled) setSignatureError(reason instanceof Error ? reason.message : 'Unable to load the recorded signature.'); });
+      }
     }).catch(reason => {
       if (!cancelled) setError(reason instanceof Error ? reason.message : 'Unable to load nomination.');
     });
     return () => { cancelled = true; };
-  }, [applicationId, attempt]);
+  }, [applicationId, attempt, userRole, version]);
   const application = record?.application.id === applicationId ? record.application : undefined;
   const selectedDocument = application?.documents?.find(document => document.id === documentId);
   const submitted = record?.history.filter(log => log.action === 'Nomination Submitted')
     .sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
 
   return createPortal(<div onClick={event => event.stopPropagation()}>
-    <NominationActionModal presentation="document" application={application} title="Nomination Form" task="Read-only nomination record" tabs={application ? FORM_TABS : []} tabIdPrefix={tabIdPrefix} activeTab={activeTab} onTabChange={tab => setTabSelection({ applicationId, tab })} onClose={onClose} headerActions={application && <DownloadNominationButton key={applicationId} applicationId={applicationId} userRole={userRole} />}>
+    <NominationActionModal presentation="document" application={application} title={version ? `Nomination Form ? Version ${version}` : "Nomination Form"} task="Read-only nomination record" tabs={application ? FORM_TABS : []} tabIdPrefix={tabIdPrefix} activeTab={activeTab} onTabChange={tab => setTabSelection({ applicationId, tab })} onClose={onClose} headerActions={application && <DownloadNominationButton key={applicationId} applicationId={applicationId} userRole={userRole} version={version} />} footer={onRevise && !version && application?.revision_active ? <button type="button" className="rounded-lg bg-blue-700 px-4 py-2 font-semibold text-white" onClick={() => { onClose(); onRevise(); }}>Edit Nomination</button> : undefined}>
+      {userRole === 'ADMINISTRATOR' && currentApplication?.id === applicationId && (currentApplication.revision_request || currentApplication.has_archived_attachments) && <NominationVersionHistory applicationId={applicationId} version={version} onSelect={value => setVersionSelection({ applicationId, version: value })} />}
       {!record && !error && <p role="status" className="py-10 text-center text-sm text-slate-600">Loading nomination form…</p>}
       {error && <div role="alert" className="space-y-3 rounded-xl bg-red-50 p-5 text-sm text-red-800">
         <p>{error}</p>
@@ -63,7 +79,7 @@ export const NominationFormViewerModal: React.FC<{
             <span className="rounded-md border border-slate-200 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Read-only record</span>
           </div>
           <NominationFieldGrid columns={3} fields={[
-            ['Award category', undefined], ['Award year', application.award_year], ['Current status', application.status],
+            ['Nomination version', application.nomination_version || 1], ['Award year', application.award_year], ['Current status', application.status],
             ['Nomination classification', application.nomination_origin], ['Nomination type', application.nomination_type],
             ['Nomination date', recordedDate(application.date_of_nomination, true)], ['Processing stage', application.processing_stage], ['Submitted', recordedDate(submitted?.created_at)], ['Last updated', recordedDate(application.updated_at)],
           ]} />
@@ -77,6 +93,9 @@ export const NominationFormViewerModal: React.FC<{
             {application.required_action && <p className="safe-long-text"><span className="font-semibold text-slate-900">Required action: </span>{application.required_action}</p>}
             {application.remarks && <p className="safe-long-text whitespace-pre-wrap"><span className="font-semibold text-slate-900">Remarks: </span>{application.remarks}</p>}
           </div>}
+          <RevisionInstructions application={application} />
+          {version && currentApplication && <VersionComparison previous={application} current={currentApplication} />}
+          <HistoricalWorkflow application={application} />
           <details className="mt-4 text-sm">
             <summary className="w-fit cursor-pointer rounded-sm text-xs font-semibold text-blue-700 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">View full workflow</summary>
             <div className="mt-3"><StageProgressTracker currentStage={application.processing_stage} currentStatus={application.status} /></div>
@@ -94,7 +113,7 @@ export const NominationFormViewerModal: React.FC<{
         </NominationFormSection>
         <NominationFormSection number="02" title="Nominator Information">
           {userRole === 'EVALUATOR' ? <p className="rounded-lg bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">Nominator identity, submission account, and signature are restricted during scoring.</p>
-            : <NominationIdentityDetails application={application} showMissing presentation="document" />}
+            : <NominationIdentityDetails application={application} showMissing presentation="document" loadedSignature={{ signature, error: signatureError }} />}
         </NominationFormSection>
         </NominationTabPanel>
         <NominationTabPanel tabIdPrefix={tabIdPrefix} activeTab={activeTab} tab="justification">
@@ -106,6 +125,15 @@ export const NominationFormViewerModal: React.FC<{
         <NominationTabPanel tabIdPrefix={tabIdPrefix} activeTab={activeTab} tab="documents">
         <NominationFormSection number="04" title="Supporting Documents">
           <NominationDocuments application={application} onOpen={setDocumentId} presentation="document" />
+          {!!signature?.documents?.length && <div className="mt-5 space-y-2">
+            <h4 className="text-sm font-semibold">Signed attachment record</h4>
+            {signature.documents.map(document => <div key={document.id} className="rounded-lg bg-slate-50 p-3 text-xs">
+              <p className="font-semibold">{document.document_name}</p>
+              <p>{document.matches_official ? 'Matches the file recorded for this version.' : 'The file in Supporting Documents differs from the signed record.'}</p>
+              <p className="break-all">{document.sha256 ? `SHA-256 ${document.sha256}` : 'Digest unavailable'}</p>
+              {document.file_url ? <a href={document.file_url} className="font-semibold text-blue-700 underline">Download signed file</a> : <p>Signed file unavailable.</p>}
+            </div>)}
+          </div>}
         </NominationFormSection>
         </NominationTabPanel>
         <NominationTabPanel tabIdPrefix={tabIdPrefix} activeTab={activeTab} tab="submission">
@@ -127,10 +155,10 @@ export const NominationFormViewerModal: React.FC<{
   </div>, document.body);
 };
 
-export const NominationReferenceButton: React.FC<{ applicationId: string; referenceNumber: string; userRole: UserRole }> = ({ applicationId, referenceNumber, userRole }) => {
+export const NominationReferenceButton: React.FC<{ applicationId: string; referenceNumber: string; userRole: UserRole; onRevise?: () => void }> = ({ applicationId, referenceNumber, userRole, onRevise }) => {
   const [open, setOpen] = useState(false);
   return <>
     <button type="button" aria-haspopup="dialog" aria-label={`View nomination form ${referenceNumber}`} onClick={event => { event.stopPropagation(); setOpen(true); }} className="whitespace-nowrap rounded-sm text-left font-mono text-xs font-semibold leading-5 text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-800 hover:decoration-blue-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">{referenceNumber || 'Reference not recorded'}</button>
-    {open && <NominationFormViewerModal applicationId={applicationId} userRole={userRole} onClose={() => setOpen(false)} />}
+    {open && <NominationFormViewerModal applicationId={applicationId} userRole={userRole} onRevise={onRevise} onClose={() => setOpen(false)} />}
   </>;
 };

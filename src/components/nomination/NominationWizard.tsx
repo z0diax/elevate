@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { Application, Award, Office, UserProfile } from '../../types';
+import { Application, Award, NominationRevisionDraft, Office, UserProfile } from '../../types';
 import { praiseService } from '../../lib/api';
 import { showToast } from '../../lib/toast';
 import { 
@@ -19,6 +19,8 @@ import {
 import confetti from 'canvas-confetti';
 import { SignaturePad, SignatureStrokes } from './SignaturePad';
 import { pdfGenerator } from '../../lib/pdfGenerator';
+import { RevisionInstructions } from './NominationRevisionControls';
+import { RevisionAttachmentList } from './RevisionAttachmentList';
 import {
   clearNominationDraft,
   clearNominationDraftFiles,
@@ -36,6 +38,7 @@ interface NominationWizardProps {
   onNominationComplete: (appId: string) => void;
   onCancel: () => void;
   onSubmissionStateChange?: (isSubmitting: boolean) => void;
+  revision?: { application: Application; draft: NominationRevisionDraft };
 }
 
 type UploadedRequirement = {
@@ -69,24 +72,41 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
   onNominationComplete,
   onCancel,
   onSubmissionStateChange,
+  revision,
 }) => {
   offices = offices.filter(office => office.is_active);
+  const [revisionDraft, setRevisionDraft] = useState(revision?.draft);
+  const revisionApplication = revision?.application;
+  const detailsLocked = revisionDraft?.request.scope === 'attachments';
   const restoredDraft = React.useMemo(() => {
+    if (revision) {
+      const saved = { ...revision.application, ...revision.draft.details } as Application;
+      return {
+        submissionId: undefined, step: 1 as const, selectedAwardId: saved.award_id,
+        nomineeName: saved.nominee_name, employeeId: saved.employee_id, positionTitle: saved.position_title,
+        officeId: saved.office_id, divisionSection: saved.division_section, employmentCategory: saved.employment_category,
+        contactNumber: saved.contact_number, email: saved.email, barangay: saved.barangay, nominationType: saved.nomination_type,
+        nominatorName: saved.nominator_name, nominatorPosition: saved.nominator_position, nominatingOffice: saved.nominating_office,
+        nominatingOfficeId: saved.nominating_office_id, selfNomination: saved.nomination_origin === 'Self-Nominated' || saved.nominee_id === currentUser.id,
+        justification: saved.justification, accomplishments: saved.accomplishments, supportingNarrative: saved.supporting_narrative,
+      };
+    }
+
     const draft = readNominationDraft(currentUser.id);
     const server = draft?.submissionId ? praiseService.getApplications().find(application => application.id === `app-${draft.submissionId}` && application.status === 'Draft') : undefined;
     if (!draft || !server) return draft;
     return { ...draft, selectedAwardId: server.award_id, nomineeName: server.nominee_name, employeeId: server.employee_id || '', positionTitle: server.position_title, officeId: server.office_id, divisionSection: server.division_section || '', employmentCategory: server.employment_category, contactNumber: server.contact_number, email: server.email, barangay: server.barangay || '', nominationType: server.nomination_type, nominatorName: server.nominator_name, nominatorPosition: server.nominator_position, nominatingOffice: server.nominating_office, nominatingOfficeId: server.nominating_office_id, selfNomination: server.nomination_origin === 'Self-Nominated', justification: server.justification, accomplishments: server.accomplishments, supportingNarrative: server.supporting_narrative };
-  }, [currentUser.id]);
-  const [submissionId] = useState(() => restoredDraft?.submissionId || createSubmissionId());
+  }, [currentUser.id, revision]);
+  const [submissionId] = useState(() => revision ? '' : restoredDraft?.submissionId || createSubmissionId());
   const serverDraft = praiseService.getApplications().find(application => application.id === `app-${submissionId}` && application.status === 'Draft');
-  const legacyDraft = Boolean(serverDraft && !serverDraft.nomination_origin);
+  const legacyDraft = Boolean((revisionApplication || serverDraft) && !(revisionApplication || serverDraft)?.nomination_origin);
 
   const restoredAwardId = restoredDraft && awards.some(award => award.id === restoredDraft.selectedAwardId)
     ? restoredDraft.selectedAwardId
-    : awards[0]?.id || '';
+    : revisionApplication ? restoredDraft?.selectedAwardId || '' : awards[0]?.id || '';
   const restoredOfficeId = restoredDraft && offices.some(office => office.id === restoredDraft.officeId)
     ? restoredDraft.officeId
-    : currentUser.office_id || offices[0]?.id || '';
+    : revisionApplication ? restoredDraft?.officeId || '' : currentUser.office_id || offices[0]?.id || '';
 
   const [step, setStep] = useState<1 | 2 | 3 | 4>(restoredDraft?.step || 1);
 
@@ -125,19 +145,23 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
   const [submittedApp, setSubmittedApp] = useState<Application | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const [isRestoringFiles, setIsRestoringFiles] = useState(true);
+  const [revisionRemarks, setRevisionRemarks] = useState(revision?.draft.remarks || '');
+  const [savingRevision, setSavingRevision] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
   const submissionInProgress = useRef(false);
   const createdApplicationRef = useRef<Application | null>(serverDraft || null);
   const uploadedDocumentKeys = useRef(new Set<string>());
 
-  const selectedAward = awards.find(a => a.id === selectedAwardId) || awards[0];
-  const selectedOfficeObj = offices.find(o => o.id === officeId) || offices[0];
+  const selectedAward = awards.find(a => a.id === selectedAwardId) || (revision ? undefined : awards[0]);
+  const selectedOfficeObj = offices.find(o => o.id === officeId) || (revision ? undefined : offices[0]);
   const hasServerDraft = Boolean(createdApplicationRef.current)
     || praiseService.getApplications().some(application => application.id === `app-${submissionId}` && application.status === 'Draft');
 
   React.useEffect(() => {
-    if (submittedApp) return;
+    if (submittedApp || revision) return;
 
     const draft: NominationDraftData = {
       version: 1,
@@ -194,10 +218,12 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
     submissionId,
     submittedApp,
     supportingNarrative,
+    revision,
   ]);
 
   // Update document requirements when award changes
   React.useEffect(() => {
+    if (revision) { setIsRestoringFiles(false); return; }
     let cancelled = false;
     setIsRestoringFiles(true);
     const requirements = selectedAward?.document_requirements || [];
@@ -240,7 +266,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
       });
 
     return () => { cancelled = true; };
-  }, [currentUser.id, selectedAwardId, selectedAward?.document_requirements]);
+  }, [currentUser.id, selectedAwardId, selectedAward?.document_requirements, revision]);
 
   const handleFileUpload = (reqId: string, docName: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -295,14 +321,117 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
     }
   };
 
+  const revisionDetails = {
+    award_id: selectedAwardId, ...(revisionApplication?.nominee_id ? {} : { nominee_name: nomineeName.trim() }),
+    employee_id: employeeId.trim(), position_title: positionTitle.trim(), office_id: officeId,
+    division_section: divisionSection.trim(), employment_category: employmentCategory, contact_number: contactNumber.trim(),
+    email: email.trim(), barangay, nomination_type: nominationType, nominator_name: nominatorName.trim(),
+    nominator_position: nominatorPosition.trim(), ...(legacyDraft && !revisionApplication?.nominating_office_id ? {} : { nominating_office_id: nominatingOfficeId }),
+    justification: justification.trim(), accomplishments: accomplishments.trim(), supporting_narrative: supportingNarrative.trim(),
+  };
+  const serializedDraft = JSON.stringify({ details: detailsLocked ? undefined : revisionDetails, remarks: revisionRemarks });
+  const savedDraft = useRef(serializedDraft);
+  const isRevisionDirty = Boolean(revision && savedDraft.current !== serializedDraft);
+
+  React.useEffect(() => {
+    if (!isRevisionDirty || submittedApp) return;
+    const warnUnsaved = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', warnUnsaved);
+    return () => window.removeEventListener('beforeunload', warnUnsaved);
+  }, [isRevisionDirty, submittedApp]);
+
+  const saveRevision = async () => {
+    if (!revisionApplication || !revisionDraft || !isRevisionDirty) return revisionDraft;
+    setSavingRevision(true);
+    try {
+      const result = await praiseService.nominationRevision(revisionApplication.id, 'save_nomination_revision', {
+        revision_id: revisionDraft.request.id, generation: revisionDraft.generation, remarks: revisionRemarks,
+        ...(detailsLocked ? {} : { details: revisionDetails }),
+      });
+      if (!result.draft) throw new Error('This revision is no longer active.');
+      savedDraft.current = serializedDraft;
+      setRevisionDraft(result.draft);
+      return result.draft;
+    } finally {
+      setSavingRevision(false);
+    }
+  };
+
+  const reportRevisionError = (error: unknown) => setErrorMessage(error instanceof Error ? error.message : 'Unable to save this revision.');
+
+  const changeRevisionAttachment = async (requirementId: string, file?: File) => {
+    if (!revisionApplication || !revisionDraft || savingRevision) return;
+    if (file && (!/\.(pdf|docx|jpe?g|png)$/i.test(file.name) || file.size === 0 || file.size > 10 * 1024 * 1024)) {
+      setErrorMessage('Choose a non-empty PDF, DOCX, JPG, JPEG, or PNG file up to 10 MB.');
+      return;
+    }
+    setSavingRevision(true);
+    setErrorMessage('');
+    try {
+      if (file) {
+        setRevisionDraft(await praiseService.stageNominationRevisionFile(revisionApplication.id, revisionDraft, requirementId, file));
+      } else {
+        const result = await praiseService.nominationRevision(revisionApplication.id, 'remove_revision_attachment', {
+          revision_id: revisionDraft.request.id, generation: revisionDraft.generation,
+          ...(requirementId.startsWith('document:') ? { document_id: requirementId.slice('document:'.length) } : { requirement_id: requirementId }),
+        });
+        if (!result.draft) throw new Error('This revision is no longer active.');
+        setRevisionDraft(result.draft);
+      }
+    } catch (error) {
+      reportRevisionError(error);
+    } finally {
+      setSavingRevision(false);
+    }
+  };
+
   const handleCancel = async () => {
-    if (submissionInProgress.current) return;
-    if (!hasServerDraft) await clearSavedDraft();
+    if (submissionInProgress.current || savingRevision) return;
+    if (revision) {
+      try { await saveRevision(); }
+      catch (error) { reportRevisionError(error); return; }
+    } else if (!hasServerDraft) await clearSavedDraft();
     onCancel();
   };
 
+  const closeRevision = useRef(handleCancel);
+  closeRevision.current = handleCancel;
+  React.useEffect(() => {
+    if (!revision) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    dialogRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        void closeRevision.current();
+      }
+      if (event.key !== 'Tab') return;
+      const dialog = dialogRef.current;
+      const controls = [...(dialog?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], summary') || [])]
+        .filter(control => control.getClientRects().length);
+      if (!controls.length) return;
+      const atBoundary = event.shiftKey ? document.activeElement === controls[0] : document.activeElement === controls.at(-1);
+      if (atBoundary || (event.shiftKey && document.activeElement === dialog)) {
+        event.preventDefault();
+        (event.shiftKey ? controls.at(-1) : controls[0])?.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus();
+    };
+  }, [revision]);
+
+  const revisionDialog = revision ? { role: 'dialog', 'aria-modal': true, 'aria-labelledby': 'nomination-revision-title', tabIndex: -1 } as const : {};
+  React.useEffect(() => { if (revision && submittedApp) dialogRef.current?.focus(); }, [revision, submittedApp]);
+
   // Validation
   const validateStep1 = () => {
+    if (detailsLocked) return '';
     if (!nominatorName.trim()) return 'Nominator full name is required.';
     if (!legacyDraft && !offices.some(office => office.id === nominatingOfficeId)) return 'Choose an active nominator office.';
     if (!offices.some(office => office.id === officeId)) return 'Choose an active nominee office.';
@@ -316,6 +445,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
   };
 
   const validateStep2 = () => {
+    if (detailsLocked) return '';
     if (!justification.trim() || justification.length < 20) {
       return 'Please provide a thorough justification for the nomination (minimum 20 characters).';
     }
@@ -330,6 +460,19 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
 
   const validateStep3 = () => {
     if (isRestoringFiles) return 'Please wait while saved attachments are restored.';
+    if (revisionApplication && revisionDraft) {
+      for (const requirement of selectedAward?.document_requirements || []) {
+        if (!requirement.is_mandatory) continue;
+        const file = revisionDraft.attachments[requirement.id];
+        const existing = revisionApplication.documents?.find(document => document.requirement_id === requirement.id);
+        if (!(file === undefined ? existing : file)?.file_url) {
+          return revisionDraft.request.scope === 'details'
+            ? 'A required attachment is missing. Ask the Administrator to authorize attachment changes.'
+            : `Mandatory document missing: ${requirement.document_name}`;
+        }
+      }
+      return '';
+    }
     const mandatoryReqs = uploadedDocs.filter(doc => doc.is_mandatory);
     for (const req of mandatoryReqs) {
       if (!req.is_uploaded || !req.file || req.file.size === 0) {
@@ -339,7 +482,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
     return '';
   };
 
-  const handleNext = () => {
+  const handleNext = async () => {
     setErrorMessage('');
     if (step === 1) {
       const err = validateStep1();
@@ -348,6 +491,8 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
     } else if (step === 2) {
       const err = validateStep2();
       if (err) { setErrorMessage(err); return; }
+      try { await saveRevision(); }
+      catch (error) { reportRevisionError(error); return; }
       setStep(3);
     } else if (step === 3) {
       const err = validateStep3();
@@ -373,6 +518,16 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
     onSubmissionStateChange?.(true);
 
     try {
+      if (revisionApplication && revisionDraft) {
+        const draft = await saveRevision();
+        const result = await praiseService.nominationRevision(revisionApplication.id, 'finalize_nomination_revision', {
+          revision_id: revisionDraft.request.id, generation: draft?.generation,
+          signature_strokes: signatureStrokes, signature_confirmed: signatureConfirmed, remarks: revisionRemarks.trim(),
+        });
+        setSubmittedApp(result.application);
+        showToast(`Nomination ${result.application.application_number} revised and resubmitted.`);
+        return;
+      }
       const createdApplication = createdApplicationRef.current || await praiseService.submitNomination({
         submission_id: submissionId,
         award_id: selectedAwardId,
@@ -451,13 +606,13 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
   // If submitted successfully
   if (submittedApp) {
     return (
-      <div id="nomination-success-card" className="max-w-3xl mx-auto bg-white rounded-xl p-8 border border-slate-200 shadow-xs text-center space-y-6">
+      <div ref={dialogRef} {...revisionDialog} id="nomination-success-card" className="max-w-3xl mx-auto bg-white rounded-xl p-8 border border-slate-200 shadow-xs text-center space-y-6">
         <div className="w-16 h-16 bg-green-50 text-green-700 rounded-full flex items-center justify-center mx-auto ring-8 ring-green-50">
           <Sparkles size={32} />
         </div>
 
         <div>
-          <h2 className="text-2xl font-bold text-slate-900">Nomination Successfully Filed!</h2>
+          <h2 id={revision ? "nomination-revision-title" : undefined} className="text-2xl font-bold text-slate-900">{revision ? 'Revised Nomination Submitted' : 'Nomination Successfully Filed!'}</h2>
           <p className="text-sm text-slate-500 mt-1">
             Your nomination has been recorded in the City of Tacloban PRAISE System.
           </p>
@@ -487,7 +642,11 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
         <div className="flex flex-wrap items-center justify-center gap-4 pt-4">
           <button
             id="download-summary-dossier-btn"
-            onClick={() => pdfGenerator.generateApplicationSummary(submittedApp, selectedAward, selectedOfficeObj)}
+            onClick={() => {
+              if (!revision) pdfGenerator.generateApplicationSummary(submittedApp, selectedAward, selectedOfficeObj);
+              else void import('../../lib/nominationPdf').then(({ downloadNominationPdf }) => downloadNominationPdf(submittedApp.id, currentUser.role))
+                .catch(error => showToast(error instanceof Error ? error.message : 'Unable to download the revised nomination.', 'error'));
+            }}
             disabled={isSubmitting}
             className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-md inline-flex items-center gap-2 shadow-xs transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
           >
@@ -509,12 +668,12 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
   }
 
   return (
-    <div id="nomination-wizard-container" className="max-w-4xl mx-auto bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+    <div ref={dialogRef} {...revisionDialog} id="nomination-wizard-container" className="max-w-4xl mx-auto bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
       {/* Wizard Header */}
       <div className="px-6 py-5 bg-slate-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">Official Form A-1</span>
-          <h2 className="text-lg font-bold text-white">Tacloban PRAISE Nomination Portal</h2>
+          <h2 id={revision ? "nomination-revision-title" : undefined} className="text-lg font-bold text-white">{revision ? 'Revise Nomination' : 'Tacloban PRAISE Nomination Portal'}</h2>
           <p className="text-xs text-slate-300 mt-0.5">Step {step} of 4: {
             step === 1 ? 'Nominee Profile & Award' :
             step === 2 ? 'Justification & Accomplishments' :
@@ -562,9 +721,12 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
       )}
 
       <div className="p-6 md:p-8 space-y-6">
+        {revisionApplication && <RevisionInstructions application={revisionApplication} />}
+        {revisionApplication && <p className="mb-4 mt-3 text-xs text-slate-600">Application {revisionApplication.application_number}. The original submitting account, nominee account link, and self-nomination classification are fixed. The official nomination stays on record until you sign and submit your changes.</p>}
+
         {/* STEP 1: NOMINEE PROFILE & AWARD SELECTION */}
         {step === 1 && (
-          <fieldset disabled={hasServerDraft || isSubmitting} className="space-y-6">
+          <fieldset disabled={hasServerDraft || isSubmitting || savingRevision || detailsLocked} className="space-y-6">
             <div>
               <label htmlFor="award-category-select" className="block text-xs font-bold text-slate-900 uppercase tracking-wider mb-2">
                 1. Select Award Category *
@@ -647,7 +809,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
                   {legacyDraft ? <label className="text-xs font-semibold">Office / Department<input readOnly value={nominatingOffice} className="mt-1 w-full rounded-md border border-slate-300 bg-slate-50 p-2.5" /></label> : <label className="text-xs font-semibold">Office / Department *<select required value={nominatingOfficeId} onChange={event => { setNominatingOfficeId(event.target.value); setNominatingOffice(offices.find(office => office.id === event.target.value)?.name || ''); }} className="mt-1 w-full rounded-md border border-slate-300 bg-slate-50 p-2.5"><option value="">Select office</option>{offices.map(office => <option key={office.id} value={office.id}>{office.name} ({office.code})</option>)}</select></label>}
                   <label className="text-xs font-semibold">Position / Designation<input value={nominatorPosition} onChange={event => setNominatorPosition(event.target.value)} className="mt-1 w-full rounded-md border border-slate-300 bg-slate-50 p-2.5" /></label>
                 </div>
-                <label className="flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={selfNomination} onChange={event => {
+                <label className="flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={selfNomination} disabled={Boolean(revision)} onChange={event => {
                   const self = event.target.checked; setSelfNomination(self);
                   if (self) { setNomineeName(currentUser.full_name); setEmployeeId(currentUser.employee_id || ''); setPositionTitle(currentUser.position_title || ''); setOfficeId(currentUser.office_id || ''); setContactNumber(currentUser.contact_number || ''); setEmail(currentUser.email); setNominationType('Individual'); }
                   else { setNomineeName(''); setEmployeeId(''); setPositionTitle(''); setOfficeId(''); setContactNumber(''); setEmail(''); }
@@ -668,7 +830,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
                     type="text"
                     required
                     placeholder="e.g. Juan P. Dela Cruz"
-                    disabled={selfNomination}
+                    disabled={selfNomination || Boolean(revisionApplication?.nominee_id)}
                     value={nomineeName}
                     onChange={e => setNomineeName(e.target.value)}
                     className="w-full text-xs p-2.5 rounded-md border border-slate-300 bg-slate-50 text-slate-900 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
@@ -712,6 +874,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
                     className="w-full text-xs p-2.5 rounded-md border border-slate-300 bg-slate-50 text-slate-900 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
                   >
                     <option value="">Select office</option>
+                    {revisionApplication && officeId === revisionApplication.office_id && !selectedOfficeObj && <option value={officeId} disabled>{revisionApplication.office_name}</option>}
                     {offices.map(off => (
                       <option key={off.id} value={off.id}>{off.name} ({off.code})</option>
                     ))}
@@ -796,7 +959,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
 
         {/* STEP 2: JUSTIFICATION & ACCOMPLISHMENTS */}
         {step === 2 && (
-          <fieldset disabled={hasServerDraft || isSubmitting} className="space-y-5">
+          <fieldset disabled={hasServerDraft || isSubmitting || savingRevision || detailsLocked} className="space-y-5">
             <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
               <FileText size={16} className="text-blue-600" />
               <span>Nomination Justification & Merits</span>
@@ -875,7 +1038,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
               </p>
             </div>
 
-            <div className="space-y-3">
+            {revisionApplication && revisionDraft ? <RevisionAttachmentList application={revisionApplication} award={selectedAward} draft={revisionDraft} disabled={savingRevision || isSubmitting} onUpload={(id, file) => void changeRevisionAttachment(id, file)} onRemove={id => void changeRevisionAttachment(id)} /> : <div className="space-y-3">
               {uploadedDocs.map((doc, idx) => (
                 <div
                   key={doc.requirement_id || idx}
@@ -915,7 +1078,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
                   </div>
                 </div>
               ))}
-            </div>
+            </div>}
           </div>
         )}
 
@@ -939,7 +1102,7 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
                 </div>
                 <div>
                   <span className="text-slate-500">Office / Barangay:</span>
-                  <p className="font-semibold text-slate-800">{selectedOfficeObj?.name} • {barangay}</p>
+                  <p className="font-semibold text-slate-800">{selectedOfficeObj?.name || revisionApplication?.office_name} • {barangay}</p>
                 </div>
                 <div>
                   <span className="text-slate-500">Position / Category:</span>
@@ -957,11 +1120,20 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
               <div className="pt-3 border-t border-slate-200 text-xs">
                 <span className="text-slate-500 font-semibold">Attached Supporting Files:</span>
                 <p className="text-slate-800 mt-1 font-medium">
-                  {uploadedDocs.filter(d => d.is_uploaded).length} of {uploadedDocs.length} documentary requirements ready.
+                  {revision ? 'Review the attachment versions below before signing.' : `${uploadedDocs.filter(d => d.is_uploaded).length} of ${uploadedDocs.length} documentary requirements ready.`}
                 </p>
               </div>
             </div>
 
+            {revisionApplication && revisionDraft && <>
+              <dl className="grid gap-3 rounded-xl border border-slate-200 p-4 text-sm sm:grid-cols-2">
+                {Object.entries(revisionDetails).filter(([key]) => !['award_id', 'office_id', 'nominating_office_id'].includes(key)).map(([key, value]) => <div key={key}><dt className="font-semibold capitalize">{key.replaceAll('_', ' ')}</dt><dd className="whitespace-pre-wrap break-words">{value || 'Not recorded'}</dd></div>)}
+              </dl>
+              <RevisionAttachmentList application={revisionApplication} award={selectedAward} draft={revisionDraft} disabled />
+              <label className="block text-sm font-semibold">Resubmission remarks
+                <textarea rows={3} value={revisionRemarks} onChange={event => setRevisionRemarks(event.target.value)} disabled={isSubmitting} className="mt-1 block w-full rounded-lg border border-slate-300 p-2" />
+              </label>
+            </>}
             <div className="rounded-xl border border-slate-200 p-4 text-xs space-y-2">
               <h3 className="text-sm font-bold">Nominator and electronic signature</h3>
               <p>{nominatorName} / {nominatorPosition} / {legacyDraft ? nominatingOffice : offices.find(office => office.id === nominatingOfficeId)?.name}</p>
@@ -985,8 +1157,8 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
             <button
               id="wizard-prev-btn"
               type="button"
-              onClick={() => setStep((step - 1) as any)}
-              disabled={isSubmitting}
+              onClick={() => { setStep((step - 1) as 1 | 2 | 3); setSignatureStrokes([]); setSignatureConfirmed(false); }}
+              disabled={isSubmitting || savingRevision}
               className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-md inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
             >
               <ArrowLeft size={14} />
@@ -999,16 +1171,17 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
               disabled={isSubmitting}
               className="px-4 py-2 text-slate-500 hover:text-slate-800 text-xs font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {hasServerDraft ? 'Close (draft saved)' : 'Cancel'}
+              {revision ? 'Save & Close' : hasServerDraft ? 'Close (draft saved)' : 'Cancel'}
             </button>
           )}
 
+          {revision && step > 1 && <button type="button" onClick={() => void handleCancel()} disabled={savingRevision || isSubmitting} className="px-3 py-2 text-xs font-semibold text-slate-700">Save & Close</button>}
           {step < 4 ? (
             <button
               id="wizard-next-btn"
               type="button"
-              onClick={handleNext}
-              disabled={isSubmitting}
+              onClick={() => void handleNext()}
+              disabled={isSubmitting || savingRevision}
               className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-md inline-flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
             >
               <span>Continue</span>
@@ -1019,15 +1192,22 @@ export const NominationWizard: React.FC<NominationWizardProps> = ({
               id="wizard-submit-btn"
               type="button"
               onClick={handleSubmitNomination}
-              disabled={isSubmitting || isRestoringFiles}
+              disabled={isSubmitting || isRestoringFiles || savingRevision}
               className="px-6 py-2.5 bg-green-600 hover:bg-green-700 text-white text-xs font-semibold rounded-md inline-flex items-center gap-2 shadow-xs transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-70"
             >
               <Sparkles size={16} />
-              <span>{isSubmitting ? 'Submitting...' : isRestoringFiles ? 'Restoring attachments...' : 'Officially Submit Nomination'}</span>
+              <span>{isSubmitting ? 'Submitting...' : isRestoringFiles ? 'Restoring attachments...' : revision ? 'Submit Revised Nomination' : 'Officially Submit Nomination'}</span>
             </button>
           )}
         </div>
-        {isSubmitting && <p className="mt-3 text-right text-xs font-semibold text-blue-700" role="status">{uploadProgress || 'Creating nomination draft...'}</p>}
+        {isRevisionDirty && errorMessage && !savingRevision && !isSubmitting && <div className="mt-3 space-y-2 text-xs">
+          {confirmDiscard ? <>
+            <p>Unsaved edits on this screen will be discarded. Your last saved draft will remain available.</p>
+            <button type="button" className="rounded-md border border-red-200 px-3 py-2 font-semibold text-red-700" onClick={onCancel}>Discard Unsaved Edits and Close</button>
+          </> : <button type="button" className="font-semibold text-slate-700 underline" onClick={() => setConfirmDiscard(true)}>Close without saving</button>}
+        </div>}
+        {savingRevision && <p role="status" className="mt-3 text-xs text-blue-700">Saving revision draft...</p>}
+        {isSubmitting && <p className="mt-3 text-right text-xs font-semibold text-blue-700" role="status">{uploadProgress || (revision ? 'Submitting signed revision...' : 'Creating nomination draft...')}</p>}
       </div>
     </div>
   );

@@ -3,6 +3,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/config/cors.php';
 require_once __DIR__ . '/config/session_auth.php';
 require_once __DIR__ . '/config/database_storage.php';
+require_once __DIR__ . '/services/NominationRevisionPolicy.php';
 
 if (!database_file_storage()) sendResponse(404, [], 'Chunked uploads are not enabled.');
 $db = storage_database();
@@ -17,11 +18,10 @@ if (($_GET['action'] ?? '') === 'start') {
     if ($target === 'certificate' && !in_array($actor['role'], ['ADMINISTRATOR', 'SECRETARIAT'], true)) sendResponse(403, [], 'Not authorized.');
     $fields = $data['fields'] ?? [];
     if (!is_array($fields)) sendResponse(400, [], 'Invalid upload fields.');
-    requireFields($fields, $target === 'documents' ? ['application_id', 'document_id', 'requirement_id', 'document_name'] : []);
+    requireFields($fields, $target === 'documents' ? ['application_id', 'document_id', 'requirement_id', 'document_name', 'revision_id', 'generation'] : []);
     if ($target === 'documents') {
         $application = require_application_access($db, $actor, requireId($fields['application_id'] ?? '', 'application ID'));
-        if ($application['nominator_id'] !== $actor['id']) sendResponse(403, [], 'Only the original filer can upload documents.');
-        if (!in_array($application['status'], ['Draft', 'Returned for Revision', 'Incomplete'], true)) sendResponse(409, [], 'Attachments cannot be changed at this stage.');
+        authorize_nomination_upload($db, $application, $actor, optionalId($fields['document_id'] ?? null, 'document ID') ?? '', optionalId($fields['revision_id'] ?? null, 'revision ID'));
     }
     $name = requireText($data['file_name'] ?? '', 'file name', 255, true);
     $allowed = $target === 'documents' ? ['pdf', 'docx', 'jpg', 'jpeg', 'png'] : ['jpg', 'jpeg', 'png', 'webp'];

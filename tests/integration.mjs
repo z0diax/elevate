@@ -440,6 +440,166 @@ async function main() {
     expect(await action(app.id, 'return_for_revision', 'filer', { remarks: 'Unauthorized' }), 403, 'filer return');
     expect(await request(`/api/applications.php?id=${app.id}`, { actor: 'admin', method: 'DELETE', json: {} }), 200, 'delete revision fixture');
   });
+
+  await test('ordinary correction permits flagged endorsement rejections and retains signed file bytes', async () => {
+    const app = await createNomination();
+    const upload = (filename, bytes, documentId = '') => request('/api/documents.php', {
+      method: 'POST', actor: 'filer', form: makeForm(app.id, filename, bytes, id('requirement-one'), documentId),
+    });
+    const document = expect(await upload('original.pdf', pdf), 201, 'original attachment');
+    expect(await action(app.id, 'finalize_submission', 'filer'), 200, 'official submission');
+    const original = expect(await request(`/api/applications.php?action=signature&id=${app.id}`, { actor: 'filer' }), 200, 'original signature');
+    expect(await action(app.id, 'inspect_document', 'head', { document_id: document.id, status: 'Head Rejected', remarks: 'Please replace the attachment.' }), 200, 'flag for correction');
+    const rejected = expect(await action(app.id, 'endorse', 'head', { decision: 'Rejected', remarks: 'The attachment needs correction.' }), 200, 'endorsement rejected');
+    assert.equal(rejected.can_correct, undefined);
+    const filerView = expect(await request(`/api/applications.php?id=${app.id}`, { actor: 'filer' }), 200, 'filer correction eligibility');
+    assert.equal(filerView.can_correct, true);
+    expect(await upload('new.pdf', pdf), 409, 'ordinary correction cannot add documents');
+    expect(await upload('replacement.png', png, document.id), 201, 'replace flagged attachment');
+    expect(await upload('another.png', png, document.id), 409, 'ordinary correction cannot replace unflagged attachments');
+    const resubmitted = expect(await action(app.id, 'resubmit', 'filer', { remarks: 'Attachment replaced.' }), 200, 'ordinary resubmission');
+    assert.equal(resubmitted.status, 'For Endorsement');
+    assert.equal(resubmitted.documents[0].status, 'Submitted');
+    const signature = expect(await request(`/api/applications.php?action=signature&id=${app.id}`, { actor: 'filer' }), 200, 'signed attachment archive');
+    assert.equal(signature.sha256, original.sha256);
+    assert.equal(signature.documents[0].matches_official, false);
+    assert.equal(signature.documents[0].sha256, createHash('sha256').update(pdf).digest('hex'));
+    const download = await request('/' + signature.documents[0].file_url, { actor: 'filer' });
+    assert.equal(download.status, 200);
+    assert.deepEqual(download.raw, pdf);
+    expect(await request('/' + signature.documents[0].file_url, { actor: 'other-filer' }), 404, 'signed attachment authorization');
+  });
+
+  await test('administrator revision authorization, suspension, cancellation, and draft generation', async () => {
+    const app = await createNomination('filer', { nominee_id: id('other-filer') });
+    const payload = { scope: 'attachments', instructions: 'Replace the original supporting attachment.' };
+    expect(await action(app.id, 'require_nomination_revision', 'admin', payload), 409, 'draft revision blocked');
+    const document = expect(await request('/api/documents.php', { method: 'POST', actor: 'filer', form: makeForm(app.id, 'original.pdf', pdf) }), 201, 'initial attachment');
+    expect(await action(app.id, 'finalize_submission', 'filer'), 200, 'initial submission');
+    expect(await action(app.id, 'require_nomination_revision', 'head', payload), 403, 'non-admin request');
+    expect(await action(app.id, 'require_nomination_revision', 'admin', { ...payload, instructions: ' ' }), 400, 'request instructions required');
+    expect(await action(app.id, 'require_nomination_revision', 'admin', { ...payload, scope: 'anything' }), 400, 'unknown scope');
+    const results = await Promise.all([action(app.id, 'require_nomination_revision', 'admin', payload), action(app.id, 'require_nomination_revision', 'admin', payload)]);
+    assert.deepEqual(results.map(result => result.status).sort(), [200, 409]);
+    const issued = results.find(result => result.status === 200).data.data.application;
+    assert.equal(issued.status, 'Returned for Revision');
+    const revision_id = issued.revision_request.id;
+    const inbox = expect(await request('/api/notifications.php', { actor: 'filer' }), 200, 'filer notifications');
+    assert.equal(inbox.filter(notification => notification.application_id === app.id && notification.title === 'Nomination Revision Required').length, 1);
+    expect(await action(app.id, 'start_nomination_revision', 'other-filer', { revision_id }), 403, 'linked nominee cannot edit');
+    expect(await action(app.id, 'cancel_nomination_revision', 'head', { revision_id, reason: 'No longer needed.' }), 403, 'non-admin cancellation');
+    expect(await action(app.id, 'inspect_document', 'head', { document_id: document.id, status: 'Head Approved' }), 409, 'suspended head action');
+    expect(await action(app.id, 'resubmit', 'filer'), 409, 'ordinary resubmission suspended');
+    const started = expect(await action(app.id, 'start_nomination_revision', 'filer', { revision_id }), 200, 'start revision');
+    assert.equal(started.draft.request.status, 'In Progress');
+    expect(await action(app.id, 'save_nomination_revision', 'filer', { revision_id, generation: started.draft.generation, details: { justification: 'Unauthorized edit' } }), 403, 'attachments-only details restriction');
+    const saved = expect(await action(app.id, 'save_nomination_revision', 'filer', {
+      revision_id, generation: started.draft.generation, remarks: 'These are staged resubmission remarks.',
+    }), 200, 'save remarks in an attachment-only draft').draft;
+    assert.equal(saved.remarks, 'These are staged resubmission remarks.');
+    const replacement = makeForm(app.id, 'cancelled.png', png);
+    replacement.set('revision_id', revision_id);
+    replacement.set('generation', String(saved.generation));
+    const staged = expect(await request('/api/documents.php', { method: 'POST', actor: 'filer', form: replacement }), 201, 'stage attachment before cancellation');
+    const stagedUrl = '/' + staged.attachments[id('requirement-one')].file_url;
+    assert.deepEqual((await request(stagedUrl, { actor: 'filer' })).raw, png);
+    const cancelled = expect(await action(app.id, 'cancel_nomination_revision', 'admin', { revision_id, reason: 'Attachment approved for continued processing.' }), 200, 'cancel active revision').application;
+    assert.equal(cancelled.status, 'For Endorsement');
+    assert.equal(cancelled.revision_active, false);
+    assert.equal(cancelled.revision_request.status, 'Cancelled');
+    expect(await request(stagedUrl, { actor: 'filer' }), 404, 'cancelled draft file inaccessible');
+    expect(await action(app.id, 'start_nomination_revision', 'filer', { revision_id }), 409, 'cannot edit cancelled revision');
+    expect(await action(app.id, 'inspect_document', 'head', { document_id: document.id, status: 'Head Approved' }), 200, 'head access restored');
+  });
+
+  await test('scoped revision stages changes, re-signs the same nomination, and preserves official history', async () => {
+    const app = await createNomination();
+    const document = expect(await request('/api/documents.php', { method: 'POST', actor: 'filer', form: makeForm(app.id, 'original.pdf', pdf) }), 201, 'original attachment');
+    expect(await action(app.id, 'finalize_submission', 'filer'), 200, 'original submission');
+    const original = expect(await request(`/api/applications.php?action=signature&id=${app.id}`, { actor: 'filer' }), 200, 'original signature');
+    const requireRevision = async scope => expect(await action(app.id, 'require_nomination_revision', 'admin', { scope, instructions: 'Correct the award category and supporting evidence.' }), 200, 'require revision').application.revision_request.id;
+    const upload = (revisionId, generation, requirement, file = 'revised.png', bytes = png, documentId = '') => {
+      const form = makeForm(app.id, file, bytes, requirement, documentId);
+      form.set('revision_id', revisionId);
+      form.set('generation', String(generation));
+      return request('/api/documents.php', { method: 'POST', actor: 'filer', form });
+    };
+    const save = (revision_id, generation, details) => action(app.id, 'save_nomination_revision', 'filer', { revision_id, generation, details });
+    const finalize = (revision_id, generation, sign = true) => action(app.id, 'finalize_nomination_revision', 'filer', {
+      revision_id, generation, signature_confirmed: sign, signature_strokes: [[[0.2, 0.3], [0.4, 0.5], [0.8, 0.2]]], remarks: 'Corrected award and evidence.',
+    });
+    const details = { award_id: id('award-two'), office_id: id('office-two'), position_title: 'Revised Position' };
+    let revisionId = await requireRevision('details');
+    expect(await upload(revisionId, 0, id('requirement-one')), 403, 'details-only attachment restriction');
+    expect(await save(revisionId, 0, { ...details, nominator_id: id('other-filer') }), 400, 'ownership field rejected');
+    const detailDraft = expect(await save(revisionId, 0, details), 200, 'save details-only award edit').draft;
+    expect(await finalize(revisionId, detailDraft.generation), 409, 'incompatible award requires attachment authorization');
+    expect(await action(app.id, 'cancel_nomination_revision', 'admin', { revision_id: revisionId, reason: 'Expanded to include attachments.' }), 200, 'cancel old scope');
+
+    revisionId = await requireRevision('both');
+    expect(await action(app.id, 'start_nomination_revision', 'filer', { revision_id: revisionId }), 200, 'start combined revision');
+    const saved = expect(await save(revisionId, 0, details), 200, 'stage revised details').draft;
+    expect(await save(revisionId, 0, { position_title: 'Overwritten' }), 409, 'stale draft rejected');
+    expect(await upload(revisionId, saved.generation, id('requirement-one')), 400, 'previous award requirement disallowed');
+    expect(await upload(revisionId, saved.generation, id('requirement-two'), 'unsafe.png', pdf), 400, 'MIME mismatch rejected');
+    expect(await upload(revisionId, saved.generation, id('requirement-two'), 'wrong.png', png, document.id), 400, 'cannot pass an official document ID into staging');
+    expect(await finalize(revisionId, saved.generation), 409, 'required new attachment cannot be omitted');
+    const staged = expect(await upload(revisionId, saved.generation, id('requirement-two')), 201, 'stage required attachment');
+    const stagedFile = staged.attachments[id('requirement-two')];
+    assert.equal(stagedFile.file_name, 'revised.png');
+    expect(await request('/' + stagedFile.file_url, { actor: 'admin' }), 404, 'administrator cannot download staged file');
+    assert.deepEqual((await request('/' + stagedFile.file_url, { actor: 'filer' })).raw, png);
+    const withOptional = expect(await upload(revisionId, staged.generation, id('requirement-optional')), 201, 'stage optional attachment');
+    expect(await action(app.id, 'remove_revision_attachment', 'filer', { revision_id: revisionId, generation: withOptional.generation, requirement_id: id('requirement-two') }), 409, 'required attachment cannot be removed');
+    const removal = expect(await action(app.id, 'remove_revision_attachment', 'filer', { revision_id: revisionId, generation: withOptional.generation, requirement_id: id('requirement-optional') }), 200, 'stage optional removal').draft;
+    const resumed = expect(await action(app.id, 'start_nomination_revision', 'filer', { revision_id: revisionId }), 200, 'resume draft').draft;
+    assert.equal(resumed.details.position_title, 'Revised Position');
+    assert.equal(resumed.attachments[id('requirement-optional')], null);
+    assert.equal(resumed.generation, removal.generation);
+    const stillOfficial = expect(await request(`/api/applications.php?action=form&id=${app.id}`, { actor: 'filer' }), 200, 'official information untouched').application;
+    assert.equal(stillOfficial.award_id, id('award-one'));
+    assert.equal(stillOfficial.documents[0].id, document.id);
+    expect(await finalize(revisionId, resumed.generation, false), 400, 'fresh signature confirmation required');
+    php('tests/integration_db.php', 'block-revision-finalization', app.id);
+    try {
+      expect(await finalize(revisionId, resumed.generation), 500, 'simulated database failure after official writes');
+      const afterFailure = expect(await request(`/api/applications.php?id=${app.id}`, { actor: 'admin' }), 200, 'official record after rollback');
+      assert.equal(afterFailure.award_id, id('award-one'));
+      assert.equal(afterFailure.nomination_version, 1);
+      assert.equal(afterFailure.revision_active, true);
+      assert.equal(afterFailure.documents[0].id, document.id);
+      assert.deepEqual((await request('/' + stagedFile.file_url, { actor: 'filer' })).raw, png);
+    } finally {
+      php('tests/integration_db.php', 'unblock-revision-finalization');
+    }
+    const submitted = await Promise.all([finalize(revisionId, resumed.generation), finalize(revisionId, resumed.generation)]);
+    assert.deepEqual(submitted.map(result => result.status).sort(), [200, 409]);
+    const official = submitted.find(result => result.status === 200).data.data.application;
+    assert.equal(official.id, app.id);
+    assert.equal(official.application_number, app.application_number);
+    assert.equal(official.nomination_version, 2);
+    assert.equal(official.status, 'For Endorsement');
+    assert.equal(official.award_id, id('award-two'));
+    assert.equal(official.office_id, id('office-two'));
+    assert.equal(official.documents[0].file_name, 'revised.png');
+    assert.equal(official.documents.length, 1);
+    expect(await action(app.id, 'cancel_nomination_revision', 'admin', { revision_id: revisionId, reason: 'Too late.' }), 409, 'completed revision cannot be cancelled');
+    const latest = expect(await request(`/api/applications.php?action=signature&id=${app.id}`, { actor: 'filer' }), 200, 'new signature');
+    assert.notEqual(latest.sha256, original.sha256);
+    assert.equal(latest.signed_snapshot.version_number, 2);
+    assert.equal(latest.signed_snapshot.signed_at, latest.signed_at);
+    assert.equal(latest.documents[0].sha256, createHash('sha256').update(png).digest('hex'));
+    const history = expect(await request(`/api/applications.php?action=revision_history&id=${app.id}`, { actor: 'admin' }), 200, 'admin history');
+    assert.deepEqual(history.versions.map(Number), [1]);
+    assert.deepEqual(history.requests.map(item => item.status), ['Completed', 'Cancelled']);
+    const historical = expect(await request(`/api/applications.php?action=signature&version=1&id=${app.id}`, { actor: 'admin' }), 200, 'historical signature');
+    assert.equal(historical.sha256, original.sha256);
+    assert.deepEqual(historical.signed_snapshot, original.signed_snapshot);
+    assert.deepEqual((await request('/' + historical.documents[0].file_url, { actor: 'admin' })).raw, pdf);
+    expect(await request(`/api/applications.php?action=form&version=1&id=${app.id}`, { actor: 'filer' }), 403, 'version history is administrator only');
+    expect(await action(app.id, 'inspect_document', 'head', { document_id: official.documents[0].id, status: 'Head Approved' }), 403, 'old office cannot review');
+    expect(await action(app.id, 'inspect_document', 'other-head', { document_id: official.documents[0].id, status: 'Head Approved' }), 200, 'new office reviews revised nomination');
+  });
   await test('verification and initial assignment create a three-person snapshot', async () => {
     expect(await action(first.id, 'assign_evaluators', 'secretary'), 409, 'unverified route');
     expect(await action(first.id, 'verify_document', 'filer', { document_id: firstDoc.id, status: 'Verified' }), 403, 'filer verification');
@@ -512,6 +672,9 @@ async function main() {
     const returned = expect(await action(second.id, 'return_for_revision', 'D', { remarks: 'Synthetic evaluator revision' }), 200, 'active evaluator return');
     assert.equal(returned.status, 'Returned for Revision');
     assert.equal(returned.remarks, 'Synthetic evaluator revision');
+    const resumed = expect(await action(second.id, 'resubmit', 'filer', { remarks: 'Clarification for the assigned evaluators.' }), 200, 'ordinary evaluator correction');
+    assert.equal(resumed.status, 'For Evaluation');
+    assert.equal(resumed.processing_stage, 'Evaluation');
     expect(await request(`/api/applications.php?id=${second.id}`, { actor: 'admin', method: 'DELETE', json: {} }), 200, 'delete returned nomination');
   });
   await test('scoring completes only after every active evaluator submits', async () => {
@@ -609,9 +772,11 @@ async function main() {
     expect(await action(first.id, 'deliberation', 'filer', { decision: 'Approved' }), 403, 'filer decision');
     const approved = expect(await action(first.id, 'deliberation', 'secretary', { decision: 'Approved', remarks: 'Synthetic approval' }), 200, 'approve at threshold');
     assert.equal(approved.status, 'Approved'); assert.equal(approved.processing_stage, 'Final Decision');
+    expect(await action(first.id, 'require_nomination_revision', 'admin', { scope: 'both', instructions: 'Check previous nomination details.' }), 409, 'approved nomination cannot be reopened');
     expect(await action(first.id, 'deliberation', 'secretary', { decision: 'Approved' }), 409, 'duplicate decision');
     const awarded = expect(await action(first.id, 'deliberation', 'secretary', { decision: 'Approved', award_now: true }), 200, 'confer award');
     assert.equal(awarded.status, 'Awarded'); assert.equal(awarded.processing_stage, 'Awarded');
+    expect(await action(first.id, 'require_nomination_revision', 'admin', { scope: 'both', instructions: 'Check previous supporting documents.' }), 409, 'awarded nomination cannot be reopened');
     const nomineeFormResponse = await request(`/api/applications.php?action=form&id=${first.id}`, { actor: 'filer' });
     const nomineeForm = expect(nomineeFormResponse, 200, 'nominee published outcome');
     assert.equal(nomineeForm.application.status, 'Awarded');
@@ -646,8 +811,74 @@ async function main() {
     const below = await evaluated(84);
     expect(await action(below, 'deliberation', 'secretary', { decision: 'Approved' }), 409, 'below minimum');
     assert.equal(expect(await action(below, 'deliberation', 'secretary', { decision: 'Not Approved' }), 200, 'reject below minimum').status, 'Not Approved');
+    expect(await action(below, 'require_nomination_revision', 'admin', { scope: 'both', instructions: 'Check a terminal rejection.' }), 409, 'deliberation rejection cannot be reopened');
+    expect(await action(below, 'resubmit', 'filer'), 409, 'deliberation rejection cannot use ordinary correction');
     const above = await evaluated(86);
     assert.equal(expect(await action(above, 'deliberation', 'secretary', { decision: 'Approved' }), 200, 'approve above minimum').status, 'Approved');
+  });
+
+  await test('revisions route by endorsement dependency and supersede historical evaluation scores', async () => {
+    const app = await createNomination();
+    const document = expect(await request('/api/documents.php', { method: 'POST', actor: 'filer', form: makeForm(app.id, 'evaluation.pdf', pdf) }), 201, 'original evidence');
+    expect(await action(app.id, 'finalize_submission', 'filer'), 200, 'official submission');
+    expect(await action(app.id, 'inspect_document', 'head', { document_id: document.id, status: 'Head Approved' }), 200, 'inspect attachment');
+    expect(await action(app.id, 'endorse', 'head', { decision: 'Endorsed' }), 200, 'endorse first version');
+    expect(await action(app.id, 'verify_document', 'secretary', { document_id: document.id, status: 'Verified' }), 200, 'verify first version');
+    expect(await action(app.id, 'assign_evaluators', 'secretary'), 200, 'assign first version');
+    const score = actor => request('/api/evaluations.php', { method: 'POST', actor, json: {
+      application_id: app.id, scores: [{ criterion_id: id('criterion-one'), score: 90 }], general_remarks: 'Synthetic evaluation of version one',
+    } });
+    expect(await score('D'), 201, 'submit original evaluation');
+    const issue = async scope => expect(await action(app.id, 'require_nomination_revision', 'admin', { scope, instructions: 'Review the supporting evidence and attest to the corrections.' }), 200, 'administrator request').application.revision_request.id;
+    const finish = (revision_id, generation) => action(app.id, 'finalize_nomination_revision', 'filer', {
+      revision_id, generation, signature_confirmed: true, signature_strokes: [[[0.2, 0.3], [0.7, 0.8]]], remarks: 'Evidence reviewed.',
+    });
+    const firstRevision = await issue('attachments');
+    expect(await score('E'), 409, 'score submission suspended');
+    expect(await action(app.id, 'verify_document', 'secretary', { document_id: document.id, status: 'Verified' }), 409, 'verification suspended');
+    expect(await action(app.id, 'reassign_evaluator', 'admin', { old_evaluator_id: id('E'), new_evaluator_id: id('B') }), 409, 'assignment suspended');
+    expect(await action(app.id, 'begin_deliberation', 'secretary'), 409, 'deliberation suspended');
+    const unchanged = expect(await finish(firstRevision, 0), 200, 'attachment-only revision with unchanged evidence').application;
+    assert.equal(unchanged.status, 'For Verification');
+    assert.equal(unchanged.endorsement.decision, 'Endorsed');
+    assert.equal(unchanged.documents[0].id, document.id);
+    const active = expect(await request(`/api/applications.php?id=${app.id}`, { actor: 'admin' }), 200, 'current workflow');
+    assert.equal(active.final_weighted_score, null);
+    assert.deepEqual(active.evaluator_assignments, []);
+    assert.deepEqual(active.evaluations, []);
+    expect(await request(`/api/applications.php?id=${app.id}`, { actor: 'D' }), 403, 'superseded evaluator loses access');
+    const previous = expect(await request(`/api/applications.php?action=form&version=1&id=${app.id}`, { actor: 'admin' }), 200, 'archived workflow').application;
+    assert.equal(previous.historical_workflow.assignments.length, 3);
+    assert.equal(previous.historical_workflow.evaluations.length, 1);
+    assert.equal(Number(previous.historical_workflow.scores[0].score), 90);
+    assert.equal(previous.documents[0].status, 'Verified');
+    assert.deepEqual((await request('/' + previous.documents[0].file_url, { actor: 'admin' })).raw, pdf);
+
+    const secondRevision = await issue('attachments');
+    const fields = { application_id: app.id, revision_id: secondRevision, generation: '0', requirement_id: id('requirement-one'), document_name: 'replacement.png' };
+    let staged;
+    if (cloudStorage) {
+      const upload = expect(await request('/api/uploads.php?action=start', { method: 'POST', actor: 'filer', json: { target: 'documents', file_name: 'replacement.png', file_size: png.length, fields } }), 201, 'start chunked revision attachment');
+      const part = new FormData();
+      part.set('upload_id', upload.upload_id);
+      part.set('part_no', '0');
+      part.set('chunk', new Blob([png]), 'chunk');
+      expect(await request('/api/uploads.php?action=part', { method: 'POST', actor: 'filer', form: part }), 200, 'upload revision part');
+      staged = expect(await request('/api/documents.php', { method: 'POST', actor: 'filer', json: { upload_id: upload.upload_id } }), 201, 'stage chunked attachment');
+    } else {
+      const form = makeForm(app.id, 'replacement.png', png);
+      for (const [key, value] of Object.entries(fields)) form.set(key, value);
+      staged = expect(await request('/api/documents.php', { method: 'POST', actor: 'filer', form }), 201, 'stage replacement');
+    }
+    const replaced = expect(await finish(secondRevision, staged.generation), 200, 'finalize changed evidence').application;
+    assert.equal(replaced.nomination_version, 3);
+    assert.equal(replaced.status, 'For Endorsement');
+    assert.equal(replaced.endorsement, null);
+    assert.equal(replaced.documents[0].status, 'Submitted');
+    expect(await request('/' + staged.attachments[id('requirement-one')].file_url, { actor: 'filer' }), 404, 'staging reference deactivated');
+    const secondSignature = expect(await request(`/api/applications.php?action=signature&version=2&id=${app.id}`, { actor: 'admin' }), 200, 'version two signature');
+    assert.equal(secondSignature.signed_snapshot.version_number, 2);
+    assert.deepEqual((await request('/' + secondSignature.documents[0].file_url, { actor: 'admin' })).raw, pdf);
   });
 }
 

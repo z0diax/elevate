@@ -2,6 +2,7 @@ import { NominationReferenceButton } from '../nomination/NominationFormViewerMod
 import React, { useMemo } from 'react';
 import { Application, Award, UserProfile } from '../../types';
 import { FolderOpen, Plus } from 'lucide-react';
+import { RevisionIndicator } from '../nomination/NominationRevisionControls';
 import { NominationQueueCards } from '../nomination/NominationQueueCards';
 
 interface NomineeDashboardProps {
@@ -10,7 +11,7 @@ interface NomineeDashboardProps {
   currentUser: UserProfile;
   onRefreshData: () => void | Promise<void>;
   onNavigateToNomination: () => void;
-  onNavigateToCorrections: () => void;
+  onNavigateToCorrections: (application: Application) => void;
 }
 
 export const NomineeDashboard: React.FC<NomineeDashboardProps> = ({
@@ -21,7 +22,8 @@ export const NomineeDashboard: React.FC<NomineeDashboardProps> = ({
   onNavigateToNomination,
   onNavigateToCorrections,
 }) => {
-  const canCorrect = (application: Application) => application.nominator_id === currentUser.id && (['Returned for Revision', 'Incomplete'].includes(application.status) || (application.status === 'Not Approved' && application.endorsement?.decision === 'Rejected'));
+  const canCorrect = (application: Application) => application.nominator_id === currentUser.id && application.can_correct;
+  const canRevise = (application: Application) => Boolean(application.nominator_id === currentUser.id && application.revision_active && application.revision_request);
   const myApplications = useMemo(() => applications.filter(application =>
     application.status !== 'Draft' && (application.nominee_id === currentUser.id ||
     application.nominator_id === currentUser.id)
@@ -56,7 +58,7 @@ export const NomineeDashboard: React.FC<NomineeDashboardProps> = ({
           </h3>
 
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
-            <NominationQueueCards userRole={currentUser.role} applications={myApplications} onOpen={onNavigateToCorrections} actionLabel={application => canCorrect(application) ? 'Review required changes' : null} />
+            <NominationQueueCards userRole={currentUser.role} applications={myApplications} onOpen={onNavigateToCorrections} onRevise={onNavigateToCorrections} canRevise={canRevise} actionLabel={application => canRevise(application) ? 'Edit Nomination' : canCorrect(application) ? 'Review required changes' : null} />
             {myApplications.length === 0 ? (
               <div className="p-10 text-center text-slate-400">
                 <FolderOpen size={32} className="mx-auto mb-2 opacity-30 text-slate-400" />
@@ -82,14 +84,15 @@ export const NomineeDashboard: React.FC<NomineeDashboardProps> = ({
                   <tbody className="divide-y divide-slate-100">
                     {myApplications.map(application => (
                       <tr key={application.id} className="hover:bg-slate-50">
-                        <td className="px-5 py-4 font-semibold text-slate-900"><p className="break-words">{application.nominee_name}</p><div className="mt-0.5"><NominationReferenceButton applicationId={application.id} referenceNumber={application.application_number} userRole={currentUser.role} /></div></td>
+                        <td className="px-5 py-4 font-semibold text-slate-900"><p className="break-words">{application.nominee_name}</p><div className="mt-0.5"><NominationReferenceButton applicationId={application.id} referenceNumber={application.application_number} userRole={currentUser.role} onRevise={canRevise(application) ? () => onNavigateToCorrections(application) : undefined} /></div></td>
                         <td className="px-5 py-4 text-slate-600">{application.office_name}</td>
                         <td className="px-5 py-4 font-medium text-slate-700">{application.award_name}</td>
                         <td className="px-5 py-4">
                           <span className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
                             Processing
                           </span>
-                          {canCorrect(application) && <button type="button" onClick={onNavigateToCorrections} className="mt-2 block rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-100 focus-visible:outline-2 focus-visible:outline-blue-600">Review required changes</button>}
+                          <RevisionIndicator application={application} />
+                          {(canCorrect(application) || canRevise(application)) && <button type="button" onClick={() => onNavigateToCorrections(application)} className="mt-2 block rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-100 focus-visible:outline-2 focus-visible:outline-blue-600">{canRevise(application) ? 'Edit Nomination' : 'Review required changes'}</button>}
                         </td>
                       </tr>
                     ))}

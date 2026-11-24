@@ -63,7 +63,7 @@ test('signed form includes PDF/image pages and every original file, including Wo
     const content = pageContent(pdf);
     assert.match(content, /NOMINATOR ELECTRONIC SIGNATURE/);
     assert.match(content, /Original Nominator/); assert.match(content, /2026-11-18 10:30:00/);
-    assert.match(content, /Later revisions are not re-signed/);
+    assert.match(content, /Ordinary document corrections are recorded separately/);
     assert.match(content, /ATTACHED PDF EVIDENCE/); assert.match(content, /SECOND EVIDENCE PAGE/);
     assert.ok(pdf.getPageCount() >= 6);
     const files = embeddedFiles(pdf);
@@ -79,6 +79,34 @@ test('evaluator export excludes private identity and signature even if passed un
   const content = pageContent(pdf);
   assert.match(content, /Restricted during scoring/);
   for (const secret of ['Original Nominator', 'Filing Account', 'Test Nominating Office', 'NOMINATOR ELECTRONIC SIGNATURE', signature.sha256]) assert.ok(!content.includes(secret));
+});
+
+test('versioned PDF separates ordinary replacement bytes from signed attachment bytes', async () => {
+  const originalFetch = globalThis.fetch;
+  const mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  const original = Buffer.from('PK synthetic signed evidence');
+  const replacement = Buffer.from('PK synthetic ordinary correction');
+  globalThis.fetch = async input => new Response(String(input) === '/signed' ? original : replacement);
+  try {
+    const record: Application = { ...application, nomination_version: 2, documents: [{
+      id: 'doc', application_id: application.id, document_name: 'Evidence', file_url: '/current',
+      file_type: mime, status: 'Verified', uploaded_at: '2026-11-24',
+    }] };
+    const signed = {
+      ...signature, version_number: 2, sha256: 'b'.repeat(64),
+      signed_snapshot: { ...record, signing_account: { id: 'user', name: 'Verified Filing Account', role: 'NOMINEE' } },
+      documents: [{ id: 'doc', document_name: 'Evidence', file_url: '/signed', file_type: mime, matches_official: false, sha256: 'c'.repeat(64) }],
+    };
+    const pdf = await PDFDocument.load(await buildNominationPdf(record, [], 'ADMINISTRATOR', signed));
+    const content = pageContent(pdf);
+    assert.match(content, /Signature covers nomination version 2/);
+    assert.match(content, /Verified Filing Account/);
+    assert.match(content, /Current file is outside the signed snapshot/);
+    assert.deepEqual(embeddedFiles(pdf).map(file => file.bytes), [replacement, original]);
+    const evaluator = await PDFDocument.load(await buildNominationPdf(record, [], 'EVALUATOR', signed));
+    assert.deepEqual(embeddedFiles(evaluator).map(file => file.bytes), [replacement]);
+    assert.doesNotMatch(pageContent(evaluator), /SIGNED ATTACHMENT RECORD|Verified Filing Account/);
+  } finally { globalThis.fetch = originalFetch; }
 });
 
 test('missing recorded signature and unavailable attachment fail instead of silently omitting them', async () => {

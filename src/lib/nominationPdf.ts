@@ -39,7 +39,7 @@ export async function buildNominationPdf(
   };
 
   section('01  NOMINATION OVERVIEW', [
-    ['Reference number', application.application_number], ['Award', application.award_name],
+    ['Reference number', application.application_number], ['Nomination version', application.nomination_version || 1], ['Award', application.award_name],
     ['Award year', application.award_year], ['Nomination classification', application.nomination_origin],
     ['Nomination type', application.nomination_type], ['Nomination date', date(application.date_of_nomination)],
     ['Current status', application.status], ['Processing stage', application.processing_stage],
@@ -73,9 +73,10 @@ export async function buildNominationPdf(
       }));
       doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(71, 85, 105);
       const provenance = [
-        `Signed by: ${value(signature.signed_snapshot.nominator_name)}`,
+        `Signed by: ${value(signature.signed_snapshot.signing_account?.name || signature.signed_snapshot.nominator_name)}`,
         `Recorded: ${date(signature.signed_at)} (server time).`,
-        'Signature retained from the original submission. Later revisions are not re-signed.',
+        `Signature covers nomination version ${signature.version_number || application.nomination_version || 1} and the attachment digests recorded at signing.`,
+        'Ordinary document corrections are recorded separately from the electronic signature.',
         `Integrity reference: ${signature.sha256}`,
       ].flatMap(line => doc.splitTextToSize(line, width) as string[]);
       doc.text(provenance, 14, y + 39);
@@ -90,12 +91,27 @@ export async function buildNominationPdf(
     ['Account used to submit', restricted ? 'Restricted during scoring' : application.submission_account_name || application.nominator_id],
     ['Submission account role', restricted ? 'Restricted during scoring' : application.submission_account_role?.replaceAll('_', ' ')],
     ['Submission date', date(submitted?.created_at)], ['Record created', date(application.created_at)],
+    ...((application.nomination_version || 1) > 1 ? [['Version signed', date(application.signature_signed_at)]] : []),
     ['Last updated', date(application.updated_at)], ['Remarks', application.remarks], ['Required action', application.required_action],
   ]);
 
   // Fetch with the session cookie: document URLs point to the authorized download endpoint.
   const attachments: { name: string; mime: string; bytes: Uint8Array }[] = [];
-  for (const attachment of application.documents || []) {
+  const signedFiles = restricted ? undefined : signature?.documents;
+  const signed = new Map(signedFiles?.map(document => [document.id, document]));
+  const signedArchives = signedFiles?.filter(document => !document.matches_official && document.file_url) || [];
+  const downloadable = [
+    ...(application.documents || []).map(document => {
+      const signedFile = signed.get(document.id);
+      return {
+        ...document,
+        file_url: document.file_url && signedFile?.matches_official ? signedFile.file_url : document.file_url,
+        archived: false,
+      };
+    }),
+    ...signedArchives.map(document => ({ ...document, archived: true })),
+  ];
+  for (const attachment of downloadable) {
     if (!attachment.file_url) continue;
     try {
       const response = await fetch(attachment.file_url, { credentials: 'include', signal: AbortSignal.timeout(60_000) });
@@ -107,7 +123,7 @@ export async function buildNominationPdf(
       const bytes = new Uint8Array(await response.arrayBuffer());
       if (!bytes.length) throw new Error('Empty file');
       const extension = mime === 'application/pdf' ? 'pdf' : mime === 'image/png' ? 'png' : mime === 'image/jpeg' ? 'jpg' : 'docx';
-      const name = safeFilename(attachment.document_name);
+      const name = safeFilename(`${attachment.archived ? 'Signed version - ' : ''}${attachment.document_name}`);
       attachments.push({ name: `${attachments.length + 1}_${name}${name.toLowerCase().endsWith(`.${extension}`) ? '' : `.${extension}`}`, mime, bytes });
     } catch {
       throw new Error(`Unable to include attachment "${attachment.document_name}". Please check access and try again.`);
@@ -115,8 +131,15 @@ export async function buildNominationPdf(
   }
   section('07  SUPPORTING DOCUMENTS', application.documents?.length ? application.documents.map(attachment => [
     attachment.document_name,
-    `Status: ${attachment.status}\nUploaded: ${date(attachment.uploaded_at)}\n${attachment.file_url ? 'Original file embedded in this PDF.' : 'No file recorded.'}${attachment.verification_remarks ? `\nReview remarks: ${attachment.verification_remarks}` : ''}`,
+    `Status: ${attachment.status}\nUploaded: ${date(attachment.uploaded_at)}\n${attachment.file_url ? 'Original file embedded in this PDF.' : 'No file recorded.'}${signedFiles ? signed.get(attachment.id)?.matches_official ? '\nCovered by this signature.' : '\nCurrent file is outside the signed snapshot.' : ''}${attachment.verification_remarks ? `\nReview remarks: ${attachment.verification_remarks}` : ''}`,
   ]) : [['Attachments', 'No documents attached.']]);
+
+  if (signedFiles?.length) {
+    section('08  SIGNED ATTACHMENT RECORD', signedFiles.map(document => [
+      document.document_name,
+      `SHA-256: ${value(document.sha256)}\n${document.matches_official ? 'Matches the current file for this version.' : document.file_url ? 'Signed file embedded separately.' : 'Signed file unavailable.'}`,
+    ]));
+  }
 
   const formPages = doc.getNumberOfPages();
   for (let page = 1; page <= formPages; page++) {
@@ -174,14 +197,14 @@ export async function buildNominationPdf(
   return pdf.save();
 }
 
-export async function downloadNominationPdf(applicationId: string, role: UserRole): Promise<void> {
-  const { application, history } = await praiseService.getNominationForm(applicationId);
+export async function downloadNominationPdf(applicationId: string, role: UserRole, version?: number): Promise<void> {
+  const { application, history } = await praiseService.getNominationForm(applicationId, version);
   const signature = role !== 'EVALUATOR' && application.signature_signed_at
-    ? await praiseService.getNominationSignature(applicationId) : undefined;
+    ? await praiseService.getNominationSignature(applicationId, version ?? application.nomination_version) : undefined;
   const bytes = await buildNominationPdf(application, history, role, signature);
   const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'application/pdf' }));
   const link = document.createElement('a');
-  link.href = url; link.download = `${safeFilename(application.application_number)}_Nomination_Form.pdf`;
+  link.href = url; link.download = `${safeFilename(application.application_number)}_Nomination_Form${(application.nomination_version || 1) > 1 || version ? `_v${application.nomination_version || 1}` : ''}.pdf`;
   document.body.appendChild(link); link.click(); link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }

@@ -1,11 +1,13 @@
 import { NominationReferenceButton } from './NominationFormViewerModal';
 import React, { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, FileText, Plus, RefreshCw, X } from 'lucide-react';
-import { Application, Award, Office, UserProfile } from '../../types';
+import { Application, Award, NominationRevisionDraft, Office, UserProfile } from '../../types';
 import { praiseService } from '../../lib/api';
 import { showToast } from '../../lib/toast';
 import { NominationWizard } from './NominationWizard';
 import { NominationActionModal } from './NominationActionModal';
+import { RevisionIndicator } from './NominationRevisionControls';
+import { NomineeTrackingModal } from './NomineeTrackingModal';
 import { NominationQueueCards } from './NominationQueueCards';
 
 interface SubmitNominationViewProps {
@@ -15,6 +17,8 @@ interface SubmitNominationViewProps {
   currentUser: UserProfile;
   onRefreshData: () => void | Promise<void>;
   openFormRequested?: boolean;
+  notificationApplicationId?: string;
+  onNotificationHandled?: () => void;
   onOpenFormRequestHandled?: () => void;
 }
 
@@ -28,9 +32,16 @@ export const SubmitNominationView: React.FC<SubmitNominationViewProps> = ({
   onRefreshData,
   openFormRequested = false,
   onOpenFormRequestHandled,
+  notificationApplicationId,
+  onNotificationHandled,
 }) => {
   const [page, setPage] = useState(1);
-  const canCorrect = (application: Application) => application.nominator_id === currentUser.id && (['Returned for Revision', 'Incomplete'].includes(application.status) || (application.status === 'Not Approved' && application.endorsement?.decision === 'Rejected'));
+  const canCorrect = (application: Application) => application.nominator_id === currentUser.id && application.can_correct;
+  const canRevise = (application: Application) => Boolean(application.revision_active && application.revision_request && application.nominator_id === currentUser.id);
+  const [revision, setRevision] = useState<{ application: Application; draft: NominationRevisionDraft }>();
+  const [revisionAward, setRevisionAward] = useState<Award>();
+  const [trackingApp, setTrackingApp] = useState<Application | null>(null);
+  const [openingRevision, setOpeningRevision] = useState(false);
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [isWizardSubmitting, setIsWizardSubmitting] = useState(false);
   const [resubmitApp, setResubmitApp] = useState<Application | null>(null);
@@ -60,6 +71,35 @@ export const SubmitNominationView: React.FC<SubmitNominationViewProps> = ({
     onOpenFormRequestHandled?.();
   }, [onOpenFormRequestHandled, openFormRequested]);
 
+  useEffect(() => {
+    if (!notificationApplicationId) return;
+    const application = visibleToUserApplications.find(item => item.id === notificationApplicationId);
+    if (application) setTrackingApp(application);
+    else void praiseService.getNominationForm(notificationApplicationId).then(result => setTrackingApp(result.application))
+      .catch(error => showToast(error instanceof Error ? error.message : 'Unable to open the nomination.', 'error'));
+    onNotificationHandled?.();
+  }, [notificationApplicationId, onNotificationHandled, visibleToUserApplications]);
+
+  const openRevision = async (application: Application) => {
+    if (!canRevise(application) || openingRevision) return;
+    setOpeningRevision(true);
+    try {
+      const result = await praiseService.nominationRevision(application.id, 'start_nomination_revision', { revision_id: application.revision_request?.id });
+      if (!result.draft) throw new Error('This revision request is no longer active.');
+      const originalAward = awards.find(award => award.id === result.application.award_id);
+      setRevisionAward(originalAward ? undefined : await praiseService.getNominationRevisionAward(result.application.award_id));
+      setTrackingApp(null);
+      setRevision({ application: result.application, draft: result.draft });
+      setIsWizardOpen(true);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Unable to open the revision.', 'error');
+    } finally {
+      setOpeningRevision(false);
+    }
+  };
+
+  const closeWizard = () => { setIsWizardOpen(false); setRevision(undefined); setRevisionAward(undefined); };
+
   const openResubmission = (application: Application) => {
     setResubmitApp(application);
     setReplacementFiles({});
@@ -79,7 +119,7 @@ export const SubmitNominationView: React.FC<SubmitNominationViewProps> = ({
     if (!resubmitApp) return;
 
     const correctionDocuments = (resubmitApp.documents || []).filter(document =>
-      document.status === 'Rejected' || document.status === 'Missing'
+      ['Rejected', 'Missing', 'Head Rejected'].includes(document.status)
     );
     const missingReplacement = correctionDocuments.find(document => !replacementFiles[document.id]);
     if (missingReplacement) {
@@ -97,6 +137,7 @@ export const SubmitNominationView: React.FC<SubmitNominationViewProps> = ({
       for (const document of correctionDocuments) {
         const file = replacementFiles[document.id];
         await praiseService.reuploadDocument(resubmitApp.id, document.id, file, document.document_name);
+        setResubmitApp(current => current && ({ ...current, documents: current.documents?.map(item => item.id === document.id ? { ...item, status: 'For Verification' } : item) }));
       }
       await praiseService.resubmitApplication(
         resubmitApp.id,
@@ -137,7 +178,7 @@ export const SubmitNominationView: React.FC<SubmitNominationViewProps> = ({
       </div>
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
-        <NominationQueueCards userRole={currentUser.role} applications={visibleApplications} onOpen={openResubmission} actionLabel={application => canCorrect(application) ? 'Correct & Resubmit' : null} />
+        <NominationQueueCards userRole={currentUser.role} applications={visibleApplications} canRevise={canRevise} onRevise={application => void openRevision(application)} onOpen={application => canRevise(application) ? void openRevision(application) : openResubmission(application)} actionLabel={application => canRevise(application) ? 'Edit Nomination' : canCorrect(application) ? 'Correct & Resubmit' : null} />
         {visibleApplications.length === 0 && <p className="p-8 text-center text-sm text-slate-500 sm:hidden">{currentUser.role === 'NOMINEE' ? 'No nominations yet.' : 'No nominations filed from this account.'}</p>}
         <div className="hidden overflow-x-auto sm:block">
           <table className="w-full min-w-[680px] text-left">
@@ -155,7 +196,7 @@ export const SubmitNominationView: React.FC<SubmitNominationViewProps> = ({
                 const canResubmit = canCorrect(application);
                 return (
                   <tr key={application.id} className="align-top hover:bg-slate-50/70">
-                    <td className="px-4 py-4 font-mono text-xs font-bold text-blue-700"><NominationReferenceButton applicationId={application.id} referenceNumber={application.application_number} userRole={currentUser.role} /></td>
+                    <td className="px-4 py-4 font-mono text-xs font-bold text-blue-700"><NominationReferenceButton applicationId={application.id} referenceNumber={application.application_number} userRole={currentUser.role} onRevise={canRevise(application) ? () => void openRevision(application) : undefined} /></td>
                     <td className="px-4 py-4">
                       <p className="break-words text-xs font-bold text-slate-900">{application.nominee_name}</p>
                       <p className="mt-0.5 text-[11px] text-slate-500">{application.office_name}</p>
@@ -164,6 +205,8 @@ export const SubmitNominationView: React.FC<SubmitNominationViewProps> = ({
                     <td className="px-4 py-4 text-xs text-slate-600">{application.processing_stage}</td>
                     <td className="px-4 py-4">
                       <span className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">Processing</span>
+                      {canRevise(application) && <button type="button" disabled={openingRevision} onClick={() => void openRevision(application)} className="min-h-10 rounded-lg bg-blue-700 px-3 text-xs font-semibold text-white disabled:opacity-60">Edit Nomination</button>}
+                      <RevisionIndicator application={application} />
                       {canResubmit && (
                         <button
                           type="button"
@@ -221,10 +264,14 @@ export const SubmitNominationView: React.FC<SubmitNominationViewProps> = ({
         </div>
       </div>
 
+      {trackingApp && <NomineeTrackingModal application={trackingApp} onClose={() => setTrackingApp(null)}
+        onRevise={canRevise(trackingApp) ? () => void openRevision(trackingApp) : undefined}
+        userRole={currentUser.role}
+        onCorrect={canCorrect(trackingApp) ? () => { openResubmission(trackingApp); setTrackingApp(null); } : undefined} />}
       {isWizardOpen && (
         <div className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-slate-950/70 p-3 backdrop-blur-sm sm:p-6">
           <div className="relative my-auto w-full max-w-5xl">
-            <button
+            {!revision && <button
               type="button"
               aria-label="Close nomination form"
               onClick={() => setIsWizardOpen(false)}
@@ -232,16 +279,17 @@ export const SubmitNominationView: React.FC<SubmitNominationViewProps> = ({
               className="absolute right-3 top-3 z-10 rounded-full bg-slate-800 p-2 text-slate-300 hover:bg-slate-700 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
             >
               <X size={17} />
-            </button>
+            </button>}
             <NominationWizard
-              awards={awards}
+              revision={revision}
+              awards={revisionAward && !awards.some(award => award.id === revisionAward.id) ? [...awards, revisionAward] : awards}
               offices={offices}
               currentUser={currentUser}
               onNominationComplete={async () => {
                 await onRefreshData();
-                setIsWizardOpen(false);
+                closeWizard();
               }}
-              onCancel={() => setIsWizardOpen(false)}
+              onCancel={() => { closeWizard(); if (revision) void onRefreshData(); }}
               onSubmissionStateChange={setIsWizardSubmitting}
             />
           </div>
@@ -270,7 +318,7 @@ export const SubmitNominationView: React.FC<SubmitNominationViewProps> = ({
               <h3 className="text-base font-bold text-amber-950">Requested changes</h3>
               <p className="mt-2 break-words whitespace-pre-wrap text-sm leading-6 text-amber-900">{resubmitApp.required_action || resubmitApp.remarks || 'Please complete the requested corrections.'}</p>
             </div>
-            {(resubmitApp.documents || []).filter(document => document.status === 'Rejected' || document.status === 'Missing').map(document => (
+            {(resubmitApp.documents || []).filter(document => ['Rejected', 'Missing', 'Head Rejected'].includes(document.status)).map(document => (
               <div key={document.id} className="border-b border-slate-200 pb-4">
                 <p className="break-words text-sm font-semibold text-slate-900">{document.document_name}</p>
                 <p className="mt-1 break-words text-sm text-red-700">{document.verification_remarks || 'This document needs replacement.'}</p>

@@ -2,6 +2,7 @@ import { AdminMobileApplications, AdminMobileOffices, AdminMobileUsers } from '.
 import { OfficeAssignmentSelect } from '../common/OfficeAssignmentSelect';
 import { assignedOfficeIds, hasAssignedOffice } from '../../lib/userOffices';
 import { NominationReferenceButton } from '../nomination/NominationFormViewerModal';
+import { ManageNominationRevision, RevisionIndicator } from '../nomination/NominationRevisionControls';
 import { DownloadNominationButton } from '../nomination/DownloadNominationButton';
 import React, { useEffect, useState } from 'react';
 import { Application, Award, AwardEvaluationRoute, Office, UserProfile, UserRole } from '../../types';
@@ -891,7 +892,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <AdminMobileApplications applications={filteredApplications} role={currentUser.role} isSaving={isSaving}
               onTrack={app => { setTrackingTab('status'); setTrackingDocId(null); setReassigningAssignmentId(null); setTrackingApp(app); }}
               onAudit={setAuditApp}
-              onDelete={handleDeleteNomination} />
+              onDelete={handleDeleteNomination} onRefresh={onRefreshData} />
             <div className="mobile-scroll-table hidden overflow-x-auto xl:block">
               <table className="w-full min-w-[780px] text-left text-xs border-collapse">
                 <thead className="bg-slate-50 text-slate-500 uppercase text-[10px] font-bold border-b border-slate-200">
@@ -933,7 +934,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           {app.award_name}
                         </td>
                         <td className="px-4 py-3.5">
-                          <StatusBadge status={app.status} size="sm" />
+                          <StatusBadge status={app.status} size="sm" /><RevisionIndicator application={app} />
                           {app.evaluator_assignments && app.evaluator_assignments.length > 0 && (
                             <div className="mt-1 text-[11px] text-slate-500" title={app.evaluator_assignments.map(assignment => `${assignment.evaluator_name || assignment.evaluator_id}: ${assignment.status}`).join('\n')}>
                               {getEvaluatorProgress(app).completedCount} of {getEvaluatorProgress(app).assignedCount} evaluations completed
@@ -970,10 +971,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             >
                               <History size={14} />
                             </button>
+                            {currentUser.role === 'ADMINISTRATOR' && <ManageNominationRevision application={app} onRefresh={onRefreshData} />}
                             <DownloadNominationButton applicationId={app.id} userRole={currentUser.role} appearance="icon" />
                             <button
                               onClick={() => handleDeleteNomination(app)}
-                              disabled={isSaving}
+                              disabled={isSaving || Boolean(app.revision_request)}
                               title={`Delete nomination ${app.application_number}`}
                               className="inline-flex size-6 items-center justify-center text-slate-400 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 rounded cursor-pointer"
                             >

@@ -5,9 +5,8 @@ function handle_begin_deliberation(PDO $db, array $actor, string $appId): void {
     if (!in_array($actor['role'], ['SECRETARIAT', 'ADMINISTRATOR'], true)) sendResponse(403, [], 'Only Secretariat or an Administrator can start deliberation.');
     $db->beginTransaction();
     try {
-        $stmt = $db->prepare('SELECT status, processing_stage, final_weighted_score FROM applications WHERE id = :id FOR UPDATE');
-        $stmt->execute([':id' => $appId]);
-        $current = $stmt->fetch();
+        $current = lock_nomination($db, $appId);
+        guard_nomination_processing($db, $current);
         if (!$current || $current['processing_stage'] !== 'Evaluation' || $current['status'] !== 'Evaluation Completed' || $current['final_weighted_score'] === null) {
             $db->rollBack();
             sendResponse(409, [], 'All evaluations must be completed before deliberation starts.');
@@ -27,7 +26,7 @@ function handle_begin_deliberation(PDO $db, array $actor, string $appId): void {
         if ($db->inTransaction()) $db->rollBack();
         sendInternalError($e, 'applications.php:begin_deliberation', 'Failed to start deliberation.');
     }
-    sendResponse(200, getFullApplication($db, $appId), 'Deliberation started.');
+    sendResponse(200, application_for_actor(getFullApplication($db, $appId), $actor), 'Deliberation started.');
 }
 
 function handle_deliberation(PDO $db, array $actor, array $data, string $appId, array $current): void {
@@ -76,6 +75,7 @@ function handle_deliberation(PDO $db, array $actor, array $data, string $appId, 
 
     $db->beginTransaction();
     try {
+        guard_nomination_processing($db, lock_nomination($db, $appId), $current);
         $db->prepare("
             UPDATE applications
             SET status = :status,
@@ -103,5 +103,5 @@ function handle_deliberation(PDO $db, array $actor, array $data, string $appId, 
         sendInternalError($e, 'applications.php:deliberate', 'Failed to record deliberation.');
     }
 
-    sendResponse(200, getFullApplication($db, $appId), 'Deliberation decision recorded.');
+    sendResponse(200, application_for_actor(getFullApplication($db, $appId), $actor), 'Deliberation decision recorded.');
 }

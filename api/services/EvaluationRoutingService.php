@@ -9,7 +9,7 @@ function handle_reassign_evaluator(PDO $db, array $actor, array $data, string $a
     } catch (Throwable $error) {
         sendInternalError($error, 'applications.php:reassign_evaluator', 'Failed to reassign evaluator.');
     }
-    sendResponse(200, getFullApplication($db, $appId), 'Evaluator reassigned successfully.');
+    sendResponse(200, application_for_actor(getFullApplication($db, $appId), $actor), 'Evaluator reassigned successfully.');
 }
 
 function handle_assign_evaluators(PDO $db, array $actor, array $data, string $appId, array $current): void {
@@ -17,7 +17,7 @@ function handle_assign_evaluators(PDO $db, array $actor, array $data, string $ap
         sendResponse(403, [], 'Only Secretariat staff can route nominations to evaluators.');
     }
     if ($current['processing_stage'] === 'Evaluation' && in_array($current['status'], ['For Evaluation', 'Under Evaluation'], true) && !empty($current['evaluator_assignments'])) {
-        sendResponse(200, $current, 'Evaluators already assigned.');
+        sendResponse(200, application_for_actor($current, $actor), 'Evaluators already assigned.');
     }
     if ($current['processing_stage'] !== 'Document Verification' || $current['status'] !== 'Verified') {
         sendResponse(409, [], 'Only a verified nomination can be routed to evaluators.');
@@ -26,9 +26,8 @@ function handle_assign_evaluators(PDO $db, array $actor, array $data, string $ap
 
     $db->beginTransaction();
     try {
-        $locked = $db->prepare('SELECT award_id, application_number, award_name, status FROM applications WHERE id = :id FOR UPDATE');
-        $locked->execute([':id' => $appId]);
-        $lockedApp = $locked->fetch();
+        $lockedApp = lock_nomination($db, $appId);
+        guard_nomination_processing($db, $lockedApp, $current);
         if ($lockedApp['status'] !== 'Verified') {
             $db->rollBack();
             sendResponse(409, [], 'This nomination has already left document verification.');
@@ -77,7 +76,7 @@ function handle_assign_evaluators(PDO $db, array $actor, array $data, string $ap
         sendInternalError($e, 'applications.php:assign_evaluators', 'Failed to assign evaluators.');
     }
 
-    sendResponse(200, getFullApplication($db, $appId), 'Evaluators assigned.');
+    sendResponse(200, application_for_actor(getFullApplication($db, $appId), $actor), 'Evaluators assigned.');
 }
 
 final class EvaluatorReassignmentError extends RuntimeException {

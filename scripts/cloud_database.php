@@ -38,6 +38,15 @@ if ($mode === 'import-local') {
     if (!in_array('profiles', $tables, true) || !in_array('applications', $tables, true)) throw new RuntimeException('Source does not contain the PRAISE database.');
     $quote = static fn(string $name): string => '`' . str_replace('`', '``', $name) . '`';
     $references = $source->query("SELECT DISTINCT file_url FROM application_documents WHERE file_url <> ''")->fetchAll(PDO::FETCH_COLUMN);
+    foreach (['nomination_document_history', 'nomination_revision_files'] as $table) {
+        if (!in_array($table, $tables, true)) continue;
+        $where = $table === 'nomination_document_history' ? 'sha256 IS NOT NULL' : 'document IS NOT NULL';
+        $documents = $source->query("SELECT document FROM $table WHERE $where");
+        while (($encoded = $documents->fetchColumn()) !== false) {
+            $document = json_decode($encoded, true, 512, JSON_THROW_ON_ERROR);
+            if (!empty($document['file_url'])) $references[] = $document['file_url'];
+        }
+    }
     if (in_array('report_settings', $tables, true)) {
         $references = array_merge($references, $source->query("SELECT background_image_url FROM report_settings WHERE background_image_url IS NOT NULL AND background_image_url <> ''")->fetchAll(PDO::FETCH_COLUMN));
     }
@@ -72,6 +81,7 @@ if ($mode === 'import-local') {
                 $cursor = $source->query('SELECT * FROM ' . $quote($table));
                 $insert = null;
                 while ($record = $cursor->fetch()) {
+                    if ($table === 'nomination_revision_requests') unset($record['active_application_id']);
                     $insert ??= $db->prepare('INSERT INTO ' . $quote($table) . ' (' . implode(',', array_map($quote, array_keys($record))) . ') VALUES (' . implode(',', array_fill(0, count($record), '?')) . ')');
                     $insert->execute(array_values($record));
                     $rows++;

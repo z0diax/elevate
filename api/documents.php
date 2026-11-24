@@ -8,6 +8,7 @@ require_once __DIR__ . '/config/cors.php';
 require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/config/session_auth.php';
 require_once __DIR__ . '/config/document_storage.php';
+require_once __DIR__ . '/services/NominationRevisionService.php';
 
 const MAX_DOCUMENT_SIZE = 10 * 1024 * 1024;
 const DOCUMENT_MIME_TYPES = [
@@ -118,16 +119,48 @@ if ($method === 'GET' && ($_GET['action'] ?? '') === 'download') {
     $actor = require_auth($db);
     $id = $_GET['id'] ?? null;
     if (!is_string($id) || $id === '' || strlen($id) > 64) sendResponse(404, [], 'Document not found.');
-    $stmt = $db->prepare('SELECT id, application_id, document_name, file_url, file_type FROM application_documents WHERE id = :id LIMIT 1');
-    $stmt->execute([':id' => $id]);
-    $document = $stmt->fetch();
-    if (!$document) sendResponse(404, [], 'Document not found.');
-    require_application_access($db, $actor, (string)$document['application_id']);
+    $source = $_GET['source'] ?? 'current';
+    $integrity = $_GET['sha256'] ?? null;
+    if ($integrity !== null && (!is_string($integrity) || !preg_match('/^[a-f0-9]{64}$/D', $integrity))) sendResponse(400, [], 'Invalid document digest.');
+    if ($source === 'revision') {
+        $stmt = $db->prepare('SELECT f.document, r.application_id, r.active_application_id FROM nomination_revision_files f JOIN nomination_revision_requests r ON r.id = f.revision_id WHERE f.id = ?');
+        $stmt->execute([$id]);
+        $file = $stmt->fetch();
+        if (!$file || !$file['active_application_id'] || !$file['document']) sendResponse(404, [], 'Document not found.');
+        $application = require_application_access($db, $actor, $file['application_id']);
+        if ($application['nominator_id'] !== $actor['id']) sendResponse(404, [], 'Document not found.');
+        $document = json_decode($file['document'], true, 512, JSON_THROW_ON_ERROR);
+        $integrity = $document['sha256'];
+    } elseif ($source === 'history') {
+        $stmt = $db->prepare('SELECT * FROM nomination_document_history WHERE id = ?');
+        $stmt->execute([$id]);
+        $file = $stmt->fetch();
+        if (!$file) sendResponse(404, [], 'Document not found.');
+        require_application_access($db, $actor, $file['application_id']);
+        if ($actor['role'] !== 'ADMINISTRATOR') {
+            $version = nomination_version_number($db, $file['application_id']);
+            $signature = nomination_version_signature($db, $file['application_id'], $version);
+            $snapshot = $signature ? json_decode($signature['signed_snapshot'], true, 512, JSON_THROW_ON_ERROR) : [];
+            $signed = array_column($snapshot['documents'] ?? [], 'sha256', 'id');
+            if ($actor['role'] === 'EVALUATOR' || !$file['sha256'] || ($signed[$file['document_id']] ?? null) !== $file['sha256']) {
+                sendResponse(404, [], 'Document not found.');
+            }
+        }
+        $document = json_decode($file['document'], true, 512, JSON_THROW_ON_ERROR);
+        $integrity = $file['sha256'];
+    } else {
+        $stmt = $db->prepare('SELECT id, application_id, document_name, file_url, file_type FROM application_documents WHERE id = :id LIMIT 1');
+        $stmt->execute([':id' => $id]);
+        $document = $stmt->fetch();
+        if (!$document) sendResponse(404, [], 'Document not found.');
+        require_application_access($db, $actor, (string)$document['application_id']);
+    }
     $path = document_storage_path((string)$document['file_url']);
     if ($path === null) {
         error_log('[documents.php:download] Missing or invalid storage for document ID ' . $id);
         sendResponse(404, [], 'Document file not found.');
     }
+    if ($integrity && hash_file('sha256', $path) !== $integrity) sendResponse(409, [], 'Document integrity check failed.');
     $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION));
     $mime = DOCUMENT_MIME_TYPES[$extension] ?? null;
     if ($mime === null || $mime !== $document['file_type']) sendResponse(404, [], 'Document file not found.');
@@ -168,7 +201,7 @@ if ($method === 'POST') {
     }
 
     $file = $_FILES['file'];
-    requireFields($_POST, ['application_id', 'document_id', 'requirement_id', 'document_name']);
+    requireFields($_POST, ['application_id', 'document_id', 'requirement_id', 'document_name', 'revision_id', 'generation']);
     requireFields($_FILES, ['file']);
     if (!is_array($file) || is_array($file['name'] ?? null)) sendResponse(400, [], 'Upload one file at a time.');
     [$extension, $detectedMime, $fileSize] = validate_document_upload($file, $staged !== null);
@@ -181,25 +214,26 @@ if ($method === 'POST') {
     $documentId = optionalId($documentId, 'document ID') ?? '';
     $requirementId = optionalId($requirementId, 'requirement ID');
     $documentName = requireText($documentName, 'document name', 255, true);
+    $fileName = requireText(basename(str_replace('\\', '/', $file['name'])), 'file name', 255, true);
 
-    $applicationStmt = $db->prepare("SELECT nominator_id, status, award_id FROM applications WHERE id = :id LIMIT 1");
+    $revisionId = optionalId($_POST['revision_id'] ?? null, 'revision ID');
+    $applicationStmt = $db->prepare("SELECT * FROM applications WHERE id = :id LIMIT 1");
     $applicationStmt->execute([':id' => $applicationId]);
     $application = $applicationStmt->fetch();
     if (!$application) {
         sendResponse(404, [], 'Application not found.');
     }
-    if ((string)$application['nominator_id'] !== (string)$actor['id']) {
-        sendResponse(403, [], 'Only the original filer can upload or replace nomination documents.');
+    $request = authorize_nomination_upload($db, $application, $actor, $documentId, $revisionId);
+    if ($request) {
+        if (!$requirementId) sendResponse(400, [], 'An award requirement is required.');
+        revision_attachment_requirement($db, $application, $request, $requirementId);
     }
-    if (!in_array($application['status'], ['Draft', 'Returned for Revision', 'Incomplete'], true)) {
-        sendResponse(409, [], 'Attachments can only be uploaded before submission or during a requested revision.');
-    }
-    if ($requirementId !== null && $requirementId !== '') {
+    if (!$request && $requirementId !== null && $requirementId !== '') {
         $requirementStmt = $db->prepare('SELECT id FROM award_document_requirements WHERE id = :id AND award_id = :award_id');
         $requirementStmt->execute([':id' => $requirementId, ':award_id' => $application['award_id']]);
         if (!$requirementStmt->fetch()) sendResponse(400, [], 'Attachment requirement does not belong to this award.');
     }
-    if ($documentId === '' && $requirementId) {
+    if (!$request && $documentId === '' && $requirementId) {
         $existingStmt = $db->prepare('SELECT * FROM application_documents WHERE application_id = :application_id AND requirement_id = :requirement_id LIMIT 1');
         $existingStmt->execute([':application_id' => $applicationId, ':requirement_id' => $requirementId]);
         $existingDocument = $existingStmt->fetch();
@@ -227,20 +261,28 @@ if ($method === 'POST') {
         $db->beginTransaction();
         // Serialize uploads with signing. A request that began while the form was
         // a draft must not replace an attachment after finalization commits.
-        $lockedApplication = $db->prepare('SELECT nominator_id, status, award_id FROM applications WHERE id = :id FOR UPDATE');
-        $lockedApplication->execute([':id' => $applicationId]);
-        $application = $lockedApplication->fetch();
-        if (!$application || (string)$application['nominator_id'] !== (string)$actor['id']) {
-            $db->rollBack();
-            sendResponse(403, [], 'Only the original filer can upload or replace nomination documents.');
+        $application = lock_nomination($db, $applicationId);
+        $request = authorize_nomination_upload($db, $application, $actor, $documentId, $revisionId);
+        if (!$request && $requirementId) {
+            $requirement = $db->prepare('SELECT id FROM award_document_requirements WHERE id = ? AND award_id = ? FOR UPDATE');
+            $requirement->execute([$requirementId, $application['award_id']]);
+            if (!$requirement->fetch()) reject_nomination_change($db, 400, 'Attachment requirement does not belong to this award.');
         }
-        if (!in_array($application['status'], ['Draft', 'Returned for Revision', 'Incomplete'], true)) {
-            $db->rollBack();
-            sendResponse(409, [], 'Attachments can only be uploaded before submission or during a requested revision.');
+        if ($request) {
+            $generation = requireIntRange($_POST['generation'] ?? -1, 'revision draft generation', 0, PHP_INT_MAX);
+            if ($generation !== (int)$request['draft_generation']) reject_nomination_change($db, 409, 'The revision draft has changed. Reopen it and try again.');
+            $requirement = revision_attachment_requirement($db, $application, $request, $requirementId);
+            $documentName = $requirement['document_name'];
+            $documentHash = hash_file('sha256', $file['tmp_name']);
+            if (!$documentHash) reject_nomination_change($db, 400, 'The document could not be verified.');
+        } elseif ($documentId === '' && $requirementId) {
+            $duplicate = $db->prepare('SELECT id FROM application_documents WHERE application_id = ? AND requirement_id = ? LIMIT 1');
+            $duplicate->execute([$applicationId, $requirementId]);
+            $documentId = $duplicate->fetchColumn() ?: '';
         }
         $documentStatus = $documentId !== '' && $application['status'] !== 'Draft' ? 'For Verification' : 'Submitted';
         if ($documentId !== '') {
-            $oldStmt = $db->prepare('SELECT file_url, requirement_id FROM application_documents WHERE id = :id AND application_id = :application_id FOR UPDATE');
+            $oldStmt = $db->prepare('SELECT * FROM application_documents WHERE id = :id AND application_id = :application_id FOR UPDATE');
             $oldStmt->execute([':id' => $documentId, ':application_id' => $applicationId]);
             $oldDocument = $oldStmt->fetch();
             if (!$oldDocument) {
@@ -251,7 +293,12 @@ if ($method === 'POST') {
                 $db->rollBack();
                 sendResponse(400, [], 'Document does not belong to that requirement.');
             }
-            $oldFileUrl = (string)$oldDocument['file_url'];
+            if ($oldDocument['requirement_id']) {
+                $exists = revision_rows($db, 'SELECT award_id FROM award_document_requirements WHERE id = ?', $oldDocument['requirement_id'])[0] ?? [];
+                if (($exists['award_id'] ?? null) !== $application['award_id']) reject_nomination_change($db, 400, 'Attachment requirement does not belong to this award.');
+            }
+            if ($application['status'] === 'Draft') $oldFileUrl = (string)$oldDocument['file_url'];
+            else archive_nomination_document($db, $oldDocument);
         }
         if (database_file_storage()) {
             database_store_file($db, $fileUrl, $file['tmp_name']);
@@ -260,11 +307,25 @@ if ($method === 'POST') {
             if (!move_uploaded_file($file['tmp_name'], $targetPath)) throw new RuntimeException('Unable to move uploaded file.');
             $fileMoved = true;
         }
+        if ($request) {
+            $document = [
+                'id' => 'doc-' . bin2hex(random_bytes(16)), 'application_id' => $applicationId, 'requirement_id' => $requirementId,
+                'document_name' => $documentName, 'file_name' => $fileName,
+                'file_url' => $fileUrl, 'file_size' => $fileSize, 'file_type' => $detectedMime,
+                'status' => 'For Verification', 'uploaded_at' => date('Y-m-d H:i:s'), 'sha256' => $documentHash,
+            ];
+            start_nomination_revision($db, $request, $application, $actor);
+            set_revision_attachment($db, $request, $requirementId, $document);
+            $result = revision_draft_payload($db, nomination_revision($db, $applicationId));
+            $db->commit();
+            sendResponse(201, $result, 'Attachment staged.');
+        }
         if ($documentId !== '') {
             $stmt = $db->prepare("
                 UPDATE application_documents
                 SET document_name = :document_name,
                     file_url = :file_url,
+                    file_name = :file_name,
                     file_size = :file_size,
                     file_type = :file_type,
                     status = :status,
@@ -279,6 +340,7 @@ if ($method === 'POST') {
                 ':application_id' => $applicationId,
                 ':document_name' => $documentName,
                 ':file_url' => $fileUrl,
+                ':file_name' => $fileName,
                 ':file_size' => $fileSize,
                 ':file_type' => $detectedMime,
                 ':status' => $documentStatus,
@@ -289,14 +351,15 @@ if ($method === 'POST') {
         } else {
             $documentId = 'doc-' . bin2hex(random_bytes(16));
             $stmt = $db->prepare("
-                INSERT INTO application_documents (id, application_id, requirement_id, document_name, file_url, file_size, file_type, status)
-                VALUES (:id, :application_id, :requirement_id, :document_name, :file_url, :file_size, :file_type, :status)
+                INSERT INTO application_documents (id, application_id, requirement_id, document_name, file_name, file_url, file_size, file_type, status)
+                VALUES (:id, :application_id, :requirement_id, :document_name, :file_name, :file_url, :file_size, :file_type, :status)
             ");
             $stmt->execute([
                 ':id' => $documentId,
                 ':application_id' => $applicationId,
                 ':requirement_id' => $requirementId,
                 ':document_name' => $documentName,
+                ':file_name' => $fileName,
                 ':file_url' => $fileUrl,
                 ':file_size' => $fileSize,
                 ':file_type' => $detectedMime,

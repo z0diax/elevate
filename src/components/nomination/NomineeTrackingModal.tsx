@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Application } from '../../types';
+import { Application, UserRole } from '../../types';
 import { praiseService } from '../../lib/api';
 import { DocumentViewerModal } from '../common/DocumentViewerModal';
+import { RevisionInstructions } from './NominationRevisionControls';
 import { NominationActionModal } from './NominationActionModal';
 import { NominationDetails, NominationDocuments, NominationHistory } from './NominationReadOnlySections';
 
@@ -9,14 +10,14 @@ interface NomineeTrackingModalProps {
   application: Application;
   onClose: () => void;
   onCorrect?: () => void;
+  onRevise?: () => void;
+  userRole?: UserRole;
 }
 
-export const NomineeTrackingModal: React.FC<NomineeTrackingModalProps> = ({ application, onClose, onCorrect }) => {
+export const NomineeTrackingModal: React.FC<NomineeTrackingModalProps> = ({ application, onClose, onCorrect, onRevise, userRole = 'NOMINEE' }) => {
   const [activeTab, setActiveTab] = useState('status');
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
-  const needsCorrection = application.status === 'Returned for Revision'
-    || application.status === 'Incomplete'
-    || (application.status === 'Not Approved' && application.endorsement?.decision === 'Rejected');
+  const needsCorrection = Boolean(onCorrect || onRevise);
   const selectedDoc = application.documents?.find(document => document.id === selectedDocId) || null;
 
   return (
@@ -29,9 +30,10 @@ export const NomineeTrackingModal: React.FC<NomineeTrackingModalProps> = ({ appl
         activeTab={activeTab}
         onTabChange={setActiveTab}
         onClose={onClose}
-        footer={needsCorrection && onCorrect ? <button type="button" onClick={onCorrect} className="min-h-11 w-full rounded-lg bg-blue-600 px-5 text-sm font-semibold text-white hover:bg-blue-700 sm:w-auto">Review required changes</button> : undefined}
+        footer={needsCorrection ? <button type="button" onClick={onRevise || onCorrect} className="min-h-11 w-full rounded-lg bg-blue-600 px-5 text-sm font-semibold text-white hover:bg-blue-700 sm:w-auto">{onRevise ? 'Edit Nomination' : 'Review required changes'}</button> : undefined}
       >
         {activeTab === 'status' && <section className="space-y-4">
+          <RevisionInstructions application={application} />
           <div className={'rounded-xl p-5 ' + (needsCorrection ? 'border border-amber-200 bg-amber-50' : 'bg-slate-50')}>
             <h3 className="text-base font-bold text-slate-950">{needsCorrection ? 'Corrections requested' : 'Nomination in progress'}</h3>
             <p className="mt-2 break-words text-sm leading-6 text-slate-700">{needsCorrection
@@ -47,7 +49,7 @@ export const NomineeTrackingModal: React.FC<NomineeTrackingModalProps> = ({ appl
         {activeTab === 'details' && <NominationDetails application={application} />}
         {activeTab === 'history' && <NominationHistory logs={praiseService.getAuditLogsForApplication(application.id)} />}
       </NominationActionModal>
-      {selectedDoc && <DocumentViewerModal isOpen={true} onClose={() => setSelectedDocId(null)} document={selectedDoc} nomineeName={application.nominee_name} applicationNumber={application.application_number} userRole="NOMINEE" />}
+      {selectedDoc && <DocumentViewerModal isOpen={true} onClose={() => setSelectedDocId(null)} document={selectedDoc} nomineeName={application.nominee_name} applicationNumber={application.application_number} userRole={userRole} />}
     </>
   );
 };

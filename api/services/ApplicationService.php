@@ -117,43 +117,35 @@ function handle_resubmit(PDO $db, array $actor, array $data, string $appId, arra
         sendResponse(403, [], 'Only the user who originally submitted this nomination can resubmit it.');
     }
 
-    $wasRejectedDuringEndorsement = $current['status'] === 'Not Approved'
-        && isset($current['endorsement']['decision'])
-        && $current['endorsement']['decision'] === 'Rejected';
-    if (!in_array($current['status'], ['Returned for Revision', 'Incomplete'], true) && !$wasRejectedDuringEndorsement) {
-        sendResponse(409, [], 'This nomination is not currently eligible for resubmission.');
-    }
-
-    $pendingDocsStmt = $db->prepare("
-        SELECT COUNT(*)
-        FROM application_documents
-        WHERE application_id = :id AND status IN ('Rejected', 'Missing')
-    ");
-    $pendingDocsStmt->execute([':id' => $appId]);
-    if ((int)$pendingDocsStmt->fetchColumn() > 0) {
-        sendResponse(409, [], 'Replace every rejected or missing document before resubmitting.');
-    }
-
-    $replacementDocsStmt = $db->prepare("
-        SELECT COUNT(*)
-        FROM application_documents
-        WHERE application_id = :id AND status = 'For Verification'
-    ");
-    $replacementDocsStmt->execute([':id' => $appId]);
-    $hasReplacementDocuments = (int)$replacementDocsStmt->fetchColumn() > 0;
-    $returnToVerification = $current['status'] === 'Incomplete'
-        || $current['processing_stage'] === 'Document Verification'
-        || (isset($current['endorsement']['decision']) && $current['endorsement']['decision'] === 'Endorsed')
-        || $hasReplacementDocuments;
-    $newStatus = $returnToVerification ? 'For Verification' : 'For Endorsement';
-    $newStage = $returnToVerification ? 'Document Verification' : 'Endorsement';
-    $requiredAction = $returnToVerification
-        ? 'Corrected nomination resubmitted for Secretariat document verification.'
-        : 'Corrected nomination resubmitted for Head of Office endorsement.';
-    $resubmissionNote = trim((string)($data['remarks'] ?? 'Requested corrections completed by the original filer.'));
-
     $db->beginTransaction();
     try {
+        $current = lock_nomination($db, $appId);
+        guard_nomination_processing($db, $current);
+        $current['endorsement'] = current_nomination_endorsement($db, $appId);
+        if (!ordinary_correction_eligible($current)) {
+            reject_nomination_change($db, 409, 'This nomination is not currently eligible for resubmission.');
+        }
+
+        $pendingDocsStmt = $db->prepare("
+            SELECT COUNT(*)
+            FROM application_documents
+            WHERE application_id = :id AND status IN ('Rejected', 'Missing', 'Head Rejected')
+        ");
+        $pendingDocsStmt->execute([':id' => $appId]);
+        if ((int)$pendingDocsStmt->fetchColumn() > 0) {
+            reject_nomination_change($db, 409, 'Replace every rejected or missing document before resubmitting.');
+        }
+
+        [$newStatus, $newStage, $requiredAction] = ordinary_correction_destination($db, $current);
+        $resubmissionNote = trim((string)($data['remarks'] ?? 'Requested corrections completed by the original filer.'));
+
+        if ($newStage === 'Endorsement') {
+            foreach (revision_rows($db, "SELECT * FROM application_documents WHERE application_id = ? AND verified_at IS NOT NULL", $appId) as $document) {
+                archive_nomination_document($db, $document);
+            }
+            $db->prepare("UPDATE application_documents SET status = 'Submitted', verification_remarks = NULL, verified_by = NULL, verified_at = NULL WHERE application_id = ? AND file_url <> ''")
+                ->execute([$appId]);
+        }
         $db->prepare("
             UPDATE applications
             SET status = :status,
@@ -212,6 +204,7 @@ function handle_return_for_revision(PDO $db, array $actor, array $data, string $
 
     $db->beginTransaction();
     try {
+        guard_nomination_processing($db, lock_nomination($db, $appId), $current);
         $db->prepare("
             UPDATE applications
             SET status = 'Returned for Revision',
@@ -407,20 +400,30 @@ function handle_delete_application(PDO $db, string $appId): void {
         sendResponse(404, [], 'Application not found.');
     }
 
-    // Resolve database references before deleting records; never use client paths.
-    $localUploadPaths = [];
-    $storedReferences = [];
-    $fileStmt = $db->prepare('SELECT file_url FROM application_documents WHERE application_id = :id');
-    $fileStmt->execute([':id' => $appId]);
-    foreach ($fileStmt->fetchAll(PDO::FETCH_COLUMN) as $reference) {
-        if (database_file_storage()) { $storedReferences[] = (string)$reference; continue; }
-        $path = document_storage_path((string)$reference);
-        if ($path !== null) $localUploadPaths[] = $path;
-    }
-
     $db->beginTransaction();
     try {
-        foreach ($storedReferences as $reference) database_delete_file($db, $reference);
+        $locked = lock_nomination($db, $appId);
+        guard_nomination_processing($db, $locked);
+        if (nomination_revision($db, $appId, false)) {
+            reject_nomination_change($db, 409, 'This nomination has archived records and cannot be deleted.');
+        }
+        // Resolve database references before deleting records; never use client paths.
+        $localUploadPaths = [];
+        $storedReferences = [];
+        $fileStmt = $db->prepare('SELECT file_url FROM application_documents WHERE application_id = :id');
+        $fileStmt->execute([':id' => $appId]);
+        foreach ($fileStmt->fetchAll(PDO::FETCH_COLUMN) as $reference) {
+            if (database_file_storage()) { $storedReferences[] = (string)$reference; continue; }
+            $path = document_storage_path((string)$reference);
+            if ($path !== null) $localUploadPaths[] = $path;
+        }
+
+        foreach (revision_rows($db, 'SELECT document FROM nomination_document_history WHERE application_id = ?', $appId) as $historical) {
+            $reference = json_decode($historical['document'], true, 512, JSON_THROW_ON_ERROR)['file_url'];
+            if (database_file_storage()) $storedReferences[] = (string)$reference;
+            elseif ($path = document_storage_path((string)$reference)) $localUploadPaths[] = $path;
+        }
+        foreach (array_unique($storedReferences) as $reference) database_delete_file($db, $reference);
         $db->prepare('DELETE FROM notifications WHERE application_id = :application_id')
             ->execute([':application_id' => $appId]);
 

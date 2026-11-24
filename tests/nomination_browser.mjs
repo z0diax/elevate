@@ -12,7 +12,10 @@ const root = resolve(import.meta.dirname, '..');
 const chrome = [process.env.CHROME_PATH, 'C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(path => path && existsSync(path));
 if (!chrome) throw Error('Set CHROME_PATH to a Chromium executable.');
 const temporary = mkdtempSync(join(tmpdir(), 'praise-nomination-browser-'));
-const javascript = (await build({ entryPoints: [join(root, 'tests/nomination_browser_fixture.tsx')], bundle: true, write: false, format: 'iife' })).outputFiles[0].text;
+const javascript = (await build({
+  entryPoints: [join(root, 'tests/nomination_browser_fixture.tsx')],
+  bundle: true, write: false, format: 'iife', loader: { '.png': 'dataurl' },
+})).outputFiles[0].text;
 const cssFile = readdirSync(join(root, 'dist/assets')).find(name => name.endsWith('.css'));
 const css = readFileSync(join(root, 'dist/assets', cssFile));
 const server = createServer((request, response) => {

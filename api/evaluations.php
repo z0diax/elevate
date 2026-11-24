@@ -9,6 +9,8 @@ require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/config/session_auth.php';
 require_once __DIR__ . '/services/ApplicationHistory.php';
 
+require_once __DIR__ . '/services/NominationRevisionPolicy.php';
+
 $database = new Database();
 $db = $database->getConnection();
 
@@ -48,9 +50,10 @@ if ($method === 'POST' && ($_GET['action'] ?? '') === 'start') {
     $appId = requireId($data['application_id'] ?? null, 'application ID');
     try {
         $db->beginTransaction();
-        $appStmt = $db->prepare('SELECT status, processing_stage FROM applications WHERE id = :id FOR UPDATE');
+        $appStmt = $db->prepare('SELECT id, award_id, status, processing_stage FROM applications WHERE id = :id FOR UPDATE');
         $appStmt->execute([':id' => $appId]);
         $app = $appStmt->fetch();
+        if ($app) guard_nomination_processing($db, $app);
         if (!$app || $app['processing_stage'] !== 'Evaluation' || !in_array($app['status'], ['For Evaluation', 'Under Evaluation'], true)) {
             $db->rollBack();
             sendResponse(409, [], 'This nomination is not open for evaluation.');
@@ -139,9 +142,11 @@ if ($method === 'POST') {
     $db->beginTransaction();
     try {
         // Serialize submissions for this nomination so the completion check sees every committed score.
-        $lockStmt = $db->prepare('SELECT status, processing_stage FROM applications WHERE id = :id FOR UPDATE');
+        $lockStmt = $db->prepare('SELECT id, award_id, status, processing_stage FROM applications WHERE id = :id FOR UPDATE');
         $lockStmt->execute([':id' => $appId]);
         $lockedApplication = $lockStmt->fetch();
+        if ($lockedApplication) guard_nomination_processing($db, $lockedApplication);
+        if (!$lockedApplication || $lockedApplication['award_id'] !== $application['award_id']) reject_nomination_change($db, 409, 'The nomination has changed. Reload the scorecard.');
         if ($lockedApplication['processing_stage'] !== 'Evaluation' || !in_array($lockedApplication['status'], ['For Evaluation', 'Under Evaluation', 'Evaluation Completed'], true)) {
             $db->rollBack();
             sendResponse(409, [], 'Evaluation editing is locked because this nomination has moved forward. Refresh the nomination.');

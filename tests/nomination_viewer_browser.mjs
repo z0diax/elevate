@@ -289,6 +289,78 @@ try {
   assert.match(await evaluate('document.querySelector("[role=dialog] header [role=alert]").textContent'), /signature could not be loaded/);
   assert.equal(existsSync(join(temporary, 'PRAISE-VIEWER_Nomination_Form.pdf')), false, 'failed signature does not download incomplete PDF');
   await close();
+  const visibleButton = label => `Array.from(document.querySelectorAll('button')).find(button => button.textContent.trim() === ${JSON.stringify(label)} && button.getBoundingClientRect().height > 0)`;
+  const clickLabel = async label => { const expression = visibleButton(label); await waitFor(`!!(${expression})`); await evaluate(`(${expression}).click()`); };
+  const positionInput = 'input[placeholder="e.g. Administrative Officer IV / BHW"]';
+  const positionValue = `document.querySelector(${JSON.stringify(positionInput)}).value`;
+  for (const [width, scope] of [[1360, 'both'], [390, 'attachments']]) {
+    await command('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: width < 640 });
+    await evaluate("window.viewerTest.revisionState.enabled=true; window.viewerTest.resetRevision(); window.viewerTest.render('ADMINISTRATOR')");
+    await clickLabel('Require Nomination Revision');
+    await waitFor('!!document.querySelector("[role=dialog] select")');
+    assert.equal(await evaluate('document.querySelector("[role=dialog] select").value'), 'both');
+    assert.match(await evaluate('document.querySelector("[role=dialog]").textContent'), /Filing Account/);
+    await set('[role=dialog] select', scope);
+    await set('[role=dialog] textarea', 'Correct the position and supporting evidence.');
+    await clickLabel('Require Revision');
+    await waitFor('!document.querySelector("[role=dialog]") && document.body.textContent.includes("Revision Required")');
+    writeFileSync(join(temporary, `revision-admin-${width}.png`), Buffer.from((await command('Page.captureScreenshot')).data, 'base64'));
+    await evaluate("window.viewerTest.render('SECRETARIAT')");
+    assert.equal(await evaluate(`!!(${visibleButton('Require Nomination Revision')})`), false);
+    assert.equal(await evaluate(`!!(${visibleButton('Cancel Revision Request')})`), false);
+    await evaluate("window.viewerTest.revisionState.otherFiler=true; window.viewerTest.render('NOMINEE','submission')");
+    await waitFor('!!document.querySelector("#submit-nomination-view")');
+    assert.equal(await evaluate(`!!(${visibleButton('Edit Nomination')})`), false, 'a linked nominee cannot edit another account’s filing');
+    await evaluate("window.viewerTest.revisionState.otherFiler=false; window.viewerTest.render('NOMINEE','submission')");
+    await clickLabel('Edit Nomination');
+    await waitFor('!!document.querySelector("#wizard-next-btn")');
+    assert.match(await evaluate('document.querySelector("#nomination-wizard-container").textContent'), /Revise Nomination/);
+    assert.match(await evaluate('document.querySelector("#nomination-wizard-container").textContent'), /Correct the position and supporting evidence/);
+    assert.equal(await evaluate('document.querySelector("#award-category-select").matches(":disabled")'), scope === 'attachments');
+    assert.equal(await evaluate(positionValue), 'Officer');
+    if (scope === 'both') {
+      await set(positionInput, 'Revised Officer');
+      await clickLabel('Save & Close');
+      await waitFor('!document.querySelector("#nomination-wizard-container")');
+      await clickLabel('Edit Nomination');
+      await waitFor('!!document.querySelector("#wizard-next-btn")');
+      assert.equal(await evaluate(positionValue), 'Revised Officer', 'prefilled server draft resumes');
+    }
+    await click('#wizard-next-btn');
+    await click('#wizard-next-btn');
+    await waitFor('document.querySelector("#nomination-wizard-container").textContent.includes("Existing attachment")');
+    await evaluate(`(() => {
+      const input = document.querySelector('#nomination-wizard-container input[type=file]');
+      const data = new DataTransfer(); data.items.add(new File(['fixture'], 'revised.png', { type: 'image/png' }));
+      input.files = data.files; input.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+    await waitFor('document.querySelector("#nomination-wizard-container").textContent.includes("Replacement staged")');
+    await click('#wizard-next-btn');
+    await waitFor('!!document.querySelector("#wizard-submit-btn")');
+    assert.match(await evaluate('document.querySelector("#wizard-submit-btn").textContent'), /Submit Revised Nomination/);
+    await click('#wizard-submit-btn');
+    assert.match(await evaluate('document.querySelector("#nomination-wizard-container").textContent'), /Draw your signature/);
+    await evaluate('document.querySelector("canvas").scrollIntoView({block:"center"})');
+    const rect = await evaluate('(() => { const r = document.querySelector("canvas").getBoundingClientRect(); return { x:r.x, y:r.y, width:r.width }; })()');
+    await command('Input.dispatchMouseEvent', { type: 'mousePressed', x: rect.x + 12, y: rect.y + 15, button: 'left', clickCount: 1 });
+    await command('Input.dispatchMouseEvent', { type: 'mouseMoved', x: rect.x + rect.width * 0.5, y: rect.y + 38, button: 'left', buttons: 1 });
+    await command('Input.dispatchMouseEvent', { type: 'mouseReleased', x: rect.x + rect.width * 0.5, y: rect.y + 38, button: 'left', clickCount: 1 });
+    await click('#nomination-wizard-container input[type="checkbox"]');
+    const submissions = await evaluate('window.viewerTest.revisionState.submissions');
+    writeFileSync(join(temporary, `revision-filer-${width}.png`), Buffer.from((await command('Page.captureScreenshot')).data, 'base64'));
+    await click('#wizard-submit-btn');
+    await waitFor('!!document.querySelector("#nomination-success-card")');
+    assert.match(await evaluate('document.querySelector("#nomination-success-card").textContent'), /PRAISE-VIEWER/);
+    assert.equal(await evaluate('window.viewerTest.revisionState.submissions'), submissions + 1);
+  }
+  await evaluate("window.viewerTest.state.signatureFail=false; window.viewerTest.render('ADMINISTRATOR')");
+  await open();
+  await evaluate('Array.from(document.querySelectorAll("summary")).find(item => item.textContent.includes("Nomination revision and version history")).click()');
+  await set('[role=dialog] select', '1');
+  await waitFor('document.querySelector("[role=dialog]").textContent.includes("Original Nominee Record")');
+  assert.match(await evaluate('document.querySelector("[role=dialog]").textContent'), /Compare with latest finalized version/);
+  await close();
+  console.log('PASS: administrator authorization controls, original filer ownership, staged draft restoration, scope restrictions, new signatures and historical version selection on desktop and mobile.');
   console.log('PASS: shared viewer across roles at 320/390/768/1100px; tabs, focus, workflows, previews, signatures, legacy/error handling; full PDF downloads with fresh retrieval, embedded attachments, loading state, evaluator privacy and signature failure.');
   console.log(`Review artifacts: ${temporary}`);
 } finally {

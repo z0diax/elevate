@@ -124,11 +124,42 @@ export interface ApplicationEvaluatorAssignment {
 
 export type DocumentStatus = 'Not Submitted' | 'Submitted' | 'For Verification' | 'Head Approved' | 'Head Rejected' | 'Verified' | 'Rejected' | 'Missing';
 
+export type NominationRevisionScope = 'details' | 'attachments' | 'both';
+
+export interface NominationRevisionRequest {
+  id: string;
+  revision_number: number;
+  requested_by_name: string;
+  requested_by_role: UserRole;
+  requested_at: string;
+  scope: NominationRevisionScope;
+  instructions: string;
+  previous_status: ApplicationStatus;
+  previous_stage: ProcessingStage;
+  status: 'Pending' | 'In Progress' | 'Completed' | 'Cancelled';
+  started_at?: string;
+  completed_at?: string;
+  completed_by_name?: string;
+  cancelled_by_name?: string;
+  remarks?: string;
+  cancellation_reason?: string;
+  cancelled_at?: string;
+}
+
+export interface NominationRevisionDraft {
+  request: NominationRevisionRequest;
+  details: Record<string, string>;
+  remarks?: string;
+  attachments: Record<string, ApplicationDocument | null>;
+  generation: number;
+}
+
 export interface ApplicationDocument {
   id: string;
   application_id: string;
   requirement_id?: string;
   document_name: string;
+  file_name?: string;
   file_url: string;
   file_size?: number;
   file_type?: string;
@@ -170,6 +201,13 @@ export interface Application {
   submission_account_name?: string;
   submission_account_role?: UserRole;
   signature_signed_at?: string;
+  nomination_version?: number;
+  revision_request?: NominationRevisionRequest;
+  revision_active?: boolean;
+  has_archived_attachments?: boolean;
+  can_require_revision?: boolean;
+  can_correct?: boolean;
+  historical_workflow?: Record<string, Record<string, unknown>[]>;
   justification: string;
   accomplishments: string;
   supporting_narrative: string;

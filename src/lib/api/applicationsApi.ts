@@ -1,6 +1,8 @@
-import { Application, ApplicationHistory, ApplicationStatus, ProcessingStage } from '../../types';
+import { Application, ApplicationDocument, ApplicationHistory, ApplicationStatus, Award, NominationRevisionDraft, NominationRevisionRequest, ProcessingStage } from '../../types';
 import { apiRequest } from './client';
-import { normalizeApplication, normalizeAuditLog } from './normalizers';
+import { uploadFile } from './fileUpload';
+import { resolveProjectUrl } from '../mysqlService';
+import { normalizeApplication, normalizeAuditLog, normalizeAward, normalizeDocument } from './normalizers';
 import { loadApplications, loadAuditLogs, loadNotifications, state } from './state';
 
 type SubmitNominationPayload = {
@@ -65,13 +67,60 @@ export function getStageFromStatus(status: ApplicationStatus): ProcessingStage {
   }
 }
 
+type NominationSignature = {
+  strokes: number[][][];
+  signed_at: string;
+  sha256: string;
+  signed_snapshot: Application & { signing_account?: { id: string; name: string; role: string } };
+  version_number?: number;
+  documents?: Array<Pick<ApplicationDocument, 'id' | 'document_name' | 'file_url' | 'file_size' | 'file_type'> & { sha256?: string; matches_official?: boolean }>;
+};
+
+function normalizeRevisionDraft(draft: NominationRevisionDraft): NominationRevisionDraft {
+  return {
+    ...draft,
+    attachments: Object.fromEntries(Object.entries(draft.attachments).map(([id, document]) => [id, document && normalizeDocument(document)])),
+  };
+}
+
 export const applicationsApi = {
-  async getNominationForm(appId: string): Promise<{ application: Application; history: ApplicationHistory[] }> {
-    const result = await apiRequest<{ application: unknown; history: unknown[] }>(`applications.php?action=form&id=${encodeURIComponent(appId)}`);
+  async getNominationRevisionAward(awardId: string): Promise<Award> {
+    return normalizeAward(await apiRequest(`awards.php?id=${encodeURIComponent(awardId)}`));
+  },
+  async getNominationForm(appId: string, version?: number): Promise<{ application: Application; history: ApplicationHistory[] }> {
+    const result = await apiRequest<{ application: unknown; history: unknown[] }>(`applications.php?action=form&id=${encodeURIComponent(appId)}${version ? `&version=${version}` : ''}`);
     return { application: normalizeApplication(result.application), history: result.history.map(normalizeAuditLog) };
   },
-  async getNominationSignature(appId: string): Promise<{ strokes: number[][][]; signed_at: string; sha256: string; signed_snapshot: Application }> {
-    return apiRequest(`applications.php?action=signature&id=${encodeURIComponent(appId)}`);
+  async getNominationSignature(appId: string, version?: number): Promise<NominationSignature> {
+    const signature = await apiRequest<NominationSignature>(`applications.php?action=signature&id=${encodeURIComponent(appId)}${version ? `&version=${version}` : ''}`);
+    return { ...signature, documents: signature.documents?.map(document => ({ ...document, file_url: document.file_url ? resolveProjectUrl(document.file_url) : '' })) };
+  },
+  async getNominationRevisionHistory(appId: string): Promise<{
+    requests: NominationRevisionRequest[];
+    versions: number[];
+    archived_attachments: Array<{ id: string; sha256?: string; archived_at: string; document: ApplicationDocument }>;
+  }> {
+    const history = await apiRequest<{
+      requests: NominationRevisionRequest[];
+      versions: number[];
+      archived_attachments: Array<{ id: string; sha256?: string; archived_at: string; document: ApplicationDocument }>;
+    }>(`applications.php?action=revision_history&id=${encodeURIComponent(appId)}`);
+    return { ...history, archived_attachments: history.archived_attachments.map(file => ({
+      ...file, document: { ...file.document, file_url: file.document.file_url ? resolveProjectUrl(file.document.file_url) : '' },
+    })) };
+  },
+  async nominationRevision(appId: string, action: string, payload: object): Promise<{ application: Application; draft: NominationRevisionDraft | null }> {
+    const result = await apiRequest<{ application: unknown; draft: NominationRevisionDraft | null }>(
+      `applications.php?action=${action}&id=${encodeURIComponent(appId)}`, { method: 'PUT', body: JSON.stringify(payload) },
+    );
+    return { application: normalizeApplication(result.application), draft: result.draft && normalizeRevisionDraft(result.draft) };
+  },
+  async stageNominationRevisionFile(appId: string, draft: NominationRevisionDraft, requirementId: string, file: File): Promise<NominationRevisionDraft> {
+    const result = await uploadFile<NominationRevisionDraft>('documents.php', 'file', file, {
+      application_id: appId, revision_id: draft.request.id, generation: String(draft.generation),
+      requirement_id: requirementId, document_name: file.name,
+    });
+    return normalizeRevisionDraft(result);
   },
   async beginDeliberation(appId: string): Promise<Application> {
     const application = normalizeApplication(await apiRequest<any>(`applications.php?action=begin_deliberation&id=${encodeURIComponent(appId)}`, {

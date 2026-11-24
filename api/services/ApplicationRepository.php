@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/ApplicationPrivacy.php';
+require_once __DIR__ . '/NominationRevisionPolicy.php';
 
 function getFullApplication(PDO $db, string $appId): ?array {
     $stmt = $db->prepare("SELECT id, application_number, award_id, award_name, award_year,
@@ -19,10 +20,6 @@ function getFullApplication(PDO $db, string $appId): ?array {
         return null;
     }
 
-    $signatureStmt = $db->prepare('SELECT signed_at FROM nomination_signatures WHERE application_id = ?');
-    $signatureStmt->execute([$appId]);
-    $app['signature_signed_at'] = $signatureStmt->fetchColumn() ?: null;
-
     $app['award_year'] = (int)$app['award_year'];
     $app['final_weighted_score'] = $app['final_weighted_score'] !== null ? (float)$app['final_weighted_score'] : null;
     $assignmentStmt = $db->prepare("SELECT aea.*, p.full_name AS evaluator_name FROM application_evaluator_assignments aea JOIN profiles p ON p.id = aea.evaluator_id WHERE aea.application_id = :id ORDER BY aea.sequence_no, aea.assigned_at");
@@ -38,9 +35,21 @@ function getFullApplication(PDO $db, string $appId): ?array {
     }
     $app['documents'] = $documents;
 
-    $endStmt = $db->prepare("SELECT * FROM endorsements WHERE application_id = :id ORDER BY created_at DESC LIMIT 1");
-    $endStmt->execute([':id' => $appId]);
-    $app['endorsement'] = $endStmt->fetch() ?: null;
+    $app['endorsement'] = current_nomination_endorsement($db, $appId);
+    $revision = nomination_revision($db, $appId, false);
+    $active = $revision && $revision['active_application_id'] !== null;
+    $app['revision_request'] = $revision ? revision_request_summary($revision) : null;
+    $app['revision_active'] = $active;
+    $app['can_require_revision'] = !$active && $app['nominator_id'] && nomination_revision_eligible($app);
+    $app['can_correct'] = !$active && ordinary_correction_eligible($app);
+    $archive = $db->prepare('SELECT 1 FROM nomination_document_history WHERE application_id = ? LIMIT 1');
+    $archive->execute([$appId]);
+    $app['has_archived_attachments'] = (bool)$archive->fetchColumn();
+    $app['nomination_version'] = nomination_version_number($db, $appId);
+    $signatureTable = $app['nomination_version'] === 1 ? 'nomination_signatures' : 'nomination_revision_signatures';
+    $signatureStmt = $db->prepare("SELECT signed_at FROM $signatureTable WHERE application_id = ?" . ($app['nomination_version'] > 1 ? ' AND version_number = ?' : ''));
+    $signatureStmt->execute($app['nomination_version'] === 1 ? [$appId] : [$appId, $app['nomination_version']]);
+    $app['signature_signed_at'] = $signatureStmt->fetchColumn() ?: null;
 
     $evalStmt = $db->prepare("SELECT * FROM evaluations WHERE application_id = :id ORDER BY created_at ASC");
     $evalStmt->execute([':id' => $appId]);
@@ -100,8 +109,8 @@ function listApplications(PDO $db, array $actor): array {
         $stmt = $db->prepare("SELECT a.id FROM applications a WHERE a.status <> 'Draft' AND EXISTS (SELECT 1 FROM application_evaluator_assignments x WHERE x.application_id = a.id AND x.evaluator_id = :id AND x.status <> 'Reassigned') ORDER BY a.created_at DESC");
         $stmt->execute([':id' => $actor['id']]);
     } elseif ($role === 'SECRETARIAT') {
-        $stmt = $db->prepare("SELECT id FROM applications WHERE processing_stage IN ('Document Verification', 'Evaluation', 'Deliberation', 'Final Decision', 'Awarded') AND status <> 'Draft' ORDER BY created_at DESC");
-        $stmt->execute();
+        $stmt = $db->prepare("SELECT id FROM applications WHERE (processing_stage IN ('Document Verification', 'Evaluation', 'Deliberation', 'Final Decision', 'Awarded') OR nominator_id = ?) AND status <> 'Draft' ORDER BY created_at DESC");
+        $stmt->execute([$actor['id']]);
     } elseif ($role === 'HEAD_OF_OFFICE') {
         $officeIds = assigned_office_ids($actor);
         $placeholders = implode(',', array_fill(0, max(1, count($officeIds)), '?'));

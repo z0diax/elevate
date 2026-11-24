@@ -4,6 +4,10 @@ require_once __DIR__ . '/NominationSignature.php';
 
 /** Shape responses only: workflow code must continue using the full stored record. */
 function application_for_actor(array $application, array $actor): array {
+    $isFiler = ($application['nominator_id'] ?? null) === ($actor['id'] ?? null);
+    if (!$isFiler && ($actor['role'] ?? '') !== 'ADMINISTRATOR') unset($application['revision_request']);
+    if (($actor['role'] ?? '') !== 'ADMINISTRATOR') unset($application['can_require_revision'], $application['has_archived_attachments']);
+    if (!$isFiler) unset($application['can_correct']);
     if (($actor['role'] ?? '') !== 'NOMINEE') {
         return redact_nominator_for_evaluator($application, $actor);
     }
@@ -19,6 +23,7 @@ function application_for_actor(array $application, array $actor): array {
         'accomplishments', 'supporting_narrative', 'date_of_nomination',
         'status', 'processing_stage', 'stage', 'required_action', 'remarks', 'award_date',
         'created_at', 'updated_at', 'signature_signed_at', 'documents', 'endorsement',
+        'revision_request', 'revision_active', 'nomination_version', 'can_correct',
     ];
     return array_intersect_key($application, array_flip($publicFields));
 }
@@ -29,6 +34,7 @@ function application_history_for_actor(array $logs, array $application, array $a
     if ($role === 'NOMINEE') {
         $publicActions = [
             'Nomination Signed', 'Nomination Submitted', 'Nomination Resubmitted',
+            'Nomination Revision Required', 'Nomination Revision Started', 'Nomination Revision Cancelled', 'Revised Nomination Submitted',
             'Document Uploaded', 'Draft Attachment Replaced', 'Compliance Document Re-uploaded',
             'Returned for Revision', 'Head of Office: Endorsed',
             'Head of Office: Returned for Revision', 'Head of Office: Rejected',

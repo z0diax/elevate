@@ -6,12 +6,33 @@ require_test_database();
 require_once __DIR__ . '/../api/config/database.php';
 
 $mode = $argv[1] ?? '';
-if (!in_array($mode, ['setup', 'cleanup', 'verify-empty', 'verify-cloud-file'], true)) throw new RuntimeException('Invalid fixture operation.');
+if (!in_array($mode, ['setup', 'cleanup', 'verify-empty', 'verify-cloud-file', 'block-revision-finalization', 'unblock-revision-finalization'], true)) {
+    throw new RuntimeException('Invalid fixture operation.');
+}
 $run = (string)(getenv('TEST_RUN_ID') ?: '');
 if ($mode !== 'verify-empty' && !preg_match('/^[a-f0-9]{16}$/D', $run)) throw new RuntimeException('TEST_RUN_ID must be a random 16-character hex value.');
 $db = (new Database())->getConnection();
 if (!$db) throw new RuntimeException('The explicitly configured test database does not exist or cannot be reached. Create an empty *_test database first.');
 $tables = $db->query('SHOW TABLES')->fetchAll(PDO::FETCH_COLUMN);
+
+if (in_array($mode, ['block-revision-finalization', 'unblock-revision-finalization'], true)) {
+    $trigger = 'test_revision_failure_' . $run;
+    if ($mode === 'block-revision-finalization') {
+        $appId = $argv[2] ?? '';
+        $app = $db->prepare('SELECT id FROM applications WHERE id = ? AND nominator_id = ?');
+        $app->execute([$appId, "test-$run-filer"]);
+        if (!$app->fetchColumn()) throw new RuntimeException('Revision fault injection requires a nomination from this test run.');
+        $quotedAppId = $db->quote($appId);
+        $db->exec("CREATE TRIGGER $trigger BEFORE INSERT ON nomination_revision_signatures FOR EACH ROW BEGIN
+            IF NEW.application_id = $quotedAppId THEN
+                SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Synthetic revision write failure';
+            END IF;
+        END");
+    } else {
+        $db->exec("DROP TRIGGER IF EXISTS $trigger");
+    }
+    exit;
+}
 
 if ($mode === 'verify-cloud-file') {
     require_once __DIR__ . '/../api/config/database_storage.php';
@@ -78,6 +99,8 @@ if ($mode === 'setup') {
             $db->prepare('INSERT INTO award_criteria (id, award_id, criterion_name, weight_percentage, max_score) VALUES (?, ?, ?, 100, 100)')
                 ->execute([$id('criterion-' . $name), $id('award-' . $name), 'Synthetic test criterion']);
         }
+        $db->prepare('INSERT INTO award_document_requirements (id, award_id, document_name, is_mandatory) VALUES (?, ?, ?, 0)')
+            ->execute([$id('requirement-optional'), $id('award-two'), 'Optional revision attachment']);
         $db->commit();
     } catch (Throwable $error) {
         $db->rollBack();
@@ -88,6 +111,7 @@ if ($mode === 'setup') {
 }
 
 // Setup refuses databases with records. Cleanup is therefore limited to this run's fixtures.
+$db->exec('DROP TRIGGER IF EXISTS test_revision_failure_' . $run);
 $like = 'test-' . $run . '-%';
 $db->beginTransaction();
 try {

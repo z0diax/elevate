@@ -7,6 +7,7 @@ import { praiseService } from './lib/api';
 import { isAssignedEvaluator } from './lib/evaluatorAssignments';
 import { Header } from './components/common/Header';
 import { Sidebar } from './components/common/Sidebar';
+import { NominationFormViewerModal } from './components/nomination/NominationFormViewerModal';
 import { SubmitNominationView } from './components/nomination/SubmitNominationView';
 import { AdminDashboard } from './components/dashboards/AdminDashboard';
 import { SecretariatDashboard } from './components/dashboards/SecretariatDashboard';
@@ -108,6 +109,8 @@ export default function App() {
   const [auditLogs, setAuditLogs] = useState<ApplicationHistory[]>([]);
   const [certificateTemplateSettings, setCertificateTemplateSettings] = useState<CertificateTemplateSettings>(DEFAULT_CERTIFICATE_TEMPLATE_SETTINGS);
   const [currentTab, setCurrentTab] = useState<string>('dashboard');
+  const [notificationViewerId, setNotificationViewerId] = useState<string>();
+  const [nominationNotificationId, setNominationNotificationId] = useState<string>();
   const [openNominationFormRequested, setOpenNominationFormRequested] = useState(false);
   const [isDesktopViewport, setIsDesktopViewport] = useState(() => (
     typeof window === 'undefined' ? true : window.innerWidth >= DESKTOP_BREAKPOINT
@@ -448,16 +451,23 @@ export default function App() {
           onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
           onToggleSidebar={handleToggleSidebar}
           isSidebarOpen={isSidebarOpen}
-          onNavigateToTab={tab => {
+          onNavigateToTab={(tab, applicationId) => {
+            if (applicationId && (tab === 'my-applications' || tab === 'new-nomination')) {
+              setNominationNotificationId(applicationId);
+              setCurrentTab(currentUser.role === 'NOMINEE' ? 'my-applications' : 'new-nomination');
+              return;
+            }
             if (tab === 'new-nomination') {
               handleOpenNominationForm();
               return;
             }
+            if (applicationId && ['all-applications', 'verification', 'endorsements'].includes(tab)) setNotificationViewerId(applicationId);
             setCurrentTab(tab);
           }}
           onLogout={handleLogout}
         />
 
+        {notificationViewerId && <NominationFormViewerModal applicationId={notificationViewerId} userRole={currentUser.role} onClose={() => setNotificationViewerId(undefined)} />}
         <main className="flex-1 p-3 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
           {(currentTab === 'dashboard' || currentTab === 'all-applications' || currentTab === 'awards-management' || currentTab === 'offices-management' || currentTab === 'users-management') && (
             <AdminDashboard
@@ -535,7 +545,10 @@ export default function App() {
               currentUser={currentUser}
               onRefreshData={refreshData}
               onNavigateToNomination={handleOpenNominationForm}
-              onNavigateToCorrections={() => setCurrentTab('new-nomination')}
+              onNavigateToCorrections={application => {
+                setNominationNotificationId(application.id);
+                setCurrentTab('new-nomination');
+              }}
             />
           )}
 
@@ -546,6 +559,8 @@ export default function App() {
               offices={offices}
               currentUser={currentUser}
               onRefreshData={refreshData}
+              notificationApplicationId={nominationNotificationId}
+              onNotificationHandled={() => setNominationNotificationId(undefined)}
               openFormRequested={openNominationFormRequested}
               onOpenFormRequestHandled={() => setOpenNominationFormRequested(false)}
             />

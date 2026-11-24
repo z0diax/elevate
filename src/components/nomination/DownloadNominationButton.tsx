@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import { Download, LoaderCircle } from 'lucide-react';
 import { UserRole } from '../../types';
 
-export const DownloadNominationButton: React.FC<{ applicationId: string; userRole: UserRole; appearance?: 'header' | 'list' | 'icon' }> = ({ applicationId, userRole, appearance = 'header' }) => {
+export const DownloadNominationButton: React.FC<{ applicationId: string; userRole: UserRole; version?: number; appearance?: 'header' | 'list' | 'icon' }> = ({ applicationId, userRole, version, appearance = 'header' }) => {
   const pending = useRef(false);
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState('');
@@ -11,7 +11,7 @@ export const DownloadNominationButton: React.FC<{ applicationId: string; userRol
     pending.current = true; setDownloading(true); setError('');
     try {
       const { downloadNominationPdf } = await import('../../lib/nominationPdf');
-      await downloadNominationPdf(applicationId, userRole);
+      await downloadNominationPdf(applicationId, userRole, version);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Unable to generate the nomination PDF. Please try again.');
     } finally {

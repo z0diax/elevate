@@ -3,6 +3,7 @@ import { Application, Office, UserProfile } from '../../types';
 import { StatusBadge } from '../common/StatusBadge';
 import { NominationReferenceButton } from '../nomination/NominationFormViewerModal';
 import { getEvaluatorProgress } from '../../lib/evaluatorAssignments';
+import { ManageNominationRevision, RevisionIndicator } from '../nomination/NominationRevisionControls';
 import { DownloadNominationButton } from '../nomination/DownloadNominationButton';
 
 const actionClass = 'min-h-11 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200';
@@ -18,10 +19,10 @@ function Details({ fields }: { fields: [string, React.ReactNode][] }) {
   </dl>;
 }
 
-export function AdminMobileApplications({ applications, role, isSaving, onTrack, onAudit, onDelete }: {
+export function AdminMobileApplications({ applications, role, isSaving, onTrack, onAudit, onDelete, onRefresh }:  {
   applications: Application[]; role: UserProfile['role']; isSaving: boolean;
   onTrack: (application: Application) => void; onAudit: (application: Application) => void;
-  onDelete: (application: Application) => void;
+  onDelete: (application: Application) => void; onRefresh?: () => void | Promise<void>;
 }) {
   return <div className={listClass} data-mobile-list="applications">
     {!applications.length && <p className="p-6 text-center text-sm text-slate-500">No applications matched your filter criteria.</p>}
@@ -30,7 +31,7 @@ export function AdminMobileApplications({ applications, role, isSaving, onTrack,
       return <article key={application.id} className="min-w-0 space-y-4 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <NominationReferenceButton applicationId={application.id} referenceNumber={application.application_number} userRole={role} />
-          <StatusBadge status={application.status} size="sm" />
+          <StatusBadge status={application.status} size="sm" /><RevisionIndicator application={application} />
         </div>
         <div><h4 className="break-words text-base font-bold text-slate-900">{application.nominee_name}</h4><p className="break-words text-sm text-slate-500">{application.position_title}</p></div>
         <Details fields={[
@@ -41,8 +42,9 @@ export function AdminMobileApplications({ applications, role, isSaving, onTrack,
         <div className="grid grid-cols-2 gap-2">
           <button type="button" className={actionClass} onClick={() => onTrack(application)}>Track stage</button>
           <button type="button" className={actionClass} onClick={() => onAudit(application)}>Audit trail</button>
+          {role === 'ADMINISTRATOR' && onRefresh && <ManageNominationRevision application={application} onRefresh={onRefresh} />}
           <DownloadNominationButton applicationId={application.id} userRole={role} appearance="list" />
-          <button type="button" className={deleteClass} disabled={isSaving} onClick={() => onDelete(application)}>Delete nomination</button>
+          <button type="button" className={deleteClass} disabled={isSaving || Boolean(application.revision_request)} onClick={() => onDelete(application)}>Delete nomination</button>
         </div>
       </article>;
     })}

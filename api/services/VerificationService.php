@@ -25,6 +25,7 @@ function handle_verify_document(PDO $db, array $actor, array $data, string $appI
 
     $db->beginTransaction();
     try {
+        guard_nomination_processing($db, lock_nomination($db, $appId), $current);
         $db->prepare("
             UPDATE application_documents
             SET status = :status, verification_remarks = :remarks, verified_by = :verified_by, verified_at = NOW()
@@ -72,7 +73,7 @@ function handle_verify_document(PDO $db, array $actor, array $data, string $appI
         sendInternalError($e, 'applications.php:verify_document', 'Failed to update document verification.');
     }
 
-    sendResponse(200, getFullApplication($db, $appId), 'Document verification updated.');
+    sendResponse(200, application_for_actor(getFullApplication($db, $appId), $actor), 'Document verification updated.');
 }
 
 function handle_mark_verified(PDO $db, array $actor, array $data, string $appId, array $current): void {
@@ -86,6 +87,7 @@ function handle_mark_verified(PDO $db, array $actor, array $data, string $appId,
 
     $db->beginTransaction();
     try {
+        guard_nomination_processing($db, lock_nomination($db, $appId), $current);
         $db->prepare("
             UPDATE application_documents
             SET status = 'Verified',
@@ -117,5 +119,5 @@ function handle_mark_verified(PDO $db, array $actor, array $data, string $appId,
         sendInternalError($e, 'applications.php:mark_verified', 'Failed to mark application verified.');
     }
 
-    sendResponse(200, getFullApplication($db, $appId), 'Application marked verified.');
+    sendResponse(200, application_for_actor(getFullApplication($db, $appId), $actor), 'Application marked verified.');
 }

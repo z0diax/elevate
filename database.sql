@@ -516,7 +516,7 @@ CREATE TABLE IF NOT EXISTS nomination_revision_requests (
     draft_generation INT NOT NULL DEFAULT 0,
     UNIQUE KEY uq_active_nomination_revision (active_application_id),
     UNIQUE KEY uq_nomination_revision_number (application_id, revision_number),
-    CONSTRAINT fk_nomination_revision_application FOREIGN KEY (application_id) REFERENCES applications(id) ON DELETE CASCADE
+    CONSTRAINT fk_nomination_revision_application FOREIGN KEY (application_id) REFERENCES applications(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS nomination_revision_files (
